@@ -7,7 +7,6 @@
 #SBATCH --mem=16G
 #SBATCH --time=03:00:00
 #SBATCH --output=logs/scanpy.log
-#SBATCH --open-mode=append
 
 source /orfeo/scratch/area/ssenci/venvs/ml_transformers/bin/activate
 
