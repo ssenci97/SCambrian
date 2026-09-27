@@ -1,0 +1,7 @@
+label	query	exact_species
+nucleus	(taxonomy_id:9606) AND (cc_scl_term:SL-0191) AND (reviewed:true)	H.sapiens nuclear proteins
+ER	(taxonomy_id:9606) AND (cc_scl_term:SL-0095) AND (reviewed:true)	H.sapiens ER proteins
+cytoplasm	(taxonomy_id:9606) AND (cc_scl_term:SL-0086) AND (reviewed:true)	H.sapiens cytoplasmic proteins
+mitochondrion	(taxonomy_id:9606) AND (cc_scl_term:SL-0173) AND (reviewed:true)	H.sapiens mitochondrial proteins
+golgi	(taxonomy_id:9606) AND (cc_scl_term:SL-0132) AND (reviewed:true)	H.sapiensGolgi proteins
+secreted	(taxonomy_id:9606) AND (cc_scl_term:SL-0243) AND (reviewed:true)	H.sapiens secreted proteins

@@ -1,0 +1,32 @@
+{
+  "config_path": "configs/query_config.tsv",
+  "seq_out_dir": "data/raw_seqs",
+  "features_out_dir": "data/features",
+  "model_name": "esmc_6b",
+  "reps_out_dir": "data/reps/ESMC-6B/",
+  "seed": 42,
+  "mmseqs_path": "/orfeo/cephfs/scratch/area/ssenci/pkgs/mmseqs_new/mmseqs/bin/mmseqs",
+  "dedup_out_dir": "data/mmseqs_clusters/dedup",
+  "clusters_out_dir": "data/mmseqs_clusters",
+  "batch_size": 1,
+  "scanpy": {
+    "outdir": "data/scanpy/ESMC-6B/",
+    "n_pcs": 64,
+    "n_neighbors": 15,
+    "resolution": 1.0,
+    "min_percent_enrichment": 80,
+    "min_module_size": 100
+  },
+  "mmseqs": {
+    "dedup_min_seq_id": 0.99,
+    "dedup_cov": 0.95,
+    "dedup_cov_mode": 1,
+    "clust_cov": 0.5,
+    "clust_cov_mode": 0,
+    "thresholds": [
+      "0.95", "0.90", "0.85", "0.80", "0.75", "0.70", 
+      "0.65", "0.60", "0.55", "0.50", "0.45", "0.40", 
+      "0.35", "0.30", "0.25", "0.20", "0.15"
+    ]
+  }
+}

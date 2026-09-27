@@ -1,0 +1,9 @@
+### Please god of data keep unwanted data out from the repo
+# Ignore all hidden files and directories
+.*
+# Keep .gitignore tracked
+!.gitignore
+
+data/
+logs/
+
