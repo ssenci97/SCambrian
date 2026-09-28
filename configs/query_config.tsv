@@ -1,4 +1,4 @@
 label	query	exact_species
-hsap	(taxonomy_id:9606) AND (go:0061630)	H.sapiens
-arthal	(taxonomy_id:3702) AND (go:0061630)	Ar.thaliana
-mmus	(taxonomy_id:9913) AND (go:10090)	M.musculus
+mammalia	(taxonomy_id:40674) AND (go:0061630)	Mammalia
+aves	(taxonomy_id:8782) AND (go:0061630)	Aves
+teleostei	(taxonomy_id:32443) AND (go:0061630)	Teleostei

@@ -7,7 +7,7 @@
 #SBATCH --mem=20G
 #SBATCH --time=03:00:00
 #SBATCH --output=logs/mmseqs2_clust.log
-#SBATCH --array=1-25
+#SBATCH --array=1-5
 #SBATCH --open-mode=append
 
 set -euo pipefail

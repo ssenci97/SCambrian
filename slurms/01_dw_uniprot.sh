@@ -1,13 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=UPdownload
-#SBATCH --partition=GENOA
+#SBATCH --partition=THIN
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=4G
+#SBATCH --mem=5G
 #SBATCH --time=02:00:00
 #SBATCH --output=logs/log_downloads_UniProtKB.log
-#SBATCH --array=1-10
+#SBATCH --array=1-5%3
 #SBATCH --open-mode=append
 ###################################### constants-and-init
 CONFIG_JSON="configs/param_config.json"

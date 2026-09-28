@@ -8,7 +8,7 @@
 #SBATCH --time=03:00:00
 #SBATCH --output=logs/mmseqs2.log
 #SBATCH --open-mode=append
-#SBATCH --array=1-25
+#SBATCH --array=1-5
 set -euo pipefail
 
 # Read configs from JSON using jq
