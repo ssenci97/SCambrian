@@ -1,4 +1,4 @@
 label	query	exact_species
-hsap	(taxonomy_id:9606) AND (cc_scl_term:SL-0191) AND (reviewed:true)	H.sapiens
-arthal	(taxonomy_id:3702) AND (cc_scl_term:SL-0191) AND (reviewed:true)	Ar.thaliana
-btaur	(taxonomy_id:9913) AND (cc_scl_term:SL-0191) AND (reviewed:true)	B.taurus
+hsap	(taxonomy_id:9606) AND (go:0061630)	H.sapiens
+arthal	(taxonomy_id:3702) AND (go:0061630)	Ar.thaliana
+mmus	(taxonomy_id:9913) AND (go:10090)	M.musculus
