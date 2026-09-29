@@ -1,4 +1,3 @@
 label	query	exact_species
-mammalia	(taxonomy_id:40674) AND (go:0061630)	Mammalia
-aves	(taxonomy_id:8782) AND (go:0061630)	Aves
-teleostei	(taxonomy_id:32443) AND (go:0061630)	Teleostei
+Mammalia	(xref:interpro-IPR001766) AND (taxonomy_id:40674)	Mammalia
+Sauropsis	(xref:interpro-IPR001766) AND (taxonomy_id:8457)	Sauropsis

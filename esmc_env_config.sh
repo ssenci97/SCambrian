@@ -36,7 +36,7 @@ fi
 echo "[SLURM-INFO] Creating Python 3.10 env..."
 conda create -y -p .env python=3.10
 conda activate ./.env
-pip install --upgrade pip setuptools wheel packaging
+pip install --upgrade pip setuptools wheel packaging pyarrow fastparquet
 ###################################### torch
 echo "[SLURM-INFO] Installing PyTorch 2.4.1 (cu121)..."
 pip install torch==2.4.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121

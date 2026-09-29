@@ -6,8 +6,11 @@
   "reps_out_dir": "data/reps/ESMC-6b/",
   "seed": 42,
   "mmseqs_path": "/orfeo/cephfs/scratch/area/ssenci/pkgs/mmseqs_new/mmseqs/bin/mmseqs",
-  "dedup_out_dir": "data/mmseqs_clusters/dedup",
+  "dedup_out_dir": "data/mmseqs_clusters/dedup_short/",
   "clusters_out_dir": "data/mmseqs_clusters",
+  "contacts_outdir": "data/contacts_esmc-6b_short/",
+  "min_sep": 11,
+  "max_sep": 500,
   "batch_size": 1,
   "scanpy": {
     "outdir": "data/scanpy/ESMC-6b/",
@@ -24,9 +27,19 @@
     "clust_cov": 0.5,
     "clust_cov_mode": 0,
     "thresholds": [
-      "0.95", "0.90", "0.85", "0.80", "0.75", "0.70", 
-      "0.65", "0.60", "0.55", "0.50", "0.45", "0.40", 
+      "0.95", "0.90", "0.85", "0.80", "0.75", "0.70",
+      "0.65", "0.60", "0.55", "0.50", "0.45", "0.40",
       "0.35", "0.30", "0.25", "0.20", "0.15"
     ]
+  },
+  "contacts_classification": {
+    "min_sep": 11,
+    "max_sep": 500,
+    "contact_threshold": 0.5,
+    "disorder_threshold": 0.15,
+    "domain_min_len": 40,
+    "disorder_min_len": 15,
+    "outdir": "data/contacts_classified/",
+    "annotated_out": "annotated_contacts.parquet"
   }
 }
