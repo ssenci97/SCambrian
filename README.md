@@ -5,6 +5,7 @@
 Pipeline for downloading compartment-specific UniProt sets, reducing redundancy, building multi-identity sequence clusters, computing ESMC embeddings, and performing embedding-space clustering + enrichment analysis.
 
 ```
+configs/config_params.yaml
 configs/query_config.tsv
         │
         ▼

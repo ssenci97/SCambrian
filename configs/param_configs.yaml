@@ -1,0 +1,21 @@
+dw_uniprot_features:
+  config_path: configs/query_configs.tsv
+  features_out_dir: data/features
+dw_uniprot_seqs:
+  config_path: configs/query_configs.tsv
+  seq_out_dir: data/sequences
+run_mmseqs2:
+  clusters_out_dir: data/clusters
+  dedup_out_dir: data/dedup
+  mmseqs:
+    clust_cov: 0.8
+    clust_cov_mode: 0
+    dedup_cov: 0.8
+    dedup_cov_mode: 0
+    dedup_min_seq_id: 0.9
+    thresholds:
+    - 0.9
+    - 0.8
+    - 0.7
+  mmseqs_path: mmseqs
+  seq_out_dir: data/sequences
