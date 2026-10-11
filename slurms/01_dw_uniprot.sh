@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=UPdownload
+#SBATCH --job-name=dw_UP
 #SBATCH --partition=THIN
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=5G
+#SBATCH --mem=2G
 #SBATCH --time=02:00:00
-#SBATCH --output=logs/log_downloads_UniProtKB.log
+#SBATCH --output=logs/dw_UP_%A_%a.log
 #SBATCH --array=1-5%3
 #SBATCH --open-mode=append
 ###################################### constants-and-init

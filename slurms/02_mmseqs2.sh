@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=mmseqs_pipeline
-#SBATCH --partition=GENOA
+#SBATCH --job-name=mmseqs
+#SBATCH --partition=THIN
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=16
 #SBATCH --mem=20G
 #SBATCH --time=04:00:00
-#SBATCH --output=logs/mmseqs_pipeline.log
-#SBATCH --array=1-5
+#SBATCH --output=logs/mmseqs_%A_%a.log
+#SBATCH --array=1-5%3
 #SBATCH --open-mode=append
 ###################################### constants-and-init
 CONFIG_YAML="configs/param_configs.yaml"
