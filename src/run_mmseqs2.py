@@ -15,7 +15,7 @@ import yaml
 
 SEED = 42
 random.seed(SEED)
-DEFAULT_PARAMS = {"mmseqs_path": "mmseqs", "seq_out_dir": "data/sequences", "dedup_out_dir": "data/dedup", "clusters_out_dir": "data/clusters", "mmseqs": {"dedup_min_seq_id": 0.9, "dedup_cov": 0.8, "dedup_cov_mode": 0, "clust_cov": 0.8, "clust_cov_mode": 0, "thresholds": [0.9, 0.8, 0.7]}}
+DEFAULT_PARAMS = {"mmseqs_path": "mmseqs", "seq_out_dir": "data/sequences", "dedup_out_dir": "data/dedup", "clusters_out_dir": "data/clusters", "mmseqs": {"dedup_min_seq_id": 0.9, "dedup_cov": 0.8, "dedup_cov_mode": 0, "clust_cov": 0.8, "clust_cov_mode": 0, "thresholds": [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2]}}
 
 ###################################### config
 def get_params():

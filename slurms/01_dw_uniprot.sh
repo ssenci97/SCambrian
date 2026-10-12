@@ -7,9 +7,12 @@
 #SBATCH --mem=2G
 #SBATCH --time=02:00:00
 #SBATCH --output=logs/dw_UP_%A_%a.log
-#SBATCH --array=1-5%3
+#SBATCH --array=1-2
 #SBATCH --open-mode=append
 ###################################### constants-and-init
+python3 src/dw_uniprot_seqs.py --yaml-out
+python3 src/dw_uniprot_features.py --yaml-out
+
 CONFIG_YAML="configs/param_configs.yaml"
 START_TIME=$(date +%s)
 ###################################### parse-config

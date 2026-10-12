@@ -8,6 +8,7 @@
 #SBATCH --time=04:00:00
 #SBATCH --job-name=setup_ESMC
 #SBATCH --output=logs/setup_ESMC.log
+
 ###################################### env
 module purge
 unset LD_LIBRARY_PATH
@@ -23,29 +24,38 @@ if [[ "$CC" == *fedora41* ]]; then
   export CXX=/usr/bin/g++
 fi
 echo "[SLURM-INFO] Using CC=$CC CXX=$CXX"
+
 ###################################### paths
 mkdir -p logs tmp .cache
 export TMPDIR="$PWD/tmp"
 export PIP_CACHE_DIR="$PWD/.cache"
-###################################### conda
+
+###################################### conda & conditional setup
 source ~/scratch/miniconda/etc/profile.d/conda.sh
+
 if [ -d ".env" ]; then
-  echo "[SLURM-INFO] Removing previous .env..."
-  rm -rf .env
+  echo "[SLURM-INFO] Existing .env environment found. Skipping installation and running verification..."
+  conda activate ./.env
+else
+  echo "[SLURM-INFO] Creating Python 3.10 env..."
+  conda create -y -p .env python=3.10
+  conda activate ./.env
+  
+  pip install --upgrade pip setuptools wheel packaging pyarrow fastparquet
+
+  ###################################### torch
+  echo "[SLURM-INFO] Installing PyTorch 2.4.1 (cu121)..."
+  pip install torch==2.4.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+  ###################################### esmc
+  echo "[SLURM-INFO] Installing ESMC + runtime deps..."
+  pip install esm httpx accelerate ninja biopython scipy pandas matplotlib huggingface_hub
+
+  ###################################### flash-attn
+  echo "[SLURM-INFO] Installing precompiled flash-attn 2.6.3..."
+  pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.6.3/flash_attn-2.6.3+cu123torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 fi
-echo "[SLURM-INFO] Creating Python 3.10 env..."
-conda create -y -p .env python=3.10
-conda activate ./.env
-pip install --upgrade pip setuptools wheel packaging pyarrow fastparquet
-###################################### torch
-echo "[SLURM-INFO] Installing PyTorch 2.4.1 (cu121)..."
-pip install torch==2.4.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-###################################### esmc
-echo "[SLURM-INFO] Installing ESMC + runtime deps..."
-pip install esm httpx accelerate ninja biopython scipy pandas matplotlib huggingface_hub
-###################################### flash-attn
-echo "[SLURM-INFO] Installing precompiled flash-attn 2.6.3..."
-pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.6.3/flash_attn-2.6.3+cu123torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
+
 ###################################### verify
 echo "[SLURM-INFO] Comprehensive verification..."
 python -c "
@@ -57,4 +67,7 @@ print(f'Accelerate      : {accelerate.__version__}')
 print(f'Flash Attention : {flash_attn.__version__}')
 print('All ESMC core dependencies successfully verified!')
 "
-echo "[SLURM-INFO] Setup finished $(date)"
+
+python3 src/extract_contacts_biohub.py --yaml-out
+python3 src/extract_reps_biohub.py --yaml-out
+echo "[SLURM-INFO] Script finished $(date)"

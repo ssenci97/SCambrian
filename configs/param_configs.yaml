@@ -4,6 +4,15 @@ dw_uniprot_features:
 dw_uniprot_seqs:
   config_path: configs/query_configs.tsv
   seq_out_dir: data/sequences
+extract_contacts_biohub:
+  batch_size: 300
+  contacts_outdir: data/esm-contacts/esmc_6b
+  min_sep: 6
+  model_name: esmc_6b
+extract_reps_biohub:
+  batch_size: 500
+  model_name: esmc_6b
+  reps_outdir: data/esm-reps/esmc_6b
 run_mmseqs2:
   clusters_out_dir: data/clusters
   dedup_out_dir: data/dedup
@@ -17,5 +26,37 @@ run_mmseqs2:
     - 0.9
     - 0.8
     - 0.7
+    - 0.6
+    - 0.5
+    - 0.4
+    - 0.3
+    - 0.2
   mmseqs_path: mmseqs
   seq_out_dir: data/sequences
+npz_tsne:
+  seed: 42
+  n_components: 2
+  perplexity: 30.0
+  max_iter: 1000
+  learning_rate: auto
+  early_exaggeration: 12.0
+  metric: euclidean
+  init: pca
+  output_dir: data/tsne
+npz_umap:
+  seed: 42
+  n_components: 2
+  n_neighbors: 15
+  min_dist: 0.1
+  metric: euclidean
+  n_epochs: null
+  learning_rate: 1.0
+  init: spectral
+  output_dir: data/umap
+npz_scanpy:
+  seed: 42
+  resolution: 1.0
+  n_neighbors: 15
+  min_module_size: 100
+  min_percent_enrichment: 80
+  outdir: data/scanpy/
