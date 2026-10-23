@@ -1,172 +1,160 @@
-# Protein Sequence Embedding & Clustering Pipeline
+# SCambrian — Protein Sequence Embedding & Clustering Pipeline
 
 ## Overview
 
-Pipeline for downloading compartment-specific UniProt sets, reducing redundancy, building multi-identity sequence clusters, computing ESMC embeddings, and performing embedding-space clustering + enrichment analysis.
+The pipeline starts from **any set of protein FASTA files**. It removes redundancy with MMseqs2, builds multi-identity clusters, computes ESMC-6B embeddings and residue contacts, and then runs embedding-space analyses (t-SNE/UMAP, Scanpy clustering and enrichment).
 
 ```
-configs/config_params.yaml
-configs/query_config.tsv
-        │
-        ▼
-01  UniProt download:
-    sequences + features per query/label
-    → data/raw_seqs/   data/features/
-        │
-        ▼
-02  MMseqs2 deduplication (easy-linclust):
-    min-seq-id / coverage from config
-    → data/mmseqs_clusters/dedup/*_dedup.fasta
-        │
-        ▼
-03  MMseqs2 multi-threshold clustering:
-    successive clustering on previous representatives
-    thresholds 0.95 → 0.15 (config)
-    → data/mmseqs_clusters/<label>/
-        │
-        ▼
-04  ESMC representation extraction (GPU):
-    mean-pooled embeddings from deduplicated FASTA
-    → data/reps/<model>/<label>_reps.npz
-        │
-        ▼
-05  Scanpy analysis:
-    L2-norm → (optional PCA) → neighbors → Leiden
-    UMAP, channel ranking, species enrichment, modules
-    → data/scanpy/<model>/
+(optional) supp_00  UniProt fetch ─┐
+user-provided FASTA files ─────────┤
+                                   ▼
+                       data/sequences/<label>.fasta|.fa|.faa
+                                   │
+00  setup_env     one conda env (.env) + YAML compilation
+                                   │
+01  mmseqs2       easy-linclust dedup → successive clustering (0.9 → 0.2)
+                  → data/dedup/<label>_dedup.fasta, data/clusters/<label>/
+                                   │
+02  reps          ESMC-6B mean-pooled embeddings + residue contacts (GPU)
+                  → data/esm-reps/esmc_6b/<label>_reps.npz
+                  → data/esm-contacts/esmc_6b/<label>_contacts.parquet
+                                   │
+supp_01  dimred   t-SNE / UMAP per file and combined → data/dimred/
+supp_02  scanpy   joint + intra-group Leiden, enrichment, modules → data/scanpy/
 ```
 
-## Requirements
+`<label>` is the file stem with the `_seqs` / `_dedup` / `_reps` suffixes removed. For example, `Mammalia_seqs.fasta` → `Mammalia`.
 
-- SLURM cluster
-- Python 3 + packages: pandas, tqdm, torch, esm, anndata, scanpy, seaborn, matplotlib, numpy
-- MMseqs2 (path set in config)
-- jq
-- GPU for step 04 (A100)
+## Installation
 
-## Configuration
+```bash
+mkdir -p logs                      # SLURM needs the log directory to exist at submission
+sbatch slurms/00_setup_env.sh      # or: bash slurms/00_setup_env.sh
+```
 
-`configs/param_config.json` — all paths and parameters.
+The setup script:
+- creates a single conda env in `./.env` (Python 3.10) with:
+  - MMseqs2 (bioconda)
+  - PyTorch 2.4.1 (cu121)
+  - `requirements.txt`
+  - the flash-attn 2.6.3 wheel
+- is idempotent: an existing env, marked by `.env/.setup_complete`, is only verified
+- verifies all imports, CUDA and `mmseqs`
+- compiles `configs/param_configs.yaml` by running every script with `--yaml-out`; values already in the YAML are kept and missing keys are added
 
-`configs/query_config.tsv` — input queries:
+These environment variables can be overridden for every slurm script:
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `CONDA_SH` | `~/scratch/miniconda/etc/profile.d/conda.sh` | conda init script, used if `conda` is not on PATH |
+| `ENV_DIR` | `./.env` | environment prefix |
+| `CONFIG_YAML` | `configs/param_configs.yaml` | parameter file |
+| `DIMRED_COMPONENTS` | `2 3` | `n_components` values looped by `supp_01_dimred.sh` |
+
+## Input sequences
+
+Put one FASTA per dataset into `data/sequences/`. The directory is set by `run_mmseqs2.seq_in_dir`. You can provide these files yourself, fetch them from UniProt, or both:
+
+```bash
+sbatch slurms/supp_00_fetch_uniprot.sh   # one array task per row of configs/query_configs.tsv
+```
+
+`configs/query_configs.tsv`:
 
 ```
 label	query	exact_species
-nucleus	(taxonomy_id:9606) AND (cc_scl_term:SL-0191) AND (reviewed:true)	H.sapiens nuclear proteins
-...
+Mammalia	(xref:interpro-IPR001766) AND (taxonomy_id:40674)	Mammalia
 ```
 
-Key parameters:
+## Running
 
-| Key | Meaning |
-|-----|---------|
-| seq_out_dir | Raw sequences |
-| features_out_dir | UniProt features |
-| dedup_out_dir | Deduplicated FASTA |
-| clusters_out_dir | MMseqs clusters |
-| reps_out_dir | ESMC embeddings |
-| model_name | ESMC model (e.g. esmc_6b) |
-| mmseqs.* | Dedup / clustering thresholds |
-| scanpy.* | PCA, neighbors, Leiden resolution, enrichment cutoffs |
+Always run from the repository root. Every step can be run in two ways.
 
-## Steps
+### 1. YAML + SLURM
 
-### 01 — Download UniProt
+Edit `configs/param_configs.yaml`, then submit each step. Size the arrays to the number of inputs; a task beyond the number of inputs exits cleanly.
 
 ```bash
-sbatch slurms/01_dw_uniprot.sh
+N=$(ls data/sequences/*.fa* | wc -l)
+sbatch --array=1-$N slurms/01_mmseqs2.sh
+sbatch --array=1-$N slurms/02_reps.sh
+sbatch --array=0-$N slurms/supp_01_dimred.sh   # 0 = all files combined, i = file i
+sbatch slurms/supp_02_scanpy.sh
 ```
 
-- Reads queries from `query_config.tsv`
-- Downloads sequences (TSV + FASTA + IDs) and features
-- Output: `data/raw_seqs/`, `data/features/`
+Without SLURM (`bash slurms/01_mmseqs2.sh`), each script processes every input in turn.
 
-### 02 — Deduplicate
+### 2. Command line
+
+Every script in `src/` accepts its parameters as CLI flags:
 
 ```bash
-sbatch slurms/02_dedup.sh
+python src/run_mmseqs2.py --fasta my_proteins.fasta --dedup_min_seq_id 0.95
+python src/extract_reps_biohub.py --fasta data/dedup/Mammalia_dedup.fasta
+python src/npz_umap.py --tensor data/esm-reps/esmc_6b/Mammalia_reps.npz --n-components 3
 ```
 
-- MMseqs2 easy-linclust (default 99% identity)
-- Output: `data/mmseqs_clusters/dedup/*_dedup.fasta`
+Parameter precedence is **built-in defaults < YAML section < explicit CLI flags**.
 
-### 03 — Cluster (multi-threshold)
+| Flag | Effect |
+|------|--------|
+| `--yaml-in [PATH]` | read parameters from the YAML (on by default) |
+| `--no-yaml-in` | ignore the YAML |
+| `--yaml-out [PATH]` | write the resolved parameters back to the script's YAML section (opt-in); run-specific paths such as `--fasta` and `--out` are not stored |
 
-```bash
-sbatch slurms/03_clust.sh
-```
+Running a script with only `--yaml-out`, i.e. no inputs, writes its section and exits. YAML writes are atomic and use a file lock, so concurrent array tasks are safe.
 
-- Hierarchical clustering at thresholds listed in config (0.95 → 0.15)
-- Uses representatives of previous threshold as input for next
-- Output: `data/mmseqs_clusters/<label>/`
-  - cluster TSV
-  - representative FASTA
-  - metrics TSV
-  - summary
+## Parameters (`configs/param_configs.yaml`)
 
-### 04 — Extract ESMC embeddings
+| Section | Key parameters |
+|---------|----------------|
+| `run_mmseqs2` | `seq_in_dir`, `dedup_out_dir`, `clusters_out_dir`, `dedup_min_seq_id`, `dedup_cov(_mode)`, `clust_cov(_mode)`, `thresholds`, `threads` (null = `SLURM_CPUS_PER_TASK`) |
+| `extract_reps_biohub` | `model_name`, `batch_size`, `chunk_size`, `reps_outdir` |
+| `extract_contacts_biohub` | `model_name`, `batch_size`, `max_tokens`, `min_sep`, `contacts_outdir` |
+| `npz_tsne` / `npz_umap` | reducer hyperparameters, `seed`, `n_jobs`, `output_dir` |
+| `npz_scanpy` | `resolution`, `n_neighbors`, `n_pcs` (null = full space), `min_module_size`, `min_percent_enrichment`, `seed`, `outdir` |
+| `dw_uniprot_seqs` / `dw_uniprot_features` | `config_path`, output dirs, `timeout` |
 
-```bash
-sbatch slurms/04_reps.sh
-```
-
-- Runs on GPU
-- Processes each `*_dedup.fasta`
-- Output: `data/reps/ESMC-6B/<label>_reps.npz`
-
-### 05 — Scanpy analysis
-
-```bash
-sbatch slurms/05_scanpy.sh
-```
-
-- Loads all .npz files
-- L2-normalizes embeddings
-- Optional PCA → neighbors (cosine) → Leiden → UMAP
-- Rank genes (channels) per cluster
-- Species enrichment plots
-- Extracts protein modules (highly enriched clusters)
-
-Output: `data/scanpy/ESMC-6B/.../`
+## Outputs
 
 ```
-protein_clusters_metadata.csv
-species_cluster_enrichment_*.csv
-channel_importance_rankings.csv
-umap_species_panel.png
-protein-modules/
-clustering_metrics.txt
-```
-
-## Directory layout
-
-```
-configs/
-  param_config.json
-  query_config.tsv
-slurms/
-  01_dw_uniprot.sh
-  02_dedup.sh
-  03_clust.sh
-  04_reps.sh
-  05_scanpy.sh
-src/
-  dw_uniprot_seqs.py
-  dw_uniprot_features.py
-  extract_reps_biohub.py
-  npz_scanpy.py
 data/
-  raw_seqs/
-  features/
-  mmseqs_clusters/
-  reps/
-  scanpy/
+  sequences/<label>_seqs.{fasta,tsv}, <label>_ids.txt   (UniProt fetch only)
+  features/<label>_feats.tsv                            (UniProt fetch only)
+  dedup/<label>_dedup.fasta
+  clusters/<label>/
+    <label>_ids_id<t>_<tag>.txt                 member → representative at threshold t
+    <label>_representatives_id<t>_<tag>.fasta
+    <label>_cluster_metrics.tsv
+    <label>_all_clusters_summary.tsv
+    clustering_summary.txt
+  esm-reps/esmc_6b/<label>_reps.npz             embeddings, ids
+  esm-contacts/esmc_6b/<label>_contacts.parquet accession, res_i, res_j, dist, value
+  dimred/<labels>_{tsne,umap}_nc<k>_..._weights.{tsv,npz}
+  scanpy/<inputs>/
+    protein_clusters_metadata__<tag>.csv
+    species_cluster_enrichment__<tag>.csv
+    channel_importance_rankings__<tag>.csv
+    clustering_metrics__<tag>.txt
+    umap_species_panel__<tag>.png
+    intra_group/umap_intra_species_panel__<tag>.png
+    protein-modules/*.txt
 logs/
 ```
 
-## Notes
+## Logging
 
-- All scripts are idempotent (skip existing outputs).
-- Array jobs are sized to the number of labels / files.
-- Adjust array ranges and resources in the SBATCH headers if needed.
+- Python messages are prefixed with `[PYTHON-INFO]`; errors are logged as `[PYTHON-INFO] Error: ...` before being raised.
+- Shell messages are prefixed with `[SLURM-INFO]`.
+- Every Python script and every slurm job ends with `<date> <elapsed>s <memory>MB`.
 
+## Layout
+
+```
+configs/   param_configs.yaml, query_configs.tsv
+slurms/    common.sh, 00_setup_env.sh, 01_mmseqs2.sh, 02_reps.sh, supp_0{0,1,2}_*.sh
+src/       utils.py + one script per step
+requirements.txt
+```
+
+The UniProt, MMseqs2, reps and contacts steps skip outputs that already exist; dimred and scanpy overwrite theirs. To start from scratch: `rm -rf data logs tmp`.

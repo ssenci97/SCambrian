@@ -1,105 +1,86 @@
 #!/usr/bin/env python3
-"""Perform t-SNE dimensionality reduction on tensor representations."""
-###################################### DEPENDENCIES_AND_CONSTANTS
+"""Run t-SNE on one or more embedding files and save the coordinates as TSV and ``.npz``."""
+############### <imports>
 import argparse
 import os
-import resource
+import sys
 import time
-from datetime import datetime
 from multiprocessing import cpu_count
 from pathlib import Path
 import numpy as np
 import pandas as pd
 import sklearn
 from sklearn.manifold import TSNE
-import torch
-import yaml
-EARLY_EXAGGERATION = 12.0
-INIT = "pca"
-LEARNING_RATE = "auto"
-MAX_ITER = 1000
-METRIC = "euclidean"
-N_COMPONENTS = 2
-OUTPUT_DIR = "data/dimred"
-PERPLEXITY = 30.0
-SEED = 42
-YAML_PATH = "configs/param_configs.yaml"
-###################################### CONFIG_AND_PARSER
-parser = argparse.ArgumentParser(description="t-SNE dimensionality reduction.")
-parser.add_argument("--tensor", type=str, required=True, help="Comma-separated input paths")
-parser.add_argument("--output-tsv", type=str, default=None)
-parser.add_argument("--output-npz", type=str, default=None)
-parser.add_argument("--n-components", type=int, default=N_COMPONENTS)
-parser.add_argument("--perplexity", type=float, default=PERPLEXITY)
-parser.add_argument("--max-iter", type=int, default=MAX_ITER)
-parser.add_argument("--learning-rate", type=str, default=LEARNING_RATE)
-parser.add_argument("--early-exaggeration", type=float, default=EARLY_EXAGGERATION)
-parser.add_argument("--metric", type=str, default=METRIC)
-parser.add_argument("--init", type=str, default=INIT)
-parser.add_argument("--seed", type=int, default=SEED)
-parser.add_argument("--n-jobs", type=int, default=-1)
-parser.add_argument("--output-dir", type=str, default=OUTPUT_DIR)
-parser.add_argument("--yaml-in", action="store_true")
-parser.add_argument("--yaml-out", action="store_true")
-args = parser.parse_args()
-script_key = "npz_tsne"
-params = dict(seed=SEED, n_components=N_COMPONENTS, perplexity=PERPLEXITY, max_iter=MAX_ITER, learning_rate=LEARNING_RATE, early_exaggeration=EARLY_EXAGGERATION, metric=METRIC, init=INIT, output_dir=OUTPUT_DIR)
-if args.yaml_in and Path(YAML_PATH).exists():
-    ydata = yaml.safe_load(Path(YAML_PATH).read_text()) or {}
-    if script_key in ydata: params.update(ydata[script_key])
-for k, v in params.items():
-    if not getattr(args, k, None) and k in vars(args): setattr(args, k, v)
-config = {**params, **{k: v for k, v in vars(args).items() if v is not None}}
-if args.yaml_out:
-    ydata = yaml.safe_load(Path(YAML_PATH).read_text()) if Path(YAML_PATH).exists() else {}
-    ydata[script_key] = params
-    Path(YAML_PATH).parent.mkdir(parents=True, exist_ok=True)
-    Path(YAML_PATH).write_text(yaml.dump(ydata, sort_keys=False))
-###################################### SETUP
-t0 = time.perf_counter()
-n_cores = cpu_count() if config["n_jobs"] == -1 else config["n_jobs"]
-os.environ["OMP_NUM_THREADS"] = str(n_cores)
-os.environ["MKL_NUM_THREADS"] = str(n_cores)
-os.environ["OPENBLAS_NUM_THREADS"] = str(n_cores)
-sklearn.set_config(working_memory=1024)
-print(f"[PYTHON-INFO] Detected {n_cores} CPU cores | seed={config['seed']}")
-###################################### LOAD
-paths = [Path(x.strip()) for x in config["tensor"].split(",") if x.strip()]
-tensors, ids_list = [], []
-for p in paths:
-    if p.suffix == ".pt":
-        data = torch.load(p, map_location="cpu", weights_only=False)
-        t = data["tensor"].numpy() if torch.is_tensor(data["tensor"]) else np.asarray(data["tensor"])
-        r = data["residue_ids"]
-    elif p.suffix == ".npz":
-        data = np.load(p, allow_pickle=True)
-        t = data["embeddings"]
-        r = data["ids"]
-    tensors.append(np.asarray(t))
-    ids_list.append(np.asarray(r))
-tensor = np.concatenate(tensors, axis=0)
-residue_ids = np.concatenate(ids_list, axis=0)
-print(f"[PYTHON-INFO] Merged tensor shape: {tensor.shape} | total residues: {len(residue_ids)}")
-###################################### TSNE
-lr = config["learning_rate"] if config["learning_rate"] != "auto" else "auto"
-tsne = TSNE(n_components=config["n_components"], perplexity=config["perplexity"], max_iter=config["max_iter"], learning_rate=lr, early_exaggeration=config["early_exaggeration"], metric=config["metric"], init=config["init"], random_state=config["seed"], n_jobs=n_cores, verbose=1)
-embedding = tsne.fit_transform(tensor)
-###################################### SAVE
-stems = [p.stem[:-5] if p.stem.endswith("_reps") else p.stem for p in paths]
-stem = "_".join(stems) if len(stems) > 1 else stems[0]
-out_dir = Path(config["output_dir"])
-out_dir.mkdir(parents=True, exist_ok=True)
-meta_tag = f"tsne_nc{config['n_components']}_perp{config['perplexity']}_iter{config['max_iter']}"
-tsv_path = Path(config["output_tsv"]) if config.get("output_tsv") else out_dir / f"{stem}_{meta_tag}_weights.tsv"
-npz_path = Path(config["output_npz"]) if config.get("output_npz") else out_dir / f"{stem}_{meta_tag}_weights.npz"
-cols = {f"tSNE{i+1}": embedding[:, i] for i in range(embedding.shape[1])}
-cols["id"] = residue_ids
-pd.DataFrame(cols).to_csv(tsv_path, sep="\t", index=False)
-np.savez_compressed(npz_path, embedding=embedding, id=residue_ids, n_components=config["n_components"], perplexity=config["perplexity"], max_iter=config["max_iter"], metric=config["metric"], seed=config["seed"], n_inputs=len(paths))
-print(f"[PYTHON-INFO] Saved t-SNE weights to {tsv_path}")
-###################################### FINALIZE
-elapsed = time.perf_counter() - t0
-max_mem_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
-print(f"[PYTHON-INFO] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {elapsed:.2f}s {max_mem_mb:.2f}MB")
+from utils import add_yaml_args, fasta_label, load_npz_embeddings, log, log_resources, resolve_params
+
+############### <constants>
+SCRIPT_NAME = Path(__file__).stem
+DEFAULTS = {"seed": 42, "n_components": 2, "perplexity": 30.0, "max_iter": 1000, "learning_rate": "auto", "early_exaggeration": 12.0, "metric": "euclidean", "init": "pca", "n_jobs": -1, "output_dir": "data/dimred"}
+
+
+############### <helpers>
+def set_threads(n_jobs: int) -> int:
+    """Resolve the core count and pin BLAS/OpenMP thread pools to it.
+
+    Args:
+        n_jobs: Requested cores, or -1 for all available.
+
+    Returns:
+        Number of cores in use.
+    """
+    n_cores = cpu_count() if n_jobs == -1 else n_jobs
+    for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+        os.environ[var] = str(n_cores)
+    sklearn.set_config(working_memory=1024)
+    return n_cores
+
+
+############### <main>
+def main() -> None:
+    """Parse arguments, resolve parameters, fit t-SNE and save the coordinates."""
+    start_time = time.time()
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--tensor", help="Comma-separated .npz/.pt input paths")
+    parser.add_argument("--output-tsv")
+    parser.add_argument("--output-npz")
+    parser.add_argument("--n-components", type=int)
+    parser.add_argument("--perplexity", type=float)
+    parser.add_argument("--max-iter", type=int)
+    parser.add_argument("--learning-rate")
+    parser.add_argument("--early-exaggeration", type=float)
+    parser.add_argument("--metric")
+    parser.add_argument("--init")
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("--n-jobs", type=int)
+    parser.add_argument("--output-dir")
+    add_yaml_args(parser)
+    args = parser.parse_args()
+    params = resolve_params(SCRIPT_NAME, DEFAULTS, args)
+    if not args.tensor:
+        if args.yaml_out:
+            sys.exit(0)
+        parser.error("--tensor is required")
+    n_cores = set_threads(params["n_jobs"])
+    log(f"Detected {n_cores} CPU cores | seed={params['seed']}")
+    paths = [Path(x.strip()) for x in args.tensor.split(",") if x.strip()]
+    tensor, ids = load_npz_embeddings(paths)
+    log(f"Merged tensor shape: {tensor.shape} | total entries: {len(ids)}")
+    lr = params["learning_rate"] if str(params["learning_rate"]) == "auto" else float(params["learning_rate"])
+    tsne = TSNE(n_components=params["n_components"], perplexity=params["perplexity"], max_iter=params["max_iter"], learning_rate=lr, early_exaggeration=params["early_exaggeration"], metric=params["metric"], init=params["init"], random_state=params["seed"], n_jobs=n_cores, verbose=1)
+    embedding = tsne.fit_transform(tensor)
+    stem = "_".join(fasta_label(p) for p in paths)
+    out_dir = Path(params["output_dir"])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    meta_tag = f"tsne_nc{params['n_components']}_perp{params['perplexity']}_iter{params['max_iter']}"
+    tsv_path = Path(args.output_tsv) if args.output_tsv else out_dir / f"{stem}_{meta_tag}_weights.tsv"
+    npz_path = Path(args.output_npz) if args.output_npz else out_dir / f"{stem}_{meta_tag}_weights.npz"
+    cols = {f"tSNE{i + 1}": embedding[:, i] for i in range(embedding.shape[1])}
+    cols["id"] = ids
+    pd.DataFrame(cols).to_csv(tsv_path, sep="\t", index=False)
+    np.savez_compressed(npz_path, embedding=embedding, id=ids, n_components=params["n_components"], perplexity=params["perplexity"], max_iter=params["max_iter"], metric=params["metric"], seed=params["seed"], n_inputs=len(paths))
+    log(f"Saved t-SNE coordinates to {tsv_path} and {npz_path}")
+    log_resources(start_time)
+
+
 if __name__ == "__main__":
-    pass
+    main()

@@ -6,22 +6,18 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=03:00:00
-#SBATCH --output=logs/scanpy_%A.log
+#SBATCH --output=logs/scanpy_%j.log
+############### <init>
+source slurms/common.sh
+activate_env
 
-source /orfeo/scratch/area/ssenci/venvs/ml_transformers/bin/activate
+############### <inputs>
+REPS_DIR=$(cfg extract_reps_biohub reps_outdir data/esm-reps/esmc_6b)
+mapfile -t NPZ_ARRAY < <(find "$REPS_DIR" -maxdepth 1 -type f -name "*_reps.npz" 2>/dev/null | LC_ALL=C sort)
+[ "${#NPZ_ARRAY[@]}" -lt 2 ] && slurm_info "Error: at least 2 *_reps.npz files are required in $REPS_DIR for comparative analysis" >&2 && exit 1
 
-REPS_DIR=$(python3 -c "import yaml; print(yaml.safe_load(open('configs/param_configs.yaml'))['extract_reps_biohub']['reps_outdir'])")
-mapfile -t NPZ_ARRAY < <(find "$REPS_DIR" -name "*.npz" | sort)
-
-if [ ${#NPZ_ARRAY[@]} -lt 2 ]; then
-    echo "[SLURM-INFO] Error: At least 2 .npz files are required in $REPS_DIR for comparative analysis." >&2
-    exit 1
-fi
-
-echo "[SLURM-INFO] === MODE: COMBINED (All files jointly) ==="
+############### <run>
+slurm_info "=== MODE: COMBINED (all files jointly) ==="
 du -sh "${NPZ_ARRAY[@]}"
-
-NPZ_FILES_STR=$(printf "%s\n" "${NPZ_ARRAY[@]}" | paste -sd, -)
-
-echo "[SLURM-INFO] --- Running Scanpy Joint Analysis ---"
-python3 src/npz_scanpy.py --npzs "$NPZ_FILES_STR" --yaml-in --yaml-out
+python3 src/npz_scanpy.py --yaml-in "$CONFIG_YAML" --npzs "$(printf "%s\n" "${NPZ_ARRAY[@]}" | paste -sd, -)" || exit 1
+finalize
