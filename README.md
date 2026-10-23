@@ -1,4 +1,5 @@
 # SCambrian — Protein Sequence Embedding & Clustering Pipeline
+Area Science Park -- Laboratory of Data Engineering
 
 ## Overview
 
