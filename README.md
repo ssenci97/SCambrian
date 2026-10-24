@@ -72,6 +72,16 @@ Key parameters:
 
 ## Steps
 
+### Run everything
+
+```bash
+bash slurms/run_all.sh                 # all steps, chained with afterok dependencies
+bash slurms/run_all.sh 03 supp_01      # only selected steps (01 02 03 supp_01 supp_02)
+DRY_RUN=1 bash slurms/run_all.sh       # print the sbatch commands without submitting
+```
+
+Array sizes are computed from the configs (labels in `query_configs.tsv`, models in `extract_reps_biohub.model_name`), so no `--array` editing is needed. Run it from the repo root on the login node (not via `sbatch`). Each step can still be submitted on its own with `sbatch`; the header `--array` is then used.
+
 ### 01 — Download UniProt
 
 ```bash
@@ -168,6 +178,6 @@ logs/
 ## Notes
 
 - All scripts are idempotent (skip existing outputs).
-- Array jobs are sized to the number of labels / files.
-- Adjust array ranges and resources in the SBATCH headers if needed.
+- `slurms/run_all.sh` sizes array jobs to the number of labels / models; adjust resources in the SBATCH headers if needed.
+- Steps 02 and supp_01 index the files on disk, not the TSV: when removing labels from the TSV, delete their stale outputs too.
 
