@@ -9,6 +9,9 @@
 #SBATCH --output=logs/mmseqs_%A_%a.log
 #SBATCH --array=1-5%3
 #SBATCH --open-mode=append
+###################################### conda
+source ~/scratch/miniconda/etc/profile.d/conda.sh
+conda activate ./.env
 ###################################### constants-and-init
 CONFIG_YAML="configs/param_configs.yaml"
 START_TIME=$(date +%s)

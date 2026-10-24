@@ -56,16 +56,24 @@ else
   pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.6.3/flash_attn-2.6.3+cu123torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 fi
 
+###################################### analysis (uniprot / dimred / scanpy) — also runs on an existing .env
+# numpy pinned: numba (scanpy) and torch 2.4.1 break on newer numpy
+echo "[SLURM-INFO] Installing analysis deps..."
+pip install "numpy<2.3" pyyaml tqdm seaborn scikit-learn umap-learn scanpy anndata numba safetensors
+
 ###################################### verify
 echo "[SLURM-INFO] Comprehensive verification..."
 python -c "
-import torch, esm, httpx, accelerate, flash_attn
+import torch, esm, httpx, accelerate, flash_attn, numpy, numba, scanpy, umap, sklearn
 print(f'PyTorch Version : {torch.__version__}')
 print(f'CUDA Available  : {torch.cuda.is_available()} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"})')
 print(f'HTTPX Version   : {httpx.__version__}')
 print(f'Accelerate      : {accelerate.__version__}')
 print(f'Flash Attention : {flash_attn.__version__}')
-print('All ESMC core dependencies successfully verified!')
+print(f'NumPy / Numba   : {numpy.__version__} / {numba.__version__}')
+print(f'Scanpy          : {scanpy.__version__}')
+print(f'UMAP / sklearn  : {umap.__version__} / {sklearn.__version__}')
+print('All pipeline dependencies successfully verified!')
 "
 
 python3 src/extract_reps_biohub.py --yaml-out

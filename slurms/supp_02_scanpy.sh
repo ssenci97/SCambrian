@@ -8,7 +8,9 @@
 #SBATCH --time=03:00:00
 #SBATCH --output=logs/scanpy_%A.log
 
-source /orfeo/scratch/area/ssenci/venvs/ml_transformers/bin/activate
+###################################### conda
+source ~/scratch/miniconda/etc/profile.d/conda.sh
+conda activate ./.env
 
 # Fetch reps base directory (one subdirectory per model) and scanpy output directory from YAML config
 REPS_DIR=$(python3 -c "import yaml; print(yaml.safe_load(open('configs/param_configs.yaml'))['extract_reps_biohub']['reps_outdir'])")

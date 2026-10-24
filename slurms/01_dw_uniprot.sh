@@ -9,6 +9,9 @@
 #SBATCH --output=logs/dw_UP_%A_%a.log
 #SBATCH --array=1-2
 #SBATCH --open-mode=append
+###################################### conda
+source ~/scratch/miniconda/etc/profile.d/conda.sh
+conda activate ./.env
 ###################################### constants-and-init
 python3 src/dw_uniprot_seqs.py --yaml-out
 python3 src/dw_uniprot_features.py --yaml-out
