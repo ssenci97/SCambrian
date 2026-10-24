@@ -36,18 +36,14 @@ with open("configs/param_configs.yaml") as f:
 dedup = d.get("run_mmseqs2", {}).get("dedup_out_dir", "data/dedup")
 cfg_path = d.get("dw_uniprot_seqs", {}).get("config_path", "configs/query_configs.tsv")
 reps_dir = d.get("extract_reps_biohub", {}).get("reps_outdir", "data/esm-reps")
-contacts_dir = d.get("extract_contacts_biohub", {}).get("contacts_outdir", "data/esm-contacts")
-contacts_model = d.get("extract_contacts_biohub", {}).get("model_name", "esmc_6b")
 models = d.get("extract_reps_biohub", {}).get("model_name", "esmc_6b")
 models = [models] if isinstance(models, str) else models
 print("MODELS=(" + " ".join(models) + ")")
-print(f"CONTACTS_MODEL={contacts_model}")
 print(f"FASTA_DIR={dedup}")
 print(f"CONFIG_FILE={cfg_path}")
 print(f"REPS_DIR={reps_dir}")
-print(f"CONTACTS_DIR={contacts_dir}/{contacts_model}")
 ')"
-mkdir -p "$REPS_DIR" "$CONTACTS_DIR"
+mkdir -p "$REPS_DIR"
 echo "[SLURM-INFO] Job started on $(date)"
 ###################################### parse args
 YAML_ONLY=false
@@ -62,7 +58,6 @@ if [ ! -f "$CONFIG_FILE" ]; then
   if [ "$YAML_ONLY" = true ]; then
     echo "[SLURM-INFO] Running standalone --yaml-out updates..."
     python src/extract_reps_biohub.py --yaml-out
-    python src/extract_contacts_biohub.py --yaml-out
     echo "[SLURM-INFO] YAML-out update completed successfully."
     exit 0
   fi
@@ -87,7 +82,6 @@ if [ "${#files[@]}" -eq 0 ]; then
   if [ "$YAML_ONLY" = true ]; then
     echo "[SLURM-INFO] Running standalone --yaml-out updates..."
     python src/extract_reps_biohub.py --yaml-out
-    python src/extract_contacts_biohub.py --yaml-out
     echo "[SLURM-INFO] YAML-out update completed successfully."
     exit 0
   fi
@@ -105,7 +99,6 @@ input_file="${files[$FILE_IDX]}"
 filename=$(basename "$input_file")
 base_name="${filename%_dedup.fasta}"
 base_name="${base_name%_seqs}"
-output_contacts="${CONTACTS_DIR}/${base_name}_contacts.parquet"
 echo "[SLURM-INFO] Target input: $input_file"
 echo "[SLURM-INFO] Target model: $MODEL"
 echo "[SLURM-INFO] Target reps output: ${REPS_DIR}/${MODEL}/${base_name}_reps.npz"
@@ -113,11 +106,5 @@ echo "[SLURM-INFO] Target reps output: ${REPS_DIR}/${MODEL}/${base_name}_reps.np
 START=$(date +%s)
 echo "[SLURM-INFO] Running extract_reps_biohub.py ($MODEL)"
 /usr/bin/time -f "real %e s\nmaxrss %M KB" python src/extract_reps_biohub.py --fasta "$input_file" --model_name "$MODEL" --yaml-in --yaml-out
-# contacts are ESMC-6B only: run them once per file, in the task of the contacts model
-if [ "$MODEL" = "$CONTACTS_MODEL" ]; then
-  echo "[SLURM-INFO] Target contacts output: $output_contacts"
-  echo "[SLURM-INFO] Running extract_contacts_biohub.py"
-  /usr/bin/time -f "real %e s\nmaxrss %M KB" python src/extract_contacts_biohub.py --fasta "$input_file" --out "$output_contacts" --yaml-in --yaml-out
-fi
 END=$(date +%s)
 echo "[SLURM-INFO] Done $(date) elapsed $((END-START))s"

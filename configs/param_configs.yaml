@@ -4,13 +4,8 @@ dw_uniprot_features:
 dw_uniprot_seqs:
   config_path: configs/query_configs.tsv
   seq_out_dir: data/sequences
-extract_contacts_biohub:
-  batch_size: 300
-  contacts_outdir: data/esm-contacts
-  min_sep: 6
-  model_name: esmc_6b
 extract_reps_biohub:
-  batch_size: 500
+  batch_size: 20
   model_name:
   - esmc_300m
   - esmc_600m

@@ -49,7 +49,7 @@ else
 
   ###################################### esmc
   echo "[SLURM-INFO] Installing ESMC + runtime deps..."
-  pip install esm httpx accelerate ninja biopython scipy pandas matplotlib huggingface_hub
+  pip install esm transformers httpx accelerate ninja biopython scipy pandas matplotlib huggingface_hub
 
   ###################################### flash-attn
   echo "[SLURM-INFO] Installing precompiled flash-attn 2.6.3..."
@@ -68,6 +68,5 @@ print(f'Flash Attention : {flash_attn.__version__}')
 print('All ESMC core dependencies successfully verified!')
 "
 
-python3 src/extract_contacts_biohub.py --yaml-out
 python3 src/extract_reps_biohub.py --yaml-out
 echo "[SLURM-INFO] Script finished $(date)"
