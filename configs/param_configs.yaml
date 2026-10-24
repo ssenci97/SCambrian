@@ -5,7 +5,7 @@ dw_uniprot_seqs:
   config_path: configs/query_configs.tsv
   seq_out_dir: data/sequences
 extract_reps_biohub:
-  batch_size: 20
+  batch_size: 500
   model_name:
   - esmc_300m
   - esmc_600m

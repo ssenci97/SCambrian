@@ -49,7 +49,7 @@ else
 
   ###################################### esmc
   echo "[SLURM-INFO] Installing ESMC + runtime deps..."
-  pip install esm transformers httpx accelerate ninja biopython scipy pandas matplotlib huggingface_hub
+  pip install esm httpx accelerate ninja biopython scipy pandas matplotlib huggingface_hub
 
   ###################################### flash-attn
   echo "[SLURM-INFO] Installing precompiled flash-attn 2.6.3..."
