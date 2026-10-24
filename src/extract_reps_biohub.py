@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""Extract protein sequence representations using ESMC models."""
+"""Extract mean-pooled protein sequence representations with ESMC models.
+
+The 300m and 600m models load from the esm registry. The 6B model loads from the
+``biohub/ESMC-6B`` Hugging Face checkpoint, whose published layout is translated
+onto the esm ``ESMC`` module tree before a strict state dict load.
+"""
 ###################################### imports-and-config
 import argparse
 import datetime
 import gc
 import glob
-import inspect
 import json
 import os
 import random
+import re
 import resource
 import sys
 import time
@@ -23,6 +28,7 @@ from safetensors.torch import load_file
 warnings.filterwarnings("ignore", category=FutureWarning)
 from esm.models.esmc import ESMC
 from esm.sdk.api import ESMProtein, LogitsConfig
+from esm.tokenization import get_esmc_model_tokenizers
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
@@ -35,9 +41,44 @@ CHUNK_SIZE = 500
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MODEL_NAMES = ["esmc_300m", "esmc_600m", "esmc_6b"]
 REPS_OUTDIR = "data/esm-reps"
+HF_6B_REPO = "biohub/ESMC-6B"
+HF_6B_NAMES = ["esmc_6b", "esm_6b", "biohub/ESMC-6B", "biohub/esmc-6b-2024-12"]
+HF_ROOT_KEYS = {
+    "esmc.embed_tokens.weight": "embed.weight",
+    "esmc.norm.weight": "transformer.norm.weight",
+    "lm_head.dense.weight": "sequence_head.0.weight",
+    "lm_head.dense.bias": "sequence_head.0.bias",
+    "lm_head.layer_norm.weight": "sequence_head.2.weight",
+    "lm_head.layer_norm.bias": "sequence_head.2.bias",
+    "lm_head.decoder.weight": "sequence_head.3.weight",
+    "lm_head.decoder.bias": "sequence_head.3.bias",
+}
+HF_BLOCK_KEYS = {
+    "input_layernorm.weight": "attn.layernorm_qkv.0.weight",
+    "input_layernorm.bias": "attn.layernorm_qkv.0.bias",
+    "self_attn.q_norm.weight": "attn.q_ln.weight",
+    "self_attn.k_norm.weight": "attn.k_ln.weight",
+    "self_attn.o_proj.weight": "attn.out_proj.weight",
+    "post_attention_layernorm.weight": "ffn.0.weight",
+    "post_attention_layernorm.bias": "ffn.0.bias",
+    "mlp.down_proj.weight": "ffn.3.weight",
+}
+HF_FUSED_KEYS = {
+    "attn.layernorm_qkv.1.weight": ("self_attn.q_proj.weight", "self_attn.k_proj.weight", "self_attn.v_proj.weight"),
+    "ffn.1.weight": ("mlp.gate_proj.weight", "mlp.up_proj.weight"),
+}
+HF_BLOCK_RE = re.compile(r"^esmc\.layers\.(\d+)\.(.+)$")
 START_TIME = time.time()
 ###################################### helper-functions
 def parse_fasta(fp):
+    """Parse a FASTA file into indexed records.
+
+    Args:
+        fp: Path to the FASTA file.
+
+    Returns:
+        List of ``(index, id, sequence)`` tuples, ids taken up to the first whitespace.
+    """
     r, idx, cid, cseq = [], 0, None, []
     with open(fp) as f:
         for l in f:
@@ -50,6 +91,14 @@ def parse_fasta(fp):
     if cid: r.append((idx, cid, "".join(cseq)))
     return r
 def parse_tsv(fp):
+    """Parse a two-column ``id<TAB>sequence`` TSV with a header row.
+
+    Args:
+        fp: Path to the TSV file.
+
+    Returns:
+        List of ``(index, id, sequence)`` tuples.
+    """
     r = []
     with open(fp) as f:
         next(f, None)
@@ -58,47 +107,83 @@ def parse_tsv(fp):
             if len(p) >= 2: r.append((idx, p[0], p[1]))
     return r
 def esmC_extract(seqs, model, device):
+    """Compute mean-pooled per-sequence embeddings, excluding BOS and EOS tokens.
+
+    Args:
+        seqs: One sequence or a list of sequences.
+        model: Loaded ``ESMC`` model.
+        device: Torch device the model lives on.
+
+    Returns:
+        List of 1-D numpy arrays of length ``d_model``.
+    """
     if isinstance(seqs, str): seqs = [seqs]
     tensors = [model.encode(ESMProtein(sequence=s)) for s in seqs]
-    return [model.logits(t, CFG).embeddings.squeeze(0)[1:-1].mean(dim=0).cpu().numpy() for t in tensors]
+    return [model.logits(t, CFG).embeddings.squeeze(0)[1:-1].float().mean(dim=0).cpu().numpy() for t in tensors]
+def hf_to_esmc_state_dict(raw):
+    """Translate the published ESMC checkpoint layout onto the esm ``ESMC`` module tree.
+
+    Mirrors ``esm.models.esmc.checkpoint_layout.published_to_native`` from esm 3.4.1,
+    targeting the ``nn.Sequential`` indices of the esm 3.2.x modules. Separate q/k/v
+    and gate/up projections are concatenated row-wise in that order.
+
+    Args:
+        raw: Published state dict (``esmc.layers.N.*``, ``lm_head.*``).
+
+    Returns:
+        State dict keyed by ``ESMC`` parameter names. Unrecognised keys pass through.
+    """
+    out, parts = {}, {}
+    for k, v in raw.items():
+        if k in HF_ROOT_KEYS:
+            out[HF_ROOT_KEYS[k]] = v
+            continue
+        m = HF_BLOCK_RE.match(k)
+        if m is None:
+            out[k] = v
+            continue
+        idx, leaf = m.groups()
+        if leaf in HF_BLOCK_KEYS: out[f"transformer.blocks.{idx}.{HF_BLOCK_KEYS[leaf]}"] = v
+        else: parts.setdefault(idx, {})[leaf] = v
+    for idx, found in parts.items():
+        for fused, leaves in HF_FUSED_KEYS.items():
+            out[f"transformer.blocks.{idx}.{fused}"] = torch.cat([found.pop(l) for l in leaves], dim=0)
+        out.update({f"esmc.layers.{idx}.{l}": v for l, v in found.items()})
+    return out
 def load_esmc_model(model_name, device):
-    hf_6b_names = ["esmc_6b", "esm_6b", "biohub/ESMC-6B", "biohub/esmc-6b-2024-12"]
-    if model_name in hf_6b_names:
-        print(f"[PYTHON-INFO] Loading 6B model from Hugging Face hub (biohub/ESMC-6B)...")
-        model_dir = snapshot_download(repo_id="biohub/ESMC-6B")
-        config_path = os.path.join(model_dir, "config.json")
-        model_kwargs = {}
-        if os.path.exists(config_path):
-            with open(config_path, "r") as f:
-                cfg = json.load(f)
-            sig = inspect.signature(ESMC.__init__)
-            valid_params = set(sig.parameters.keys()) - {"self"}
-            model_kwargs = {k: v for k, v in cfg.items() if k in valid_params}
-        if model_kwargs:
-            print("[PYTHON-INFO] Initializing ESMC architecture from config.json...")
-            model = ESMC(**model_kwargs)
-        else:
-            print("[PYTHON-INFO] Initializing default ESMC architecture...")
-            model = ESMC.from_pretrained("esmc_600m")
-        raw_state_dict = {}
-        st_files = sorted(glob.glob(os.path.join(model_dir, "*.safetensors")))
-        if st_files:
-            for f in st_files: raw_state_dict.update(load_file(f))
-        else:
-            pt_files = sorted(glob.glob(os.path.join(model_dir, "*.bin")) + glob.glob(os.path.join(model_dir, "*.pt")))
-            for f in pt_files: raw_state_dict.update(torch.load(f, map_location="cpu", weights_only=True))
-        clean_state_dict = {}
-        for k, v in raw_state_dict.items():
-            new_key = k
-            if new_key.startswith("model."): new_key = new_key[6:]
-            if new_key.startswith("_orig_mod."): new_key = new_key[10:]
-            clean_state_dict[new_key] = v
-        missing, unexpected = model.load_state_dict(clean_state_dict, strict=False)
-        print(f"[PYTHON-INFO] Loaded state dict: {len(missing)} missing keys, {len(unexpected)} unexpected keys")
-        return model.to(device).eval()
-    else:
+    """Load an ESMC model ready for inference.
+
+    Args:
+        model_name: Registry name (``esmc_300m``, ``esmc_600m``) or one of ``HF_6B_NAMES``.
+        device: Target torch device.
+
+    Returns:
+        ``ESMC`` model in eval mode, bfloat16 on GPU.
+
+    Raises:
+        RuntimeError: If the 6B checkpoint does not match the ``ESMC`` architecture exactly.
+    """
+    if model_name not in HF_6B_NAMES:
         print(f"[PYTHON-INFO] Loading standard ESMC model via registry: {model_name}")
-        return ESMC.from_pretrained(model_name).to(device).eval()
+        return ESMC.from_pretrained(model_name, device=device).eval()
+    print(f"[PYTHON-INFO] Loading 6B model from Hugging Face hub ({HF_6B_REPO})...")
+    model_dir = snapshot_download(repo_id=HF_6B_REPO)
+    with open(os.path.join(model_dir, "config.json")) as f:
+        cfg = json.load(f)
+    model = ESMC(d_model=cfg["hidden_size"], n_heads=cfg["num_attention_heads"], n_layers=cfg["num_hidden_layers"], tokenizer=get_esmc_model_tokenizers(), use_flash_attn=device.type == "cuda")
+    raw = {}
+    for f in sorted(glob.glob(os.path.join(model_dir, "*.safetensors"))): raw.update(load_file(f))
+    state_dict = hf_to_esmc_state_dict(raw)
+    del raw
+    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+    print(f"[PYTHON-INFO] Loaded state dict: {len(missing)} missing keys, {len(unexpected)} unexpected keys")
+    if missing or unexpected:
+        raise RuntimeError(f"ESMC-6B checkpoint mismatch: missing={missing[:5]} unexpected={unexpected[:5]}")
+    del state_dict
+    gc.collect()
+    model = model.to(device)
+    if device.type != "cpu": model = model.to(torch.bfloat16)
+    return model.eval()
 ###################################### main-execution
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
