@@ -1,3 +1,4 @@
 label	query	exact_species
-Mammalia	(xref:interpro-IPR001766) AND (taxonomy_id:40674)	Mammalia
-Sauropsis	(xref:interpro-IPR001766) AND (taxonomy_id:8457)	Sauropsis
+aegypti	(organism_id:7159)	Ae. aegypti
+albopictus	(organism_id:7160)	Ae. albopictus
+
