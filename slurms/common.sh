@@ -8,7 +8,8 @@ fi
 ############### <constants>
 CONFIG_YAML="${CONFIG_YAML:-configs/param_configs.yaml}"
 CONDA_SH="${CONDA_SH:-$HOME/scratch/miniconda/etc/profile.d/conda.sh}"
-ENV_DIR="${ENV_DIR:-$PWD/.env}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_DIR="${ENV_DIR:-$REPO_ROOT/.env}"
 START_TIME=$(date +%s)
 
 ############### <paths>
@@ -32,10 +33,12 @@ sanitize_toolchain() {
 }
 
 load_conda() {
-  if ! command -v conda >/dev/null 2>&1; then
-    [ -f "$CONDA_SH" ] || { slurm_info "Error: conda not found; set CONDA_SH (currently $CONDA_SH)"; exit 1; }
-    source "$CONDA_SH"
+  [ "$(type -t conda)" = "function" ] && return
+  if [ ! -f "$CONDA_SH" ] && command -v conda >/dev/null 2>&1; then
+    CONDA_SH="$(conda info --base)/etc/profile.d/conda.sh"
   fi
+  [ -f "$CONDA_SH" ] || { slurm_info "Error: conda.sh not found; set CONDA_SH (currently $CONDA_SH)"; exit 1; }
+  source "$CONDA_SH"
 }
 
 activate_env() {
