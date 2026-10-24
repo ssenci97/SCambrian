@@ -1,85 +1,104 @@
 #!/usr/bin/env python3
-"""Run UMAP on one or more embedding files and save the coordinates as TSV and ``.npz``."""
-############### <imports>
+"""Perform UMAP dimensionality reduction on tensor representations."""
+###################################### DEPENDENCIES_AND_CONSTANTS
 import argparse
 import os
-import sys
+import resource
 import time
+from datetime import datetime
 from multiprocessing import cpu_count
 from pathlib import Path
 import numpy as np
 import pandas as pd
 import sklearn
+import torch
 import umap
-from utils import add_yaml_args, fasta_label, load_npz_embeddings, log, log_resources, resolve_params
-
-############### <constants>
-SCRIPT_NAME = Path(__file__).stem
-DEFAULTS = {"seed": 42, "n_components": 2, "n_neighbors": 15, "min_dist": 0.1, "metric": "euclidean", "n_epochs": None, "learning_rate": 1.0, "init": "spectral", "n_jobs": -1, "output_dir": "data/dimred"}
-
-
-############### <helpers>
-def set_threads(n_jobs: int) -> int:
-    """Resolve the core count and pin BLAS/OpenMP thread pools to it.
-
-    Args:
-        n_jobs: Requested cores, or -1 for all available.
-
-    Returns:
-        Number of cores in use.
-    """
-    n_cores = cpu_count() if n_jobs == -1 else n_jobs
-    for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
-        os.environ[var] = str(n_cores)
-    sklearn.set_config(working_memory=1024)
-    return n_cores
-
-
-############### <main>
-def main() -> None:
-    """Parse arguments, resolve parameters, fit UMAP and save the coordinates."""
-    start_time = time.time()
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--tensor", help="Comma-separated .npz/.pt input paths")
-    parser.add_argument("--output-tsv")
-    parser.add_argument("--output-npz")
-    parser.add_argument("--n-components", type=int)
-    parser.add_argument("--n-neighbors", type=int)
-    parser.add_argument("--min-dist", type=float)
-    parser.add_argument("--metric")
-    parser.add_argument("--n-epochs", type=int)
-    parser.add_argument("--learning-rate", type=float)
-    parser.add_argument("--init")
-    parser.add_argument("--seed", type=int)
-    parser.add_argument("--n-jobs", type=int)
-    parser.add_argument("--output-dir")
-    add_yaml_args(parser)
-    args = parser.parse_args()
-    params = resolve_params(SCRIPT_NAME, DEFAULTS, args)
-    if not args.tensor:
-        if args.yaml_out:
-            sys.exit(0)
-        parser.error("--tensor is required")
-    n_cores = set_threads(params["n_jobs"])
-    log(f"Detected {n_cores} CPU cores | seed={params['seed']}")
-    paths = [Path(x.strip()) for x in args.tensor.split(",") if x.strip()]
-    tensor, ids = load_npz_embeddings(paths)
-    log(f"Merged tensor shape: {tensor.shape} | total entries: {len(ids)}")
-    reducer = umap.UMAP(n_components=params["n_components"], n_neighbors=params["n_neighbors"], min_dist=params["min_dist"], metric=params["metric"], n_epochs=params["n_epochs"], learning_rate=params["learning_rate"], init=params["init"], random_state=params["seed"], n_jobs=n_cores)
-    embedding = reducer.fit_transform(tensor)
-    stem = "_".join(fasta_label(p) for p in paths)
-    out_dir = Path(params["output_dir"])
-    out_dir.mkdir(parents=True, exist_ok=True)
-    meta_tag = f"umap_nc{params['n_components']}_nn{params['n_neighbors']}_mindist{params['min_dist']}"
-    tsv_path = Path(args.output_tsv) if args.output_tsv else out_dir / f"{stem}_{meta_tag}_weights.tsv"
-    npz_path = Path(args.output_npz) if args.output_npz else out_dir / f"{stem}_{meta_tag}_weights.npz"
-    cols = {f"UMAP{i + 1}": embedding[:, i] for i in range(embedding.shape[1])}
-    cols["id"] = ids
-    pd.DataFrame(cols).to_csv(tsv_path, sep="\t", index=False)
-    np.savez_compressed(npz_path, embedding=embedding, id=ids, n_components=params["n_components"], n_neighbors=params["n_neighbors"], min_dist=params["min_dist"], metric=params["metric"], seed=params["seed"], n_inputs=len(paths))
-    log(f"Saved UMAP coordinates to {tsv_path} and {npz_path}")
-    log_resources(start_time)
-
-
+import yaml
+INIT = "spectral"
+LEARNING_RATE = 1.0
+METRIC = "euclidean"
+MIN_DIST = 0.1
+N_COMPONENTS = 2
+N_EPOCHS = None
+N_NEIGHBORS = 15
+OUTPUT_DIR = "data/dimred"
+SEED = 42
+YAML_PATH = "configs/param_configs.yaml"
+###################################### CONFIG_AND_PARSER
+parser = argparse.ArgumentParser(description="UMAP dimensionality reduction.")
+parser.add_argument("--tensor", type=str, required=True, help="Comma-separated input paths")
+parser.add_argument("--output_tsv", "--output-tsv", type=str, default=None)
+parser.add_argument("--output_npz", "--output-npz", type=str, default=None)
+parser.add_argument("--n_components", "--n-components", type=int, default=N_COMPONENTS)
+parser.add_argument("--n_neighbors", "--n-neighbors", type=int, default=N_NEIGHBORS)
+parser.add_argument("--min_dist", "--min-dist", type=float, default=MIN_DIST)
+parser.add_argument("--metric", type=str, default=METRIC)
+parser.add_argument("--n_epochs", "--n-epochs", type=int, default=N_EPOCHS)
+parser.add_argument("--learning_rate", "--learning-rate", type=float, default=LEARNING_RATE)
+parser.add_argument("--init", type=str, default=INIT)
+parser.add_argument("--seed", type=int, default=SEED)
+parser.add_argument("--n_jobs", "--n-jobs", type=int, default=-1)
+parser.add_argument("--output_dir", "--output-dir", type=str, default=OUTPUT_DIR)
+parser.add_argument("--yaml-in", nargs="?", const=YAML_PATH, default=YAML_PATH)
+parser.add_argument("--yaml-out", nargs="?", const=YAML_PATH, default=None)
+yargs, _ = parser.parse_known_args()
+script_key = "npz_umap"
+params = dict(seed=SEED, n_components=N_COMPONENTS, n_neighbors=N_NEIGHBORS, min_dist=MIN_DIST, metric=METRIC, n_epochs=N_EPOCHS, learning_rate=LEARNING_RATE, init=INIT, output_dir=OUTPUT_DIR)
+if yargs.yaml_in and Path(yargs.yaml_in).exists():
+    ydata = yaml.safe_load(Path(yargs.yaml_in).read_text()) or {}
+    if script_key in ydata: params.update(ydata[script_key])
+parser.set_defaults(**params)
+args = parser.parse_args()
+config = {**params, **{k: v for k, v in vars(args).items() if v is not None}}
+if args.yaml_out:
+    ydata = yaml.safe_load(Path(args.yaml_out).read_text()) if Path(args.yaml_out).exists() else {}
+    ydata[script_key] = params
+    Path(args.yaml_out).parent.mkdir(parents=True, exist_ok=True)
+    Path(args.yaml_out).write_text(yaml.dump(ydata, sort_keys=False))
+###################################### SETUP
+t0 = time.perf_counter()
+n_cores = cpu_count() if config["n_jobs"] == -1 else config["n_jobs"]
+os.environ["OMP_NUM_THREADS"] = str(n_cores)
+os.environ["MKL_NUM_THREADS"] = str(n_cores)
+os.environ["OPENBLAS_NUM_THREADS"] = str(n_cores)
+sklearn.set_config(working_memory=1024)
+print(f"[PYTHON-INFO] Detected {n_cores} CPU cores | seed={config['seed']}")
+###################################### LOAD
+paths = [Path(x.strip()) for x in config["tensor"].split(",") if x.strip()]
+tensors, ids_list = [], []
+for p in paths:
+    if p.suffix == ".pt":
+        data = torch.load(p, map_location="cpu", weights_only=False)
+        t = data["tensor"].numpy() if torch.is_tensor(data["tensor"]) else np.asarray(data["tensor"])
+        r = data["residue_ids"]
+    elif p.suffix == ".npz":
+        data = np.load(p, allow_pickle=True)
+        t = data["embeddings"]
+        r = data["ids"]
+    tensors.append(np.asarray(t))
+    ids_list.append(np.asarray(r))
+tensor = np.concatenate(tensors, axis=0)
+residue_ids = np.concatenate(ids_list, axis=0)
+print(f"[PYTHON-INFO] Merged tensor shape: {tensor.shape} | total residues: {len(residue_ids)}")
+###################################### UMAP
+reducer = umap.UMAP(n_components=config["n_components"], n_neighbors=config["n_neighbors"], min_dist=config["min_dist"], metric=config["metric"], n_epochs=config["n_epochs"], learning_rate=config["learning_rate"], init=config["init"], random_state=config["seed"], n_jobs=n_cores)
+embedding = reducer.fit_transform(tensor)
+###################################### SAVE
+stems = [p.stem[:-5] if p.stem.endswith("_reps") else p.stem for p in paths]
+stem = "_".join(stems) if len(stems) > 1 else stems[0]
+out_dir = Path(config["output_dir"])
+out_dir.mkdir(parents=True, exist_ok=True)
+meta_tag = f"umap_nc{config['n_components']}_nn{config['n_neighbors']}_mindist{config['min_dist']}"
+tsv_path = Path(config["output_tsv"]) if config.get("output_tsv") else out_dir / f"{stem}_{meta_tag}_weights.tsv"
+npz_path = Path(config["output_npz"]) if config.get("output_npz") else out_dir / f"{stem}_{meta_tag}_weights.npz"
+cols = {f"UMAP{i+1}": embedding[:, i] for i in range(embedding.shape[1])}
+cols["id"] = residue_ids
+pd.DataFrame(cols).to_csv(tsv_path, sep="\t", index=False)
+np.savez_compressed(npz_path, embedding=embedding, id=residue_ids, n_components=config["n_components"], n_neighbors=config["n_neighbors"], min_dist=config["min_dist"], metric=config["metric"], seed=config["seed"], n_inputs=len(paths))
+print(f"[PYTHON-INFO] Saved UMAP weights to {tsv_path}")
+###################################### FINALIZE
+elapsed = time.perf_counter() - t0
+max_mem_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+print(f"[PYTHON-INFO] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {elapsed:.2f}s {max_mem_mb:.2f}MB")
 if __name__ == "__main__":
-    main()
+    pass

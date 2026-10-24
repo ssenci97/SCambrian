@@ -1,36 +1,41 @@
-run_mmseqs2:
-  mmseqs_path: mmseqs
-  seq_in_dir: data/sequences
-  dedup_out_dir: data/dedup
-  clusters_out_dir: data/clusters
-  dedup_min_seq_id: 0.9
-  dedup_cov: 0.8
-  dedup_cov_mode: 0
-  clust_cov: 0.8
-  clust_cov_mode: 0
-  thresholds:
-  - 0.9
-  - 0.8
-  - 0.7
-  - 0.6
-  - 0.5
-  - 0.4
-  - 0.3
-  - 0.2
-  threads: null
+dw_uniprot_features:
+  config_path: configs/query_configs.tsv
+  features_out_dir: data/features
+dw_uniprot_seqs:
+  config_path: configs/query_configs.tsv
+  seq_out_dir: data/sequences
+extract_contacts_biohub:
+  batch_size: 300
+  contacts_outdir: data/esm-contacts
+  min_sep: 6
+  model_name: esmc_6b
 extract_reps_biohub:
-  model_names:
+  batch_size: 500
+  model_name:
   - esmc_300m
   - esmc_600m
   - esmc_6b
-  batch_size: 500
-  chunk_size: 500
   reps_outdir: data/esm-reps
-extract_contacts_biohub:
-  batch_size: 300
-  max_tokens: 10000
-  min_sep: 6
-  contacts_outdir: data/esm-contacts/esmc_6b
+run_mmseqs2:
+  clusters_out_dir: data/clusters
+  dedup_out_dir: data/dedup
+  mmseqs:
+    clust_cov: 0.8
+    clust_cov_mode: 0
+    dedup_cov: 0.8
+    dedup_cov_mode: 0
+    dedup_min_seq_id: 0.9
+    thresholds:
+    - 0.9
+    - 0.8
+    - 0.7
+    - 0.6
+    - 0.5
+    - 0.4
+    - 0.3
+    - 0.2
+  mmseqs_path: mmseqs
+  seq_out_dir: data/sequences
 npz_tsne:
   seed: 42
   n_components: 2
@@ -40,7 +45,6 @@ npz_tsne:
   early_exaggeration: 12.0
   metric: euclidean
   init: pca
-  n_jobs: -1
   output_dir: data/dimred
 npz_umap:
   seed: 42
@@ -51,21 +55,11 @@ npz_umap:
   n_epochs: null
   learning_rate: 1.0
   init: spectral
-  n_jobs: -1
   output_dir: data/dimred
 npz_scanpy:
   seed: 42
   resolution: 1.0
   n_neighbors: 15
-  n_pcs: null
   min_module_size: 100
   min_percent_enrichment: 80
   outdir: data/scanpy/
-dw_uniprot_seqs:
-  config_path: configs/query_configs.tsv
-  seq_out_dir: data/sequences
-  timeout: 600
-dw_uniprot_features:
-  config_path: configs/query_configs.tsv
-  features_out_dir: data/features
-  timeout: 600
