@@ -56,7 +56,7 @@ def esmC_extract(seqs, model, tok):
 def load_esmc_model(model_name):
     repo = HF_REPOS.get(model_name, model_name)
     print(f"[PYTHON-INFO] Loading {model_name} from Hugging Face hub ({repo})...")
-    model = AutoModel.from_pretrained(repo, dtype=torch.bfloat16, device_map="auto", trust_remote_code=True).eval()
+    model = AutoModel.from_pretrained(repo, torch_dtype=torch.bfloat16, device_map="auto", trust_remote_code=True).eval()
     return model, AutoTokenizer.from_pretrained(repo, trust_remote_code=True)
 ###################################### main-execution
 if __name__ == "__main__":
