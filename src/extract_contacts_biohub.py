@@ -27,7 +27,7 @@ random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
 SCRIPT_NAME = Path(__file__).stem
-DEFAULTS = {"model_name": "esmc_6b", "batch_size": 300, "max_tokens": 10000, "min_sep": 6, "contacts_outdir": "data/esm-contacts/esmc_6b"}
+DEFAULTS = {"batch_size": 300, "max_tokens": 10000, "min_sep": 6, "contacts_outdir": "data/esm-contacts/esmc_6b"}
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DTYPE = torch.bfloat16 if DEVICE.type == "cuda" else torch.float32
 HF_REPO = "biohub/ESMC-6B"
@@ -180,7 +180,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--fasta", type=Path)
     parser.add_argument("--out", type=Path, help="Output parquet (default: <contacts_outdir>/<label>_contacts.parquet)")
-    parser.add_argument("--model_name")
     parser.add_argument("--contacts_outdir")
     parser.add_argument("--batch_size", type=int)
     parser.add_argument("--max_tokens", type=int)

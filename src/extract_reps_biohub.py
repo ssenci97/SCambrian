@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract mean-pooled ESMC protein representations from a FASTA or sequence TSV into an ``.npz``."""
+"""Extract mean-pooled ESMC protein representations from a FASTA or sequence TSV into one ``.npz`` per model."""
 ############### <imports>
 import argparse
 import gc
@@ -28,7 +28,7 @@ random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
 SCRIPT_NAME = Path(__file__).stem
-DEFAULTS = {"model_name": "esmc_6b", "batch_size": 300, "chunk_size": 500, "reps_outdir": "data/esm-reps/esmc_6b"}
+DEFAULTS = {"model_names": ["esmc_300m", "esmc_600m", "esmc_6b"], "batch_size": 300, "chunk_size": 500, "reps_outdir": "data/esm-reps"}
 CFG = LogitsConfig(sequence=True, return_embeddings=True)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 HF_6B_NAMES = ["esmc_6b", "esm_6b", "biohub/ESMC-6B", "biohub/esmc-6b-2024-12"]
@@ -118,39 +118,22 @@ def load_esmc_model(model_name: str, device: torch.device) -> ESMC:
     return model.to(device).eval()
 
 
-############### <main>
-def main() -> None:
-    """Parse arguments, resolve parameters and write the representation ``.npz``."""
-    start_time = time.time()
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--seqs_tsv", type=Path)
-    group.add_argument("--fasta", type=Path)
-    parser.add_argument("--out", type=Path, help="Output .npz (default: <reps_outdir>/<label>_reps.npz)")
-    parser.add_argument("--model_name")
-    parser.add_argument("--reps_outdir")
-    parser.add_argument("--batch_size", type=int)
-    parser.add_argument("--chunk_size", type=int)
-    add_yaml_args(parser)
-    args = parser.parse_args()
-    params = resolve_params(SCRIPT_NAME, DEFAULTS, args)
-    in_path = args.fasta or args.seqs_tsv
-    if in_path is None:
-        if args.yaml_out:
-            sys.exit(0)
-        parser.error("one of --seqs_tsv or --fasta is required")
-    out = args.out or Path(params["reps_outdir"]) / f"{fasta_label(in_path)}_reps.npz"
-    if out.exists():
-        log(f"Target file '{out}' already exists. Skipping execution.")
-        log_resources(start_time)
-        sys.exit(0)
-    records = parse_fasta(in_path) if args.fasta else parse_tsv(in_path)
-    log(f"Loaded {len(records)} sequences from {in_path}; device={DEVICE}; output={out}")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    model = load_esmc_model(params["model_name"], DEVICE)
-    chunk_size, batch_size = params["chunk_size"], params["batch_size"]
+def embed_records(records: list[tuple[str, str]], model: ESMC, chunk_size: int, batch_size: int, out: Path, desc: str) -> np.ndarray:
+    """Embed records in chunks, spilling each chunk to a temporary ``.npz``, and write the merged ``.npz``.
+
+    Args:
+        records: ``(identifier, sequence)`` pairs.
+        model: Loaded ESMC model in eval mode.
+        chunk_size: Sequences per temporary chunk file.
+        batch_size: Sequences per forward batch.
+        out: Final ``.npz`` path.
+        desc: Progress-bar label.
+
+    Returns:
+        The stacked embedding matrix.
+    """
     chunk_files = []
-    for c_idx, i in enumerate(tqdm.tqdm(range(0, len(records), chunk_size), desc=f"[PYTHON-INFO] Processing chunks for {in_path}")):
+    for c_idx, i in enumerate(tqdm.tqdm(range(0, len(records), chunk_size), desc=desc)):
         chunk_recs = records[i:i + chunk_size]
         c_ids, c_embs = [], []
         with torch.no_grad():
@@ -173,7 +156,53 @@ def main() -> None:
         os.remove(c_file)
     embeddings = np.concatenate(all_embs, axis=0)
     np.savez(out, embeddings=embeddings, ids=np.concatenate(all_ids, axis=0))
-    log(f"Saved embeddings {embeddings.shape} to '{out}'")
+    return embeddings
+
+
+############### <main>
+def main() -> None:
+    """Parse arguments, resolve parameters and write one representation ``.npz`` per model."""
+    start_time = time.time()
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--seqs_tsv", type=Path)
+    group.add_argument("--fasta", type=Path)
+    parser.add_argument("--out", type=Path, help="Output .npz, single model only (default: <reps_outdir>/<model>/<label>_reps.npz)")
+    parser.add_argument("--model_names", nargs="+")
+    parser.add_argument("--reps_outdir")
+    parser.add_argument("--batch_size", type=int)
+    parser.add_argument("--chunk_size", type=int)
+    add_yaml_args(parser)
+    args = parser.parse_args()
+    params = resolve_params(SCRIPT_NAME, DEFAULTS, args)
+    in_path = args.fasta or args.seqs_tsv
+    if in_path is None:
+        if args.yaml_out:
+            sys.exit(0)
+        parser.error("one of --seqs_tsv or --fasta is required")
+    model_names = [params["model_names"]] if isinstance(params["model_names"], str) else list(params["model_names"])
+    if args.out and len(model_names) > 1:
+        parser.error("--out requires exactly one model in --model_names")
+    outs = {m: args.out or Path(params["reps_outdir"]) / m / f"{fasta_label(in_path)}_reps.npz" for m in model_names}
+    todo = [m for m in model_names if not outs[m].exists()]
+    for m in model_names:
+        if m not in todo:
+            log(f"Target file '{outs[m]}' already exists. Skipping {m}.")
+    if not todo:
+        log_resources(start_time)
+        sys.exit(0)
+    records = parse_fasta(in_path) if args.fasta else parse_tsv(in_path)
+    log(f"Loaded {len(records)} sequences from {in_path}; device={DEVICE}; models={todo}")
+    for m in todo:
+        out = outs[m]
+        out.parent.mkdir(parents=True, exist_ok=True)
+        model = load_esmc_model(m, DEVICE)
+        embeddings = embed_records(records, model, params["chunk_size"], params["batch_size"], out, f"[PYTHON-INFO] Processing chunks for {in_path} ({m})")
+        log(f"Saved {m} embeddings {embeddings.shape} to '{out}'")
+        del model
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
     log_resources(start_time)
 
 

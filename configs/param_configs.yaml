@@ -19,12 +19,14 @@ run_mmseqs2:
   - 0.2
   threads: null
 extract_reps_biohub:
-  model_name: esmc_6b
+  model_names:
+  - esmc_300m
+  - esmc_600m
+  - esmc_6b
   batch_size: 500
   chunk_size: 500
-  reps_outdir: data/esm-reps/esmc_6b
+  reps_outdir: data/esm-reps
 extract_contacts_biohub:
-  model_name: esmc_6b
   batch_size: 300
   max_tokens: 10000
   min_sep: 6

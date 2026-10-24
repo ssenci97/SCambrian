@@ -60,6 +60,19 @@ print(default if value is None else value)
 EOF
 }
 
+cfg_list() {
+  python3 - "$CONFIG_YAML" "$1" "$2" "$3" <<'EOF2'
+import sys
+from pathlib import Path
+import yaml
+path, section, key, default = sys.argv[1:5]
+data = yaml.safe_load(Path(path).read_text()) if Path(path).exists() else {}
+value = ((data or {}).get(section) or {}).get(key)
+values = default.split() if value is None else ([value] if isinstance(value, str) else value)
+print("\n".join(str(v) for v in values))
+EOF2
+}
+
 task_indices() {
   if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
     echo "$SLURM_ARRAY_TASK_ID"

@@ -7,7 +7,7 @@
 #SBATCH --mem=2G
 #SBATCH --time=02:00:00
 #SBATCH --output=logs/dw_UP_%A_%a.log
-#SBATCH --array=1-2
+#SBATCH --array=1-3
 #SBATCH --open-mode=append
 ############### <init>
 source slurms/common.sh

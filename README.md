@@ -3,7 +3,7 @@ Area Science Park -- Laboratory of Data Engineering
 
 ## Overview
 
-The pipeline starts from **any set of protein FASTA files**. It removes redundancy with MMseqs2, builds multi-identity clusters, computes ESMC-6B embeddings and residue contacts, and then runs embedding-space analyses (t-SNE/UMAP, Scanpy clustering and enrichment).
+The pipeline starts from **any set of protein FASTA files**. It removes redundancy with MMseqs2, builds multi-identity clusters, computes ESMC embeddings (300M, 600M and 6B by default) and ESMC-6B residue contacts, and then runs embedding-space analyses (t-SNE/UMAP, Scanpy clustering and enrichment).
 
 ```
 (optional) supp_00  UniProt fetch ─┐
@@ -16,12 +16,12 @@ user-provided FASTA files ─────────┤
 01  mmseqs2       easy-linclust dedup → successive clustering (0.9 → 0.2)
                   → data/dedup/<label>_dedup.fasta, data/clusters/<label>/
                                    │
-02  reps          ESMC-6B mean-pooled embeddings + residue contacts (GPU)
-                  → data/esm-reps/esmc_6b/<label>_reps.npz
+02  reps          ESMC mean-pooled embeddings (one per model) + ESMC-6B residue contacts (GPU)
+                  → data/esm-reps/<model>/<label>_reps.npz
                   → data/esm-contacts/esmc_6b/<label>_contacts.parquet
                                    │
-supp_01  dimred   t-SNE / UMAP per file and combined → data/dimred/
-supp_02  scanpy   joint + intra-group Leiden, enrichment, modules → data/scanpy/
+supp_01  dimred   t-SNE / UMAP per file and combined, per model → data/dimred/<model>/
+supp_02  scanpy   joint + intra-group Leiden, enrichment, modules, per model → data/scanpy/<model>/
 ```
 
 `<label>` is the file stem with the `_seqs` / `_dedup` / `_reps` suffixes removed. For example, `Mammalia_seqs.fasta` → `Mammalia`.
@@ -73,15 +73,24 @@ Always run from the repository root. Every step can be run in two ways.
 
 ### 1. YAML + SLURM
 
-Edit `configs/param_configs.yaml`, then submit each step. Size the arrays to the number of inputs; a task beyond the number of inputs exits cleanly.
+Edit `configs/param_configs.yaml`, then submit each step. The default `#SBATCH --array` sizes assume 3 input files and the 3 default models (`model_names`); a task beyond the number of inputs exits cleanly. For `N` files and `M` models:
+
+| Script | Tasks | Default | Task mapping |
+|--------|-------|---------|--------------|
+| `supp_00_fetch_uniprot.sh` | `1-N` | `1-3` | one per row of `query_configs.tsv` |
+| `01_mmseqs2.sh` | `1-N` | `1-3` | one per FASTA |
+| `02_reps.sh` | `1-N*M` | `1-9` | task `i` → file `(i-1)/M`, model `(i-1)%M`; contacts (ESMC-6B) run once per file, on its first model task |
+| `supp_01_dimred.sh` | `0-(N+1)*M-1` | `0-11` | task `t` → model `t/(N+1)`, mode `t%(N+1)` (0 = all files combined, i = file i) |
+| `supp_02_scanpy.sh` | `0-M-1` | `0-2` | one per model, all files jointly |
 
 ```bash
-N=$(ls data/sequences/*.fa* | wc -l)
-sbatch --array=1-$N slurms/01_mmseqs2.sh
-sbatch --array=1-$N slurms/02_reps.sh
-sbatch --array=0-$N slurms/supp_01_dimred.sh   # 0 = all files combined, i = file i
-sbatch slurms/supp_02_scanpy.sh
+sbatch slurms/01_mmseqs2.sh
+sbatch slurms/02_reps.sh
+sbatch slurms/supp_01_dimred.sh   # → data/dimred/<model>/
+sbatch slurms/supp_02_scanpy.sh   # → data/scanpy/<model>/
 ```
+
+Override the defaults with e.g. `N=5; M=3; sbatch --array=1-$((N*M)) slurms/02_reps.sh`.
 
 Without SLURM (`bash slurms/01_mmseqs2.sh`), each script processes every input in turn.
 
@@ -91,7 +100,7 @@ Every script in `src/` accepts its parameters as CLI flags:
 
 ```bash
 python src/run_mmseqs2.py --fasta my_proteins.fasta --dedup_min_seq_id 0.95
-python src/extract_reps_biohub.py --fasta data/dedup/Mammalia_dedup.fasta
+python src/extract_reps_biohub.py --fasta data/dedup/Mammalia_dedup.fasta --model_names esmc_600m
 python src/npz_umap.py --tensor data/esm-reps/esmc_6b/Mammalia_reps.npz --n-components 3
 ```
 
@@ -110,8 +119,8 @@ Running a script with only `--yaml-out`, i.e. no inputs, writes its section and 
 | Section | Key parameters |
 |---------|----------------|
 | `run_mmseqs2` | `seq_in_dir`, `dedup_out_dir`, `clusters_out_dir`, `dedup_min_seq_id`, `dedup_cov(_mode)`, `clust_cov(_mode)`, `thresholds`, `threads` (null = `SLURM_CPUS_PER_TASK`) |
-| `extract_reps_biohub` | `model_name`, `batch_size`, `chunk_size`, `reps_outdir` |
-| `extract_contacts_biohub` | `model_name`, `batch_size`, `max_tokens`, `min_sep`, `contacts_outdir` |
+| `extract_reps_biohub` | `model_names` (list; default `esmc_300m`, `esmc_600m`, `esmc_6b`), `batch_size`, `chunk_size`, `reps_outdir` (base; one subfolder per model) |
+| `extract_contacts_biohub` (always ESMC-6B) | `batch_size`, `max_tokens`, `min_sep`, `contacts_outdir` |
 | `npz_tsne` / `npz_umap` | reducer hyperparameters, `seed`, `n_jobs`, `output_dir` |
 | `npz_scanpy` | `resolution`, `n_neighbors`, `n_pcs` (null = full space), `min_module_size`, `min_percent_enrichment`, `seed`, `outdir` |
 | `dw_uniprot_seqs` / `dw_uniprot_features` | `config_path`, output dirs, `timeout` |
@@ -129,7 +138,7 @@ data/
     <label>_cluster_metrics.tsv
     <label>_all_clusters_summary.tsv
     clustering_summary.txt
-  esm-reps/esmc_6b/<label>_reps.npz             embeddings, ids
+  esm-reps/<model>/<label>_reps.npz             embeddings, ids
   esm-contacts/esmc_6b/<label>_contacts.parquet accession, res_i, res_j, dist, value
   dimred/<labels>_{tsne,umap}_nc<k>_..._weights.{tsv,npz}
   scanpy/<inputs>/
