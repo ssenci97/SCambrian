@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=20G
 #SBATCH --time=04:00:00
-#SBATCH --output=logs/mmseqs_%A_%a.log
+#SBATCH --output=logs/mmseqs/mmseqs_%A_%a.log
 #SBATCH --array=1-5%3
 #SBATCH --open-mode=append
 ###################################### conda

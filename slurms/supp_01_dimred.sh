@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
 #SBATCH --time=03:00:00
-#SBATCH --output=logs/tsne_umap_%A_%a.log
+#SBATCH --output=logs/dimred/tsne_umap_%A_%a.log
 #SBATCH --array=0-3
 
 ###################################### conda

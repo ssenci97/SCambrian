@@ -11,6 +11,33 @@ extract_reps_biohub:
   - esmc_600m
   - esmc_6b
   reps_outdir: data/esm-reps
+npz_scanpy:
+  min_module_size: 100
+  min_percent_enrichment: 80
+  n_neighbors: 15
+  outdir: data/scanpy/
+  resolution: 1.0
+  seed: 42
+npz_tsne:
+  early_exaggeration: 12.0
+  init: pca
+  learning_rate: auto
+  max_iter: 1000
+  metric: euclidean
+  n_components: 2
+  output_dir: data/dimred
+  perplexity: 30.0
+  seed: 42
+npz_umap:
+  init: spectral
+  learning_rate: 1.0
+  metric: euclidean
+  min_dist: 0.1
+  n_components: 2
+  n_epochs: null
+  n_neighbors: 15
+  output_dir: data/dimred
+  seed: 42
 run_mmseqs2:
   clusters_out_dir: data/clusters
   dedup_out_dir: data/dedup
@@ -31,30 +58,3 @@ run_mmseqs2:
     - 0.2
   mmseqs_path: mmseqs
   seq_out_dir: data/sequences
-npz_tsne:
-  seed: 42
-  n_components: 2
-  perplexity: 30.0
-  max_iter: 1000
-  learning_rate: auto
-  early_exaggeration: 12.0
-  metric: euclidean
-  init: pca
-  output_dir: data/dimred
-npz_umap:
-  seed: 42
-  n_components: 2
-  n_neighbors: 15
-  min_dist: 0.1
-  metric: euclidean
-  n_epochs: null
-  learning_rate: 1.0
-  init: spectral
-  output_dir: data/dimred
-npz_scanpy:
-  seed: 42
-  resolution: 1.0
-  n_neighbors: 15
-  min_module_size: 100
-  min_percent_enrichment: 80
-  outdir: data/scanpy/

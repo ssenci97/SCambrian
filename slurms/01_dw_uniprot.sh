@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=2G
 #SBATCH --time=02:00:00
-#SBATCH --output=logs/dw_UP_%A_%a.log
+#SBATCH --output=logs/uniprot/dw_UP_%A_%a.log
 #SBATCH --array=1-2
 #SBATCH --open-mode=append
 ###################################### conda
