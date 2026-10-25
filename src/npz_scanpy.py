@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Processes ESMC protein embeddings with joint clustering, globally lettered species-specificity UMAP panels, intra-species clustering and module extraction.
 
-A first pass runs the full analysis and assigns unique letters to the most species-specific joint clusters; a second pass recomputes neighbors, Leiden and UMAP on the lettered clusters only, plots their UMAP facets and a per-species protein-count barplot of the lettered clusters. All figures are saved as PNG and PDF.
+A first pass runs the full analysis and assigns unique letters to the most species-specific joint clusters; a second pass recomputes neighbors, Leiden and UMAP on the lettered clusters only, plots their UMAP facets and per-species protein-count barplots of all lettered clusters (UMAP-shown ones outlined in black) and of the UMAP-shown clusters only. All figures are saved as PNG and PDF.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -168,6 +168,34 @@ def add_spec_cbar(fig: plt.Figure, cax: plt.Axes) -> None:
     cbar = fig.colorbar(sm, cax=cax, orientation="horizontal")
     cbar.set_label(CBAR_LABEL, fontsize=6)
     cbar.ax.tick_params(labelsize=4)
+def plot_counts_bar(lt_counts: pd.DataFrame, letters: dict[str, str], shown: set[str], species_list: list[str], title: str, path: Path) -> None:
+    """Plot per-species protein counts of lettered clusters, outlining clusters shown in the UMAP facets.
+
+    Args:
+        lt_counts (pd.DataFrame): Protein counts per lettered cluster (rows) and species (columns), in plotting order.
+        letters (dict[str, str]): Global mapping cluster -> letter.
+        shown (set[str]): Clusters labelled in the UMAP facets, drawn with a thin black border.
+        species_list (list[str]): Species to plot.
+        title (str): Plot title.
+        path (Path): Output path.
+    """
+    n_sp = len(species_list)
+    x, width = np.arange(len(lt_counts)), 0.8 / n_sp
+    edges = ["black" if cl in shown else "none" for cl in lt_counts.index]
+    fig, ax = plt.subplots(figsize=(PANEL_SIZE_INCHES * n_sp, PANEL_SIZE_INCHES), dpi=PANEL_DPI)
+    for i, sp in enumerate(species_list):
+        ax.bar(x - 0.4 + width * (i + 0.5), lt_counts[sp].values, width=width, color=PALETTE[i % len(PALETTE)], label=sp, edgecolor=edges, linewidth=0.4)
+    ax.set_xticks(x)
+    ax.set_xticklabels([letters[cl] for cl in lt_counts.index], fontsize=5)
+    ax.tick_params(axis="y", labelsize=5)
+    ax.set_xlim(-0.6, len(lt_counts) - 0.4)
+    ax.set_xlabel("Lettered cluster", fontsize=6, labelpad=1)
+    ax.set_ylabel("Proteins", fontsize=6, labelpad=1)
+    ax.set_title(title, fontsize=7, fontweight="bold", pad=2)
+    ax.legend(fontsize=5, frameon=False)
+    ax.spines[["top", "right"]].set_visible(False)
+    save_fig(fig, path)
+    plt.close(fig)
 def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, n_pcs_use: int | None, use_pca: bool) -> tuple[dict[str, str], dict[str, dict[str, str]], pd.DataFrame, pd.DataFrame]:
     """Run joint clustering, lettered species panel, module extraction, intra-group clustering and logging.
 
@@ -371,21 +399,9 @@ def run_second_pass(adata: ad.AnnData, letters: dict[str, str], facets: dict[str
     ###################################### LETTERED_COUNTS_BARPLOT
     lt_counts = counts_df.loc[list(letters), species_list]
     lt_counts = lt_counts.loc[lt_counts.sum(axis=1).sort_values(ascending=False).index]
-    x, width = np.arange(len(lt_counts)), 0.8 / n_sp
-    fig, ax = plt.subplots(figsize=(PANEL_SIZE_INCHES * n_sp, PANEL_SIZE_INCHES), dpi=PANEL_DPI)
-    for i, sp in enumerate(species_list):
-        ax.bar(x - 0.4 + width * (i + 0.5), lt_counts[sp].values, width=width, color=PALETTE[i % len(PALETTE)], label=sp, linewidth=0)
-    ax.set_xticks(x)
-    ax.set_xticklabels([letters[cl] for cl in lt_counts.index], fontsize=5)
-    ax.tick_params(axis="y", labelsize=5)
-    ax.set_xlim(-0.6, len(lt_counts) - 0.4)
-    ax.set_xlabel("Lettered cluster", fontsize=6, labelpad=1)
-    ax.set_ylabel("Proteins", fontsize=6, labelpad=1)
-    ax.set_title("Proteins per species in lettered clusters", fontsize=7, fontweight="bold", pad=2)
-    ax.legend(fontsize=5, frameon=False)
-    ax.spines[["top", "right"]].set_visible(False)
-    save_fig(fig, target_dir / f"lettered_species_counts__{param_tag}.png")
-    plt.close(fig)
+    shown = {cl for sp_letters in facets.values() for cl in sp_letters}
+    plot_counts_bar(lt_counts, letters, shown, species_list, "Proteins per species in lettered clusters", target_dir / f"lettered_species_counts__{param_tag}.png")
+    plot_counts_bar(lt_counts.loc[[cl for cl in lt_counts.index if cl in shown]], letters, shown, species_list, "Proteins per species in UMAP-shown clusters", target_dir / f"shown_species_counts__{param_tag}.png")
 ###################################### MAIN
 def main() -> None:
     """Load embeddings, preprocess, and run the first and second analysis passes."""
@@ -395,7 +411,7 @@ def main() -> None:
         raise ValueError("[PYTHON-ERROR] This comparative script requires at least two .npz files.")
     use_pca = args.n_pcs is not None and args.n_pcs > 0
     param_tag = f"res{args.resolution}_nn{args.n_neighbors}" + (f"_npc{args.n_pcs}" if use_pca else "_full")
-    target_dir = Path(args.outdir) / "_".join([Path(f).stem for f in npz_files])
+    target_dir = Path(args.outdir) / "_".join([Path(f).stem.replace("_reps", "") for f in npz_files])
     target_dir.mkdir(parents=True, exist_ok=True)
     ###################################### LOAD_DATA
     adatas = []
@@ -423,13 +439,12 @@ def main() -> None:
         print(f"[PYTHON-INFO][DATA-SHAPE] Operating in full-space dimensions: {adata.shape[1]}")
         rep_key, n_pcs_use = "X", None
     ###################################### FIRST_PASS
-    pass_dir = target_dir / "first_pass"
-    letters, facets, cluster_sp_frac, counts_df = run_pass(adata, pass_dir, param_tag, rep_key, n_pcs_use, use_pca)
+    letters, facets, cluster_sp_frac, counts_df = run_pass(adata, target_dir, param_tag, rep_key, n_pcs_use, use_pca)
     ###################################### SECOND_PASS
     if len(letters) < 2:
         print(f"[PYTHON-INFO][SECOND-PASS] Skipping: fewer than two lettered clusters ({len(letters)})")
     else:
-        run_second_pass(adata, letters, facets, cluster_sp_frac, counts_df, pass_dir, param_tag, rep_key, n_pcs_use, use_pca)
+        run_second_pass(adata, letters, facets, cluster_sp_frac, counts_df, target_dir, param_tag, rep_key, n_pcs_use, use_pca)
     max_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
     exec_time = time.time() - start_time
     date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
