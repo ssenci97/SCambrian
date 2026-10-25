@@ -33,7 +33,7 @@ for MODEL_DIR in "$REPS_DIR"/*/; do
     NPZ_FILES_STR=$(printf "%s\n" "${NPZ_ARRAY[@]}" | paste -sd, -)
 
     echo "[SLURM-INFO] --- Running Scanpy Joint Analysis ---"
-    python3 src/npz_scanpy.py --npzs "$NPZ_FILES_STR" --outdir "${OUT_DIR%/}/$MODEL" --yaml-in --yaml-out
+    python3 src/npz_scanpy.py --npzs "$NPZ_FILES_STR" --outdir "$OUT_DIR" --yaml-in --yaml-out
     N_RUNS=$((N_RUNS + 1))
 done
 
