@@ -64,7 +64,7 @@ pip install "numpy<2.3" pyyaml tqdm seaborn scikit-learn umap-learn scanpy annda
 ###################################### verify
 echo "[SLURM-INFO] Comprehensive verification..."
 python -c "
-import torch, esm, httpx, accelerate, flash_attn, numpy, numba, scanpy, umap, sklearn, igraph
+import torch, esm, httpx, accelerate, flash_attn, numpy, numba, scanpy, umap, sklearn, igraph, matplotlib_venn
 print(f'PyTorch Version : {torch.__version__}')
 print(f'CUDA Available  : {torch.cuda.is_available()} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"})')
 print(f'HTTPX Version   : {httpx.__version__}')
