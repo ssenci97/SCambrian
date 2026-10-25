@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Processes ESMC protein embeddings with joint clustering, clean top-module highlighted intra-species UMAP panels with collision-free labeling, and module extraction."""
+"""Processes ESMC protein embeddings with joint clustering, clean top-module highlighted intra-species UMAP panels with collision-free labeling, and module extraction.
+
+A first pass runs the full analysis; a second pass repeats it after removing the highly species-specific lettered joint clusters, and a third pass keeps only the lettered clusters of the first two passes, with cluster letters coherent across passes.
+"""
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
 import argparse
@@ -32,7 +35,7 @@ COLORMAP_INTRA = COLORMAP_SPEC
 DEFAULT_OUTDIR = "data/scanpy/"
 LEIDEN_RES = 1.0
 MAX_INTRA_LABELS = 10
-MAX_JOINT_LABELS = 10
+MAX_SPECIFIC_LABELS = 4
 MIN_MODULE_SIZE = 100
 PALETTE = ["#ECDE90", "#93DEB6", "#F1B584", "#76BBE2", "#DA919B", "#899E64", "#8E81B9", "#A66C58", "#30767A", "#7A5271"]
 MIN_PERCENT_ENRICHMENT = 80
@@ -44,6 +47,7 @@ PRIVATE_THRESHOLD = 0.95
 PT_SIZE = 1.0
 PT_SIZE_BG = PT_SIZE
 PT_SIZE_FG = PT_SIZE
+REMOVAL_SPECIFICITY = 0.75
 SEED = 42
 YAML_PATH = "configs/param_configs.yaml"
 ###################################### CONFIG_AND_PARSER
@@ -68,48 +72,61 @@ if args.yaml_out:
     ydata[script_key] = params
     Path(args.yaml_out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.yaml_out).write_text(yaml.dump(ydata, sort_keys=False))
-###################################### MAIN
-def main():
-    start_time = time.time()
-    npz_files = [p.strip() for p in args.npzs.split(",")]
-    if len(npz_files) < 2:
-        raise ValueError("[PYTHON-ERROR] This comparative script requires at least two .npz files.")
-    use_pca = args.n_pcs is not None and args.n_pcs > 0
-    param_tag = f"res{args.resolution}_nn{args.n_neighbors}" + (f"_npc{args.n_pcs}" if use_pca else "_full")
-    target_dir = Path(args.outdir) / "_".join([Path(f).stem for f in npz_files])
+###################################### HELPER_FUNCTIONS
+def assign_letters(counts_df, cluster_sp_frac, species_list, prev_letters=None, fill=True):
+    """Assign lowercase letters to the most species-specific joint clusters of each species.
+
+    Args:
+        counts_df (pd.DataFrame): Protein counts per cluster (rows) and species (columns).
+        cluster_sp_frac (pd.DataFrame): Species fraction per cluster (rows) and species (columns).
+        species_list (list[str]): Species to letter.
+        prev_letters (dict[str, dict[str, str]] | None): Letters from a previous pass; surviving clusters keep them and new clusters continue the sequence.
+        fill (bool): Whether free slots are filled with new letters after the inherited ones.
+
+    Returns:
+        dict[str, dict[str, str]]: Mapping species -> {cluster: letter}, at most MAX_SPECIFIC_LABELS clusters per species.
+    """
+    letters = {}
+    for sp in species_list:
+        cand = pd.DataFrame({"spec": cluster_sp_frac[sp], "count": counts_df[sp]})
+        cand = cand[cand["count"] >= MIN_MODULE_SIZE].sort_values(["spec", "count"], ascending=False)
+        prev = (prev_letters or {}).get(sp, {})
+        sp_letters = {cl: lt for cl, lt in prev.items() if cl in cand.index}
+        next_ord = ord(max(prev.values())) + 1 if prev else ord("a")
+        for cl in cand.index:
+            if not fill or len(sp_letters) >= MAX_SPECIFIC_LABELS: break
+            if cl in sp_letters: continue
+            sp_letters[cl] = chr(next_ord)
+            next_ord += 1
+        letters[sp] = dict(sorted(sp_letters.items(), key=lambda kv: kv[1]))
+    return letters
+def run_pass(adata, target_dir, param_tag, rep_key, n_pcs_use, use_pca, prev_letters=None, fill=True):
+    """Run joint clustering, species panel, module extraction, intra-group clustering and logging for one pass.
+
+    Args:
+        adata (ad.AnnData): Normalised embeddings; must carry a ``cluster`` column when ``prev_letters`` is given.
+        target_dir (Path): Output directory for this pass.
+        param_tag (str): Parameter tag appended to output file names.
+        rep_key (str): Representation used for neighbors (``X`` or ``X_pca``).
+        n_pcs_use (int | None): Number of PCs passed to neighbors.
+        use_pca (bool): Whether the PCA space is used for silhouette scores.
+        prev_letters (dict[str, dict[str, str]] | None): Letters from previous passes; when given, joint Leiden clusters are reused instead of recomputed.
+        fill (bool): Whether free letter slots are filled with new clusters.
+
+    Returns:
+        tuple[dict[str, dict[str, str]], set[str]]: Cluster letters per species and the lettered clusters exceeding REMOVAL_SPECIFICITY.
+    """
     target_dir.mkdir(parents=True, exist_ok=True)
     modules_dir = target_dir / "protein-modules"
     modules_dir.mkdir(parents=True, exist_ok=True)
     intra_dir = target_dir / "intra_group"
     intra_dir.mkdir(parents=True, exist_ok=True)
-    ###################################### LOAD_DATA
-    adatas = []
-    for f in tqdm(npz_files, desc="Loading embeddings"):
-        data = np.load(f)
-        k_emb = next(k for k in data.files if "embeddings" in k)
-        k_ids = next(k for k in data.files if "ids" in k)
-        species_name = Path(f).stem.replace("_reps", "")
-        obs_index = [f"{species_name}_{pid}" for pid in data[k_ids]]
-        adata = ad.AnnData(X=data[k_emb].astype(np.float32), obs=pd.DataFrame({"protein_id": data[k_ids], "species": species_name}, index=obs_index))
-        adatas.append(adata)
-    adata = ad.concat(adatas, join="outer")
-    adata.obs_names_make_unique()
-    print(f"[PYTHON-INFO][DATA-SHAPE] Initial data shape: {adata.shape}")
-    ###################################### PREPROCESSING
-    norms = np.linalg.norm(adata.X, axis=1, keepdims=True)
-    norms[norms == 0] = 1.0
-    adata.X = adata.X / norms
-    sc.settings.seed = SEED
-    if use_pca:
-        sc.tl.pca(adata, n_comps=args.n_pcs)
-        print(f"[PYTHON-INFO][DATA-SHAPE] Shape after PCA (n_pcs={args.n_pcs}): {adata.obsm['X_pca'].shape}")
-        rep_key, n_pcs_use = "X_pca", args.n_pcs
-    else:
-        print(f"[PYTHON-INFO][DATA-SHAPE] Operating in full-space dimensions: {adata.shape[1]}")
-        rep_key, n_pcs_use = "X", None
     ###################################### JOINT_CLUSTERING
     sc.pp.neighbors(adata, n_neighbors=args.n_neighbors, use_rep=rep_key, n_pcs=n_pcs_use, metric="cosine")
-    sc.tl.leiden(adata, resolution=args.resolution, key_added="cluster", flavor="igraph")
+    if prev_letters is None:
+        sc.tl.leiden(adata, resolution=args.resolution, key_added="cluster", flavor="igraph")
+    else:
+        adata.obs["cluster"] = adata.obs["cluster"].cat.remove_unused_categories()
     sc.tl.umap(adata)
     sil_space = adata.obsm["X_pca"] if use_pca else adata.X
     sil_score = silhouette_score(sil_space, adata.obs["cluster"], metric="cosine", random_state=SEED)
@@ -130,6 +147,9 @@ def main():
     species_list = list(adata.obs["species"].unique())
     umap_coords = adata.obsm["X_umap"]
     cluster_sp_frac = pd.crosstab(adata.obs["cluster"], adata.obs["species"], normalize="index")
+    counts_df = pd.crosstab(adata.obs["cluster"], adata.obs["species"])
+    letters = assign_letters(counts_df, cluster_sp_frac, species_list, prev_letters, fill)
+    removed = {cl for sp, sp_letters in letters.items() for cl in sp_letters if cluster_sp_frac.loc[cl, sp] > REMOVAL_SPECIFICITY} if prev_letters is None else set()
     n_sp = len(species_list)
     n_cols = min(n_sp, 4)
     n_rows = (n_sp + n_cols - 1) // n_cols
@@ -148,17 +168,15 @@ def main():
         fg_colors[:, 3] = ALPHA_MIN + (ALPHA_MAX - ALPHA_MIN) * fg_scores
         ax.scatter(umap_coords[sort_order, 0], umap_coords[sort_order, 1], c=fg_colors, s=PT_SIZE, rasterized=True, linewidths=0)
         sp_counts = adata.obs[adata.obs["species"] == sp]["cluster"].value_counts()
-        # Label the ten largest clusters for each species, independent of the private-cluster threshold.
-        sp_counts_top = sp_counts.sort_values(ascending=False).head(MAX_JOINT_LABELS)
-        sp_ranks = {cl: r + 1 for r, cl in enumerate(sp_counts_top.index)}
-        max_cnt_sp = sp_counts_top.max() if len(sp_counts_top) > 0 else 1
-        for cl in sp_counts_top.index:
+        # Label up to four most species-specific clusters with letters ('a' = most specific), coherent across passes.
+        max_cnt_sp = max((sp_counts[cl] for cl in letters[sp]), default=1)
+        for cl, letter in letters[sp].items():
             cnt = sp_counts[cl]
             cl_pts = umap_coords[(adata.obs["cluster"] == cl).values]
             if len(cl_pts) > 0:
                 cx, cy = cl_pts[:, 0].mean(), cl_pts[:, 1].mean()
                 f_size = float(np.clip(3.5 + 5.5 * (cnt / max_cnt_sp), 3.5, 9.0))
-                txt = ax.text(cx + 1.0, cy, str(sp_ranks[cl]), fontsize=f_size, ha="center", va="center", fontweight="bold", color="black")
+                txt = ax.text(cx + 1.0, cy, letter, fontsize=f_size, ha="center", va="center", fontweight="bold", color="black")
                 txt.set_path_effects([path_effects.withStroke(linewidth=1.5, foreground="white")])
         ax.set_title(f"{sp} (n={is_sp.sum():,})", fontsize=7, fontweight="bold", pad=2)
         ax.set_xlabel("UMAP 1", fontsize=6, labelpad=1)
@@ -176,8 +194,9 @@ def main():
     plt.savefig(target_dir / f"umap_species_panel__{param_tag}.png", dpi=PANEL_DPI, bbox_inches="tight")
     plt.close(fig)
     ###################################### JOINT_SAVE
+    letter_rows = [(sp, cl, lt, counts_df.loc[cl, sp], cluster_sp_frac.loc[cl, sp], cl in removed) for sp, sp_letters in letters.items() for cl, lt in sp_letters.items()]
+    pd.DataFrame(letter_rows, columns=["species", "cluster", "letter", "protein_count", "specificity", "removed_in_second_pass"]).to_csv(target_dir / f"cluster_letters__{param_tag}.csv", index=False)
     adata.obs[["protein_id", "species", "cluster"]].to_csv(target_dir / f"protein_clusters_metadata__{param_tag}.csv", index=False)
-    counts_df = pd.crosstab(adata.obs["cluster"], adata.obs["species"])
     enrichment = cluster_sp_frac * 100
     # One tidy table combines compatible count and enrichment outputs.
     enrichment_table = counts_df.stack().rename("protein_count").reset_index()
@@ -283,6 +302,62 @@ def main():
     adata.obs[["protein_id", "species", "cluster", "intra_cluster"]].to_csv(target_dir / f"protein_clusters_metadata__{param_tag}.csv", index=False)
     marker_frames = [joint_marker_df] + intra_marker_dfs
     pd.concat(marker_frames, ignore_index=True).to_csv(target_dir / f"channel_importance_rankings__{param_tag}.csv", index=False)
+    return letters, removed
+###################################### MAIN
+def main():
+    """Load embeddings, preprocess, and run the first, second and third analysis passes."""
+    start_time = time.time()
+    npz_files = [p.strip() for p in args.npzs.split(",")]
+    if len(npz_files) < 2:
+        raise ValueError("[PYTHON-ERROR] This comparative script requires at least two .npz files.")
+    use_pca = args.n_pcs is not None and args.n_pcs > 0
+    param_tag = f"res{args.resolution}_nn{args.n_neighbors}" + (f"_npc{args.n_pcs}" if use_pca else "_full")
+    target_dir = Path(args.outdir) / "_".join([Path(f).stem for f in npz_files])
+    target_dir.mkdir(parents=True, exist_ok=True)
+    ###################################### LOAD_DATA
+    adatas = []
+    for f in tqdm(npz_files, desc="Loading embeddings"):
+        data = np.load(f)
+        k_emb = next(k for k in data.files if "embeddings" in k)
+        k_ids = next(k for k in data.files if "ids" in k)
+        species_name = Path(f).stem.replace("_reps", "")
+        obs_index = [f"{species_name}_{pid}" for pid in data[k_ids]]
+        adata = ad.AnnData(X=data[k_emb].astype(np.float32), obs=pd.DataFrame({"protein_id": data[k_ids], "species": species_name}, index=obs_index))
+        adatas.append(adata)
+    adata = ad.concat(adatas, join="outer")
+    adata.obs_names_make_unique()
+    print(f"[PYTHON-INFO][DATA-SHAPE] Initial data shape: {adata.shape}")
+    ###################################### PREPROCESSING
+    norms = np.linalg.norm(adata.X, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    adata.X = adata.X / norms
+    sc.settings.seed = SEED
+    if use_pca:
+        sc.tl.pca(adata, n_comps=args.n_pcs)
+        print(f"[PYTHON-INFO][DATA-SHAPE] Shape after PCA (n_pcs={args.n_pcs}): {adata.obsm['X_pca'].shape}")
+        rep_key, n_pcs_use = "X_pca", args.n_pcs
+    else:
+        print(f"[PYTHON-INFO][DATA-SHAPE] Operating in full-space dimensions: {adata.shape[1]}")
+        rep_key, n_pcs_use = "X", None
+    ###################################### FIRST_PASS
+    letters, removed = run_pass(adata, target_dir / "first_pass", param_tag, rep_key, n_pcs_use, use_pca)
+    ###################################### SECOND_PASS
+    print(f"[PYTHON-INFO][SECOND-PASS] Removing clusters with specificity > {REMOVAL_SPECIFICITY}: {sorted(removed)}")
+    adata_2 = adata[~adata.obs["cluster"].isin(removed)].copy()
+    adata_2.obs = adata_2.obs.drop(columns="intra_cluster")
+    print(f"[PYTHON-INFO][DATA-SHAPE] Second-pass data shape: {adata_2.shape}")
+    letters_2, _ = run_pass(adata_2, target_dir / "second_pass", param_tag, rep_key, n_pcs_use, use_pca, prev_letters=letters)
+    ###################################### THIRD_PASS
+    letters_3 = {sp: {**letters.get(sp, {}), **letters_2.get(sp, {})} for sp in letters}
+    top_clusters = {cl for sp_letters in letters_3.values() for cl in sp_letters}
+    print(f"[PYTHON-INFO][THIRD-PASS] Keeping top clusters from first and second pass: {sorted(top_clusters)}")
+    if len(top_clusters) < 2:
+        print(f"[PYTHON-INFO][THIRD-PASS] Skipping: fewer than two top clusters ({len(top_clusters)})")
+    else:
+        adata_3 = adata[adata.obs["cluster"].isin(top_clusters)].copy()
+        adata_3.obs = adata_3.obs.drop(columns="intra_cluster")
+        print(f"[PYTHON-INFO][DATA-SHAPE] Third-pass data shape: {adata_3.shape}")
+        run_pass(adata_3, target_dir / "third_pass", param_tag, rep_key, n_pcs_use, use_pca, prev_letters=letters_3, fill=False)
     max_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
     exec_time = time.time() - start_time
     date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
