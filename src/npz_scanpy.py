@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Processes ESMC protein embeddings with joint clustering, intra-species clustering, intra-to-inter cluster flux diagrams and module extraction.
 
-Embeddings are L2-normalised before cosine kNN and Leiden clustering. The report panels, each A4/4 wide, are: (a) intra-species UMAPs with the MAX_INTRA_LABELS largest clusters coloured by protein count, (b) joint UMAPs coloured by cluster specificity index, labelling per species the MAX_JOINT_LABELS most specific joint clusters with more than MIN_JOINT_SIZE proteins of that species, drawn on top of the others and named by lowercase letters assigned once and shared by all panels, (c) a re-projected (not reclustered) UMAP of all proteins of those top joint clusters coloured by cluster, (d) intra-to-top-joint cluster fluxes on a square-root (semi-quantitative) scale, where intra clusters inherit a cluster colour only when a strict majority of their proteins flows into it, and (e) a per-species protein-count barplot of the top joint clusters. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
+Embeddings are L2-normalised before cosine kNN and Leiden clustering. The report panels, each A4/4 wide, are: (a) intra-species UMAPs with all clusters with more than MIN_INTRA_SIZE proteins coloured by protein count, (b) joint UMAPs coloured by cluster specificity index, labelling per species the MAX_JOINT_LABELS most specific joint clusters with more than MIN_JOINT_SIZE proteins of that species, drawn on top of the others and named by lowercase letters assigned once and shared by all panels, (c) a re-projected (not reclustered) UMAP of all proteins of those top joint clusters coloured by cluster, (d) intra-to-top-joint cluster fluxes on a square-root (semi-quantitative) scale, where intra clusters inherit a cluster colour only when a strict majority of their proteins flows into it, and (e) a per-species protein-count barplot of the top joint clusters. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -51,8 +51,8 @@ LEGEND_CHAR_INCHES = 0.08
 LEGEND_COL_INCHES = 0.4
 LEGEND_MARKER = 7
 LEIDEN_RES = 1.0
-MAX_INTRA_LABELS = 10
 MAX_JOINT_LABELS = 6
+MIN_INTRA_SIZE = 150
 MIN_JOINT_SIZE = 100
 MIN_MODULE_SIZE = 100
 MIN_PERCENT_ENRICHMENT = 80
@@ -403,7 +403,7 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
         counts_intra = adata_sp.obs["intra_cluster"].value_counts()
         counts_intra.index = counts_intra.index.astype(str)
         intra_cls = adata_sp.obs["intra_cluster"].astype(str).values
-        intra_panel_data.append((sp, mask.sum(), n_cl, coords, intra_cls, counts_intra.head(MAX_INTRA_LABELS)))
+        intra_panel_data.append((sp, mask.sum(), n_cl, coords, intra_cls, counts_intra[counts_intra > MIN_INTRA_SIZE]))
         for cl, cnt in counts_intra.items():
             if cnt >= MIN_MODULE_SIZE:
                 adata_sp.obs[adata_sp.obs["intra_cluster"] == cl]["protein_id"].to_csv(modules_dir / f"intra_{sp}_{cnt:07d}_clust{cl}_{param_tag}.txt", index=False, header=False)
@@ -419,7 +419,7 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
         intra_marker_dfs.append(marker_df_sp)
     n_intra = len(intra_panel_data)
     if n_intra > 0:
-        top_vals = [cnt for *_, top in intra_panel_data for cnt in top.values]
+        top_vals = [cnt for *_, top in intra_panel_data for cnt in top.values] or [0]
         norm_size = Normalize(min(top_vals), max(top_vals) if max(top_vals) > min(top_vals) else min(top_vals) + 1)
         fig, gs = row_figure(n_sp, "Intra-species")
         for idx, (sp, n_pts, n_cl, coords, intra_cls, top) in enumerate(intra_panel_data):
@@ -431,7 +431,7 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
                 ax.scatter(cl_pts[:, 0], cl_pts[:, 1], c=gradient_hex(cnt, norm_size), s=PT_SIZE, alpha=ALPHA_MAX, rasterized=True, linewidths=0, zorder=3)
                 txt = ax.text(np.median(cl_pts[:, 0]), np.median(cl_pts[:, 1]), str(c_idx + 1), fontsize=FONT_LABEL, ha="center", va="center", fontweight="bold", color="black", zorder=6)
                 txt.set_path_effects([path_effects.withStroke(linewidth=1.25, foreground="white")])
-            ax.set_title(f"{sp} (Top {MAX_INTRA_LABELS} Clusters, k={n_cl})", fontsize=FONT_FACET, fontweight="bold", pad=2)
+            ax.set_title(f"{sp} (n={n_pts:,})", fontsize=FONT_FACET, fontweight="bold", pad=2)
             ax.set_xlabel("UMAP 1", fontsize=FONT_LABEL, labelpad=1)
             ax.set_ylabel("UMAP 2", fontsize=FONT_LABEL, labelpad=1)
             ax.tick_params(labelsize=FONT_TICK)
