@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Processes ESMC protein embeddings with joint clustering, intra-species clustering, intra-to-inter cluster flux diagrams and module extraction.
 
-Embeddings are L2-normalised before cosine kNN and Leiden clustering. The report panels, each A4/4 wide, are: (a) intra-species UMAPs with all clusters with more than MIN_INTRA_SIZE proteins coloured by protein count, (b) joint UMAPs coloured by cluster specificity index, labelling per species the MAX_JOINT_LABELS most specific joint clusters with more than MIN_JOINT_SIZE proteins of that species, drawn on top of the others and named by lowercase letters assigned once and shared by all panels, (c) a re-projected (not reclustered) UMAP of all proteins of those top joint clusters coloured by cluster, (d) intra-to-top-joint cluster fluxes on a square-root (semi-quantitative) scale, where intra clusters inherit a cluster colour only when a strict majority of their proteins flows into it, and (e) a per-species protein-count barplot of the top joint clusters. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
+Embeddings are L2-normalised before cosine kNN and Leiden clustering. The report panels, each A4/4 wide, are: (a) intra-species UMAPs with all clusters with more than MIN_INTRA_SIZE proteins coloured by protein count, (b) joint UMAPs coloured by cluster specificity index, labelling per species the MAX_JOINT_LABELS most specific joint clusters with more than MIN_JOINT_SIZE proteins of that species, drawn on top of the others and named by lowercase letters assigned once and shared by all panels, (c) a re-projected (not reclustered) UMAP of all proteins of those top joint clusters coloured by cluster, (d) intra-to-top-joint cluster fluxes on a square-root (semi-quantitative) scale, with joint cluster nodes and flows coloured by specificity index and outlined in black above MIN_PERCENT_ENRICHMENT, where intra clusters inherit a cluster colour only when a strict majority of their proteins flows into it, and (e) a per-species protein-count barplot of the top joint clusters. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -38,6 +38,7 @@ COLORMAP_SPEC = LinearSegmentedColormap.from_list("scambrian", ["#76BBE2", "#7b2
 DEFAULT_OUTDIR = "data/scanpy/"
 FIG_EXTRA_HEIGHT = 1.0
 FLUX_ALPHA = 0.6
+FLUX_BORDER_WIDTH = 1.2
 FLUX_FONT_SCALE = 1.5
 FLUX_GAP_TOTAL = 0.15
 FLUX_MIN_NODE = 0.02
@@ -52,6 +53,7 @@ LEGEND_COL_INCHES = 0.4
 LEGEND_MARKER = 7
 LEIDEN_RES = 1.0
 MAX_JOINT_LABELS = 6
+METRIC = "cosine"
 MIN_INTRA_SIZE = 150
 MIN_JOINT_SIZE = 100
 MIN_MODULE_SIZE = 100
@@ -259,7 +261,7 @@ def draw_flux(ax: plt.Axes, flows: pd.DataFrame, left_colors: dict[str, str], ri
     t = (1 - np.cos(np.pi * (xs - xs[0]) / (xs[-1] - xs[0]))) / 2
     for side, heights, offs, x0, cols, labs in (("l", l_h, l_off, 0.0, left_colors, left_labels), ("r", r_h, r_off, 1 - FLUX_NODE_WIDTH, right_colors, right_labels)):
         for lab, h in heights.items():
-            ax.fill_betweenx([offs[lab], offs[lab] + h], x0, x0 + FLUX_NODE_WIDTH, facecolor=cols[lab], edgecolor="black" if side == "r" and lab in outlined else "none", lw=0.6)
+            ax.fill_betweenx([offs[lab], offs[lab] + h], x0, x0 + FLUX_NODE_WIDTH, facecolor=cols[lab], edgecolor="black" if side == "r" and lab in outlined else "none", lw=FLUX_BORDER_WIDTH)
             if lab in labs: ax.text(-0.02 if side == "l" else 1.02, offs[lab] + h / 2, labs[lab], fontsize=FONT_LABEL * FLUX_FONT_SCALE, fontweight="bold", ha="right" if side == "l" else "left", va="center")
     l_cur, r_cur = l_off.copy(), r_off.copy()
     for (i, j), v in flows.stack().items():
@@ -330,10 +332,10 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
     intra_dir = target_dir / "intra_group"
     intra_dir.mkdir(parents=True, exist_ok=True)
     ###################################### JOINT_CLUSTERING
-    sc.pp.neighbors(adata, n_neighbors=args.n_neighbors, use_rep=rep_key, n_pcs=n_pcs_use, metric="cosine")
+    sc.pp.neighbors(adata, n_neighbors=args.n_neighbors, use_rep=rep_key, n_pcs=n_pcs_use, metric=METRIC)
     sc.tl.leiden(adata, resolution=args.resolution, key_added="cluster", flavor="igraph")
     sc.tl.umap(adata)
-    sil_score = silhouette_score(adata.obsm["X_pca"] if use_pca else adata.X, adata.obs["cluster"], metric="cosine", random_state=SEED)
+    sil_score = silhouette_score(adata.obsm["X_pca"] if use_pca else adata.X, adata.obs["cluster"], metric=METRIC, random_state=SEED)
     print(f"[PYTHON-INFO][METRIC] Joint Silhouette Score ({'PCA' if use_pca else 'Full'} space): {sil_score:.4f}")
     with open(target_dir / f"clustering_metrics__{param_tag}.txt", "w") as f:
         f.write(f"joint_silhouette_score_{'pca' if use_pca else 'full'}: {sil_score}\n")
@@ -391,10 +393,10 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
             print(f"[PYTHON-INFO][INTRA] Skipping {sp}: too few points ({mask.sum()})")
             continue
         adata_sp = adata[mask].copy()
-        sc.pp.neighbors(adata_sp, n_neighbors=min(args.n_neighbors, mask.sum() - 1), use_rep=rep_key, n_pcs=n_pcs_use, metric="cosine")
+        sc.pp.neighbors(adata_sp, n_neighbors=min(args.n_neighbors, mask.sum() - 1), use_rep=rep_key, n_pcs=n_pcs_use, metric=METRIC)
         sc.tl.leiden(adata_sp, resolution=args.resolution, key_added="intra_cluster", flavor="igraph")
         sc.tl.umap(adata_sp)
-        sil_sp = silhouette_score(adata_sp.obsm["X_pca"] if use_pca else adata_sp.X, adata_sp.obs["intra_cluster"], metric="cosine", random_state=SEED)
+        sil_sp = silhouette_score(adata_sp.obsm["X_pca"] if use_pca else adata_sp.X, adata_sp.obs["intra_cluster"], metric=METRIC, random_state=SEED)
         print(f"[PYTHON-INFO][METRIC] Intra Silhouette ({sp}): {sil_sp:.4f}")
         intra_metrics.append(f"intra_silhouette_{sp}: {sil_sp}")
         adata.obs.loc[mask, "intra_cluster"] = adata_sp.obs["intra_cluster"].astype(str).values
@@ -441,7 +443,8 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
         plt.close(fig)
     ###################################### INTRA_INTER_FLUX
     if n_intra > 0:
-        fig, gs = row_figure(n_sp, "Intra- to Inter-species cluster fluxes", SANKEY_HEIGHT_SCALE, strip=False, font_scale=FLUX_FONT_SCALE)
+        fig, gs = row_figure(n_sp, "Intra- to Inter-species cluster fluxes", SANKEY_HEIGHT_SCALE, font_scale=FLUX_FONT_SCALE)
+        norm_spec, spec_cut = Normalize(0, 1), MIN_PERCENT_ENRICHMENT / 100
         for idx, (sp, n_pts, n_cl, coords, intra_cls, top) in enumerate(intra_panel_data):
             ax = fig.add_subplot(gs[0, idx])
             obs_sp = adata.obs[adata.obs["species"] == sp]
@@ -457,10 +460,12 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
             l_order = [cl for cl in top.index if cl in flows.index] + flows.sum(axis=1).drop(list(top.index), errors="ignore").sort_values(ascending=False).index.tolist()
             flows = flows.loc[l_order]
             best = flows.idxmax(axis=1)
-            left_colors = {cl: colors[best[cl]] if flows.loc[cl, best[cl]] > full.loc[cl].sum() / 2 else COLOR_BG for cl in l_order}
+            spec = cluster_sp_frac[sp]
+            right_colors = {cl: gradient_hex(spec[cl], norm_spec) for cl in ranked}
+            left_colors = {cl: right_colors[best[cl]] if flows.loc[cl, best[cl]] > full.loc[cl].sum() / 2 else COLOR_BG for cl in l_order}
             rank = {cl: str(c_idx + 1) for c_idx, cl in enumerate(top.index) if cl in flows.index}
-            draw_flux(ax, flows, left_colors, {cl: colors[cl] for cl in ranked}, rank, {cl: f"{facets[sp][cl]} ({counts_df.loc[cl, sp]:,})" for cl in ranked}, set(), title)
-        add_bottom_legend(fig, {letters[cl]: c for cl, c in colors.items()}, "Joint cluster", font_scale=FLUX_FONT_SCALE)
+            draw_flux(ax, flows, left_colors, right_colors, rank, {cl: f"{facets[sp][cl]} ({counts_df.loc[cl, sp]:,})" for cl in ranked}, {cl for cl in ranked if spec[cl] >= spec_cut}, title)
+        add_colorbar(fig.add_subplot(gs[-1, :]), norm_spec, f"{CBAR_LABEL}; black border: $S_{{i}} \\geq$ {spec_cut:.2f}")
         save_fig(fig, target_dir / f"sankey_intra_to_inter_clusters__{param_tag}.png")
         plt.close(fig)
     ###################################### LOGGING
@@ -490,7 +495,7 @@ def run_second_pass(adata: ad.AnnData, facets: dict[str, dict[str, str]], colors
     adata_2.obs["cluster"] = adata_2.obs["cluster"].cat.remove_unused_categories()
     print(f"[PYTHON-INFO][DATA-SHAPE] Second-pass data shape: {adata_2.shape}")
     ###################################### SECOND_PASS_PROJECTION
-    sc.pp.neighbors(adata_2, n_neighbors=min(args.n_neighbors, adata_2.n_obs - 1), use_rep=rep_key, n_pcs=n_pcs_use, metric="cosine")
+    sc.pp.neighbors(adata_2, n_neighbors=min(args.n_neighbors, adata_2.n_obs - 1), use_rep=rep_key, n_pcs=n_pcs_use, metric=METRIC)
     sc.tl.umap(adata_2)
     ###################################### SECOND_PASS_PANEL
     obs, coords = adata_2.obs, adata_2.obsm["X_umap"]
