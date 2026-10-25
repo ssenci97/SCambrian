@@ -15,7 +15,7 @@ npz_scanpy:
   seed: 42
   resolution: 1.0
   n_neighbors: 15
-  min_module_size: 100
+  min_module_size: 200
   min_percent_enrichment: 80
   outdir: data/scanpy/
 npz_tsne:

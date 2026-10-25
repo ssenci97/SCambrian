@@ -141,12 +141,18 @@ sbatch slurms/05_scanpy.sh
 Output: `data/scanpy/ESMC-6B/.../`
 
 ```
-protein_clusters_metadata.csv
-species_cluster_enrichment_*.csv
-channel_importance_rankings.csv
-umap_species_panel.png
+<species-set>_scanpy.pdf                                       # merged PDF report
+umap_joint_clusters_species_specificity__<model>__<params>.png
+umap_reclustered_species_specific_clusters__<model>__<params>.png
+barplot_species_specific_clusters_protein_counts__<model>__<params>.png
+barplot_umap_labelled_clusters_protein_counts__<model>__<params>.png
+species_specific_cluster_letters__<model>__<params>.csv
+protein_clusters_metadata__<model>__<params>.csv
+species_cluster_enrichment__<model>__<params>.csv
+channel_importance_rankings__<model>__<params>.csv
+clustering_metrics__<model>__<params>.txt
+intra_group/umap_intra_species_top_clusters__<model>__<params>.png
 protein-modules/
-clustering_metrics.txt
 ```
 
 ## Directory layout

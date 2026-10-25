@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Processes ESMC protein embeddings with joint clustering, globally lettered species-specificity UMAP panels, intra-species clustering and module extraction.
 
-A first pass runs the full analysis and assigns unique letters to the most species-specific joint clusters; a second pass recomputes neighbors, Leiden and UMAP on the lettered clusters only, plots their UMAP facets and per-species protein-count barplots of all lettered clusters (UMAP-shown ones outlined in black) and of the UMAP-shown clusters only. All figures are saved as PNG and PDF.
+A first pass runs the full analysis and assigns unique letters to the most species-specific joint clusters; a second pass recomputes neighbors, Leiden and UMAP on the lettered clusters only, plots their UMAP facets and per-species protein-count barplots of all lettered clusters (UMAP-shown ones outlined in black) and of the UMAP-shown clusters only. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from pypdf import PdfWriter
 import resource
 import scanpy as sc
 from sklearn.metrics import silhouette_score
@@ -34,7 +35,7 @@ LEIDEN_RES = 1.0
 MAX_INTRA_LABELS = 10
 MAX_LETTERED = 8
 MAX_SPECIFIC_LABELS = 4
-MIN_MODULE_SIZE = 100
+MIN_MODULE_SIZE = 200
 PALETTE = ["#ECDE90", "#93DEB6", "#F1B584", "#76BBE2", "#DA919B", "#899E64", "#8E81B9", "#A66C58", "#30767A", "#7A5271"]
 MIN_PERCENT_ENRICHMENT = 80
 N_NEIGHBORS = 15
@@ -42,6 +43,7 @@ N_PCS = None
 PANEL_DPI = 300
 PANEL_SIZE_INCHES = 3.0
 PT_SIZE = 1.0
+REPORT_ORDER = ["umap_joint_clusters_species_specificity", "umap_intra_species_top_clusters", "umap_reclustered_species_specific_clusters", "barplot_species_specific_clusters_protein_counts", "barplot_umap_labelled_clusters_protein_counts"]
 SEED = 42
 YAML_PATH = "configs/param_configs.yaml"
 ###################################### CONFIG_AND_PARSER
@@ -182,27 +184,39 @@ def plot_counts_bar(lt_counts: pd.DataFrame, letters: dict[str, str], shown: set
     n_sp = len(species_list)
     x, width = np.arange(len(lt_counts)), 0.8 / n_sp
     edges = ["black" if cl in shown else "none" for cl in lt_counts.index]
-    fig, ax = plt.subplots(figsize=(PANEL_SIZE_INCHES * n_sp, PANEL_SIZE_INCHES), dpi=PANEL_DPI)
+    fig, ax = plt.subplots(figsize=(max(PANEL_SIZE_INCHES, 0.35 * len(lt_counts) + 1.2), PANEL_SIZE_INCHES), dpi=PANEL_DPI)
     for i, sp in enumerate(species_list):
-        ax.bar(x - 0.4 + width * (i + 0.5), lt_counts[sp].values, width=width, color=PALETTE[i % len(PALETTE)], label=sp, edgecolor=edges, linewidth=0.4)
+        ax.bar(x - 0.4 + width * (i + 0.5), lt_counts[sp].values, width=width, color=PALETTE[i % len(PALETTE)], label=sp, edgecolor=edges, linewidth=0.6)
     ax.set_xticks(x)
-    ax.set_xticklabels([letters[cl] for cl in lt_counts.index], fontsize=5)
-    ax.tick_params(axis="y", labelsize=5)
+    ax.set_xticklabels([letters[cl] for cl in lt_counts.index], fontsize=8)
+    ax.tick_params(axis="y", labelsize=8)
     ax.set_xlim(-0.6, len(lt_counts) - 0.4)
-    ax.set_xlabel("Lettered cluster", fontsize=6, labelpad=1)
-    ax.set_ylabel("Proteins", fontsize=6, labelpad=1)
-    ax.set_title(title, fontsize=7, fontweight="bold", pad=2)
-    ax.legend(fontsize=5, frameon=False)
+    ax.set_xlabel("Species-specific cluster", fontsize=9, labelpad=2)
+    ax.set_ylabel("Proteins", fontsize=9, labelpad=2)
+    ax.set_title(title, fontsize=10, fontweight="bold", pad=4)
+    ax.legend(fontsize=8, frameon=False, bbox_to_anchor=(1.0, 1.0), loc="upper left")
     ax.spines[["top", "right"]].set_visible(False)
     save_fig(fig, path)
     plt.close(fig)
+def merge_pdfs(pdfs: list[Path], out: Path) -> None:
+    """Merge PDF files into a single report.
+
+    Args:
+        pdfs (list[Path]): PDF files in merge order.
+        out (Path): Output report path.
+    """
+    writer = PdfWriter()
+    for pdf in pdfs:
+        writer.append(pdf)
+    with open(out, "wb") as f:
+        writer.write(f)
 def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, n_pcs_use: int | None, use_pca: bool) -> tuple[dict[str, str], dict[str, dict[str, str]], pd.DataFrame, pd.DataFrame]:
     """Run joint clustering, lettered species panel, module extraction, intra-group clustering and logging.
 
     Args:
         adata (ad.AnnData): Normalised embeddings.
         target_dir (Path): Output directory for this pass.
-        param_tag (str): Parameter tag appended to output file names.
+        param_tag (str): Model and parameter tag appended to output file names.
         rep_key (str): Representation used for neighbors (``X`` or ``X_pca``).
         n_pcs_use (int | None): Number of PCs passed to neighbors.
         use_pca (bool): Whether the PCA space is used for silhouette scores.
@@ -253,11 +267,11 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
     for idx in range(n_sp, len(axes)):
         fig.delaxes(axes[idx])
     add_spec_cbar(fig, fig.add_subplot(gs[-1, :]))
-    save_fig(fig, target_dir / f"umap_species_panel__{param_tag}.png")
+    save_fig(fig, target_dir / f"umap_joint_clusters_species_specificity__{param_tag}.png")
     plt.close(fig)
     ###################################### JOINT_SAVE
     letter_rows = [(sp, cl, lt, counts_df.loc[cl, sp], cluster_sp_frac.loc[cl, sp]) for sp, sp_letters in facets.items() for cl, lt in sp_letters.items()]
-    pd.DataFrame(letter_rows, columns=["species", "cluster", "letter", "protein_count", "specificity"]).to_csv(target_dir / f"cluster_letters__{param_tag}.csv", index=False)
+    pd.DataFrame(letter_rows, columns=["species", "cluster", "letter", "protein_count", "specificity"]).to_csv(target_dir / f"species_specific_cluster_letters__{param_tag}.csv", index=False)
     adata.obs[["protein_id", "species", "cluster"]].to_csv(target_dir / f"protein_clusters_metadata__{param_tag}.csv", index=False)
     enrichment = cluster_sp_frac * 100
     enrichment_table = counts_df.stack().rename("protein_count").reset_index()
@@ -348,7 +362,7 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
         cbar_intra = fig.colorbar(sm_intra, ax=list(axes[:n_intra]), orientation="horizontal", fraction=0.035, pad=0.08, aspect=35)
         cbar_intra.set_label("Proteins per highlighted cluster", fontsize=6)
         cbar_intra.ax.tick_params(labelsize=5)
-        save_fig(fig, intra_dir / f"umap_intra_species_panel__{param_tag}.png")
+        save_fig(fig, intra_dir / f"umap_intra_species_top_clusters__{param_tag}.png")
         plt.close(fig)
     ###################################### LOGGING
     with open(target_dir / f"clustering_metrics__{param_tag}.txt", "a") as f:
@@ -368,7 +382,7 @@ def run_second_pass(adata: ad.AnnData, letters: dict[str, str], facets: dict[str
         cluster_sp_frac (pd.DataFrame): First-pass species fraction per cluster.
         counts_df (pd.DataFrame): First-pass protein counts per cluster and species.
         target_dir (Path): Output directory for this pass.
-        param_tag (str): Parameter tag appended to output file names.
+        param_tag (str): Model and parameter tag appended to output file names.
         rep_key (str): Representation used for neighbors (``X`` or ``X_pca``).
         n_pcs_use (int | None): Number of PCs passed to neighbors.
         use_pca (bool): Whether the PCA space is used for silhouette scores.
@@ -394,14 +408,14 @@ def run_second_pass(adata: ad.AnnData, letters: dict[str, str], facets: dict[str
     for idx, sp in enumerate(species_list):
         draw_facet(fig.add_subplot(gs[0, idx]), coords, obs, "cluster_p1", sp, cluster_sp_frac[sp], facets[sp], counts_df[sp])
     add_spec_cbar(fig, fig.add_subplot(gs[-1, :]))
-    save_fig(fig, target_dir / f"umap_lettered_panel__{param_tag}.png")
+    save_fig(fig, target_dir / f"umap_reclustered_species_specific_clusters__{param_tag}.png")
     plt.close(fig)
     ###################################### LETTERED_COUNTS_BARPLOT
     lt_counts = counts_df.loc[list(letters), species_list]
     lt_counts = lt_counts.loc[lt_counts.sum(axis=1).sort_values(ascending=False).index]
     shown = {cl for sp_letters in facets.values() for cl in sp_letters}
-    plot_counts_bar(lt_counts, letters, shown, species_list, "Proteins per species in lettered clusters", target_dir / f"lettered_species_counts__{param_tag}.png")
-    plot_counts_bar(lt_counts.loc[[cl for cl in lt_counts.index if cl in shown]], letters, shown, species_list, "Proteins per species in UMAP-shown clusters", target_dir / f"shown_species_counts__{param_tag}.png")
+    plot_counts_bar(lt_counts, letters, shown, species_list, "Proteins per species in lettered clusters", target_dir / f"barplot_species_specific_clusters_protein_counts__{param_tag}.png")
+    plot_counts_bar(lt_counts.loc[[cl for cl in lt_counts.index if cl in shown]], letters, shown, species_list, "Proteins per species in UMAP-shown clusters", target_dir / f"barplot_umap_labelled_clusters_protein_counts__{param_tag}.png")
 ###################################### MAIN
 def main() -> None:
     """Load embeddings, preprocess, and run the first and second analysis passes."""
@@ -410,7 +424,7 @@ def main() -> None:
     if len(npz_files) < 2:
         raise ValueError("[PYTHON-ERROR] This comparative script requires at least two .npz files.")
     use_pca = args.n_pcs is not None and args.n_pcs > 0
-    param_tag = f"res{args.resolution}_nn{args.n_neighbors}" + (f"_npc{args.n_pcs}" if use_pca else "_full")
+    param_tag = f"{Path(npz_files[0]).parent.name}__res{args.resolution}_nn{args.n_neighbors}" + (f"_npc{args.n_pcs}" if use_pca else "_full")
     target_dir = Path(args.outdir) / "_".join([Path(f).stem.replace("_reps", "") for f in npz_files])
     target_dir.mkdir(parents=True, exist_ok=True)
     ###################################### LOAD_DATA
@@ -445,6 +459,11 @@ def main() -> None:
         print(f"[PYTHON-INFO][SECOND-PASS] Skipping: fewer than two lettered clusters ({len(letters)})")
     else:
         run_second_pass(adata, letters, facets, cluster_sp_frac, counts_df, target_dir, param_tag, rep_key, n_pcs_use, use_pca)
+    ###################################### PDF_REPORT
+    report = target_dir / f"{target_dir.name}_scanpy.pdf"
+    pdfs = sorted((p for p in target_dir.rglob(f"*__{param_tag}.pdf") if p != report), key=lambda p: next((i for i, s in enumerate(REPORT_ORDER) if p.stem.startswith(s)), len(REPORT_ORDER)))
+    merge_pdfs(pdfs, report)
+    print(f"[PYTHON-INFO][REPORT] Merged {len(pdfs)} PDFs into {report}")
     max_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
     exec_time = time.time() - start_time
     date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
