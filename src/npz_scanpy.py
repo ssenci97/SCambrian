@@ -5,6 +5,7 @@ import anndata as ad
 import argparse
 import datetime
 import json
+from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.patheffects as path_effects
 import matplotlib.pyplot as plt
 import numpy as np
@@ -26,13 +27,14 @@ ALPHA_MAX = 0.95
 ALPHA_MIN = 0.55
 CBAR_LABEL = "Cluster Specificity Index ($S_{i}$)"
 COLOR_BG = "#BFC5CE"
-COLORMAP_SPEC = sns.color_palette("plasma", as_cmap=True)
-COLORMAP_INTRA = sns.color_palette("magma", as_cmap=True)
+COLORMAP_SPEC = LinearSegmentedColormap.from_list("scambrian", ["#76BBE2", "#7b2c6d"])
+COLORMAP_INTRA = COLORMAP_SPEC
 DEFAULT_OUTDIR = "data/scanpy/"
 LEIDEN_RES = 1.0
 MAX_INTRA_LABELS = 10
 MAX_JOINT_LABELS = 10
 MIN_MODULE_SIZE = 100
+PALETTE = ["#ECDE90", "#93DEB6", "#F1B584", "#76BBE2", "#DA919B", "#899E64", "#8E81B9", "#A66C58", "#30767A", "#7A5271"]
 MIN_PERCENT_ENRICHMENT = 80
 N_NEIGHBORS = 15
 N_PCS = None
