@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Processes ESMC protein embeddings with joint clustering, globally lettered species-specificity UMAP panels, intra-species clustering, intra-to-inter cluster flux diagrams and module extraction.
+"""Processes ESMC protein embeddings with joint clustering, globally lettered species-specificity UMAP panels, intra-species clustering, intra-to-inter cluster flux diagrams onto all lettered clusters (UMAP-shown ones outlined in black) and module extraction.
 
 A first pass runs the full analysis and assigns unique letters to the most species-specific joint clusters; a second pass recomputes neighbors, Leiden and UMAP on the lettered clusters only, plots their UMAP facets and per-species protein-count barplots of all lettered clusters (UMAP-shown ones outlined in black) and of the UMAP-shown clusters only. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
 """
@@ -200,13 +200,14 @@ def add_spec_cbar(fig: plt.Figure, cax: plt.Axes) -> None:
     cbar = fig.colorbar(sm, cax=cax, orientation="horizontal")
     cbar.set_label(CBAR_LABEL, fontsize=FONT_LABEL)
     cbar.ax.tick_params(labelsize=FONT_TICK)
-def draw_flux(ax: plt.Axes, flows: pd.DataFrame, right_colors: dict[str, tuple], title: str) -> None:
+def draw_flux(ax: plt.Axes, flows: pd.DataFrame, right_colors: dict[str, tuple], outlined: set[str], title: str) -> None:
     """Draw an alluvial diagram of protein fluxes from intra-species clusters (left) to inter-species clusters (right).
 
     Args:
         ax (plt.Axes): Target axes.
         flows (pd.DataFrame): Protein counts with intra-cluster ranks as rows and inter-cluster labels as columns, in plotting order.
         right_colors (dict[str, tuple]): Colour of each inter-cluster node.
+        outlined (set[str]): Inter-cluster labels drawn with a thin black border.
         title (str): Axes title.
     """
     gap = FLUX_GAP * flows.values.sum()
@@ -218,7 +219,7 @@ def draw_flux(ax: plt.Axes, flows: pd.DataFrame, right_colors: dict[str, tuple],
     for side, sizes, offs, x0 in (("l", l_sz, l_off, 0.0), ("r", r_sz, r_off, 1 - FLUX_NODE_WIDTH)):
         for lab, h in sizes.items():
             color = PALETTE[int(lab) - 1] if side == "l" else right_colors[lab]
-            ax.fill_betweenx([offs[lab], offs[lab] + h], x0, x0 + FLUX_NODE_WIDTH, color=color, lw=0)
+            ax.fill_betweenx([offs[lab], offs[lab] + h], x0, x0 + FLUX_NODE_WIDTH, facecolor=color, edgecolor="black" if side == "r" and lab in outlined else "none", lw=0.6)
             ax.text(-0.02 if side == "l" else 1.02, offs[lab] + h / 2, lab, fontsize=FONT_LABEL, fontweight="bold", ha="right" if side == "l" else "left", va="center")
     l_cur, r_cur = l_off.copy(), r_off.copy()
     for i in flows.index:
@@ -410,12 +411,12 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
         for idx, (sp, n_pts, n_cl, coords, intra_cls, top_cls, counts_intra) in enumerate(intra_panel_data):
             obs_sp = adata.obs[(adata.obs["species"] == sp) & adata.obs["intra_cluster"].isin(top_cls)]
             rank = {cl: str(c_idx + 1) for c_idx, cl in enumerate(top_cls)}
-            inter = obs_sp["cluster"].map(facets[sp]).fillna("other")
-            cols = list(facets[sp].values()) + ["other"]
+            inter = obs_sp["cluster"].map(letters).fillna("other")
+            cols = list(letters.values()) + ["other"]
             flows = pd.crosstab(obs_sp["intra_cluster"].map(rank), inter).reindex(index=list(rank.values()), columns=cols, fill_value=0)
             flows = flows.loc[flows.sum(axis=1) > 0, flows.sum(axis=0) > 0]
-            right_colors = {lt: COLORMAP_SPEC(cluster_sp_frac.loc[cl, sp]) for cl, lt in facets[sp].items()} | {"other": COLOR_BG}
-            draw_flux(fig.add_subplot(gs[0, idx]), flows, right_colors, f"{sp} (n={len(obs_sp):,})")
+            right_colors = {lt: COLORMAP_SPEC(cluster_sp_frac.loc[cl, sp]) for cl, lt in letters.items()} | {"other": COLOR_BG}
+            draw_flux(fig.add_subplot(gs[0, idx]), flows, right_colors, set(facets[sp].values()), f"{sp} (n={len(obs_sp):,})")
         add_spec_cbar(fig, fig.add_subplot(gs[-1, :]))
         save_fig(fig, target_dir / f"sankey_intra_to_inter_clusters__{param_tag}.png")
         plt.close(fig)
