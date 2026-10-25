@@ -12,9 +12,11 @@
 ###################################### conda
 source ~/scratch/miniconda/etc/profile.d/conda.sh
 conda activate ./.env
+[ -f configs/param_configs.yaml ] || { echo "[SLURM-INFO] Error: configs/param_configs.yaml not found in $(pwd). Submit from the repo root." >&2; exit 1; }
 
 # Fetch reps base directory (one subdirectory per model) and dimred output directory from YAML config
 REPS_DIR=$(python3 -c "import yaml; print(yaml.safe_load(open('configs/param_configs.yaml'))['extract_reps_biohub']['reps_outdir'])")
+[ -n "$REPS_DIR" ] && [ "$REPS_DIR" != "/" ] && [ -d "$REPS_DIR" ] || { echo "[SLURM-INFO] Error: invalid REPS_DIR '$REPS_DIR'." >&2; exit 1; }
 OUT_DIR=$(python3 -c "import yaml; print(yaml.safe_load(open('configs/param_configs.yaml')).get('npz_tsne', {}).get('output_dir', 'data/dimred'))")
 
 # Read n_components dynamically from YAML (adjust the config key path if necessary)
@@ -26,7 +28,7 @@ N_MODELS=0
 for MODEL_DIR in "$REPS_DIR"/*/; do
     [ -d "$MODEL_DIR" ] || continue
     MODEL=$(basename "$MODEL_DIR")
-    mapfile -t NPZ_ARRAY < <(find "$MODEL_DIR" -name "*_reps.npz" | sort)
+    mapfile -t NPZ_ARRAY < <(find "$MODEL_DIR" -maxdepth 1 -name "*_reps.npz" | sort)
     [ ${#NPZ_ARRAY[@]} -eq 0 ] && continue
     N_MODELS=$((N_MODELS + 1))
     echo "[SLURM-INFO] ##### MODEL: $MODEL (${#NPZ_ARRAY[@]} files) #####"
