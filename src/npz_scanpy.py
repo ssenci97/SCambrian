@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Processes ESMC protein embeddings with intra-species clustering, joint clustering, species-specific cluster lettering, intra-to-inter cluster flux diagrams and module extraction.
 
-Joint and intra-species clusters are found with HDBSCAN on the UMAP coordinates (minimum size --min_cluster_size), and noise points (label NOISE_LABEL) are never lettered, ranked or extracted as modules. Lettered clusters are joint clusters with at least MIN_CLUSTER_SIZE proteins, ranked by size and specificity index with equal weight, and kept when one species exceeds MIN_PERCENT_SPECIFICITY (at least one is always kept). The report panels, each A4/4 wide, are: (a) intra-species UMAPs with the top MAX_INTRA_LABELS clusters above MIN_CLUSTER_SIZE, ranked by protein count and UMAP density together, coloured by protein count, (b) joint UMAPs with the lettered clusters in the facet of their majority species, coloured by specificity index, (c) a re-projected (not reclustered) UMAP of all proteins of the lettered clusters coloured by letter, (d) intra-to-lettered cluster fluxes on a square-root (semi-quantitative) scale, where intra clusters inherit a letter colour only when a strict majority of their proteins flows into it, and (e) a per-species protein-count barplot of the lettered clusters. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
+Lettered clusters are joint Leiden clusters with more than MIN_CLUSTER_SIZE proteins, ranked by size and specificity index with equal weight, and kept when one species exceeds MIN_PERCENT_SPECIFICITY; when none passes, the top FALLBACK_TOP_N candidates are lettered regardless of specificity. The report panels, each A4/4 wide, are: (a) intra-species UMAPs with the top MAX_INTRA_LABELS clusters above MIN_CLUSTER_SIZE, ranked by protein count and UMAP density together, coloured by protein count, (b) joint UMAPs with the lettered clusters in the facet of their majority species, coloured by specificity index, (c) a re-projected (not reclustered) UMAP of all proteins of the lettered clusters coloured by letter, (d) intra-to-lettered cluster fluxes on a square-root (semi-quantitative) scale, where intra clusters inherit a letter colour only when a strict majority of their proteins flows into it, and (e) a per-species protein-count barplot of the lettered clusters. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -19,7 +19,6 @@ from pathlib import Path
 import pymupdf
 import resource
 import scanpy as sc
-from sklearn.cluster import HDBSCAN
 from sklearn.metrics import silhouette_score
 import time
 from tqdm import tqdm
@@ -34,6 +33,7 @@ COLOR_BG = "#BFC5CE"
 COLOR_FG = "#8A929E"
 COLORMAP_SPEC = LinearSegmentedColormap.from_list("scambrian", ["#76BBE2", "#7b2c6d"])
 DEFAULT_OUTDIR = "data/scanpy/"
+FALLBACK_TOP_N = 5
 FIG_EXTRA_HEIGHT = 1.0
 FLUX_ALPHA = 0.6
 FLUX_FONT_SCALE = 1.5
@@ -48,15 +48,15 @@ FONT_TITLE = 14
 LEGEND_CHAR_INCHES = 0.08
 LEGEND_COL_INCHES = 0.4
 LEGEND_MARKER = 7
+LEIDEN_RES = 1.0
 MAX_INTRA_LABELS = 10
 MIN_CLUSTER_SIZE = 150
 MIN_MODULE_SIZE = 200
 PALETTE = ["#ECDE90", "#93DEB6", "#F1B584", "#76BBE2", "#DA919B", "#899E64", "#8E81B9", "#A66C58", "#30767A", "#7A5271"]
 MIN_PERCENT_ENRICHMENT = 80
-MIN_PERCENT_SPECIFICITY = 25
+MIN_PERCENT_SPECIFICITY = 50
 N_NEIGHBORS = 15
 N_PCS = None
-NOISE_LABEL = "-1"
 PANEL_DPI = 300
 PANEL_WIDTH_INCHES = A4_WIDTH_INCHES / 4
 PT_SIZE = 1.0
@@ -70,12 +70,12 @@ parser.add_argument("--npzs", type=str, required=True, help="Comma-separated pat
 parser.add_argument("--outdir", type=str, default=DEFAULT_OUTDIR, help="Base output directory")
 parser.add_argument("--n_pcs", type=int, default=N_PCS, help="Number of PCs for dimensionality reduction")
 parser.add_argument("--n_neighbors", type=int, default=N_NEIGHBORS, help="Number of neighbors for KNN")
-parser.add_argument("--min_cluster_size", type=int, default=MIN_CLUSTER_SIZE, help="HDBSCAN minimum cluster size")
+parser.add_argument("--resolution", type=float, default=LEIDEN_RES, help="Leiden cluster resolution")
 parser.add_argument("--yaml-in", nargs="?", const=YAML_PATH, default=YAML_PATH)
 parser.add_argument("--yaml-out", nargs="?", const=YAML_PATH, default=None)
 yargs, _ = parser.parse_known_args()
 script_key = "npz_scanpy"
-params = dict(seed=SEED, min_cluster_size=MIN_CLUSTER_SIZE, n_neighbors=N_NEIGHBORS, min_module_size=MIN_MODULE_SIZE, min_percent_enrichment=MIN_PERCENT_ENRICHMENT, outdir=DEFAULT_OUTDIR)
+params = dict(seed=SEED, resolution=LEIDEN_RES, n_neighbors=N_NEIGHBORS, min_module_size=MIN_MODULE_SIZE, min_percent_enrichment=MIN_PERCENT_ENRICHMENT, outdir=DEFAULT_OUTDIR)
 if yargs.yaml_in and Path(yargs.yaml_in).exists():
     ydata = yaml.safe_load(Path(yargs.yaml_in).read_text()) or {}
     if script_key in ydata: params.update(ydata[script_key])
@@ -138,23 +138,26 @@ def letter_code(i: int) -> str:
         s = chr(97 + r) + s
     return s
 def assign_letters(counts_df: pd.DataFrame, cluster_sp_frac: pd.DataFrame) -> dict[str, str]:
-    """Letter the non-noise joint clusters of at least MIN_CLUSTER_SIZE proteins ranked by size and specificity index (equal weight) whose top species exceeds MIN_PERCENT_SPECIFICITY.
+    """Letter the joint clusters above MIN_CLUSTER_SIZE ranked by size and specificity index (equal weight) whose top species exceeds MIN_PERCENT_SPECIFICITY.
 
     Args:
         counts_df (pd.DataFrame): Protein counts per cluster (rows) and species (columns).
         cluster_sp_frac (pd.DataFrame): Species fraction per cluster (rows) and species (columns).
 
     Returns:
-        dict[str, str]: Mapping cluster -> letter in rank order; the top-ranked candidate is kept when none passes.
+        dict[str, str]: Mapping cluster -> letter in rank order; the top FALLBACK_TOP_N candidates are kept when none passes.
     """
-    size, spec = counts_df.sum(axis=1).drop(NOISE_LABEL, errors="ignore"), cluster_sp_frac.max(axis=1)
-    cand = size[size >= MIN_CLUSTER_SIZE].index
-    if cand.empty: cand = size.nlargest(1).index
+    size, spec = counts_df.sum(axis=1), cluster_sp_frac.max(axis=1)
+    cand = size[size > MIN_CLUSTER_SIZE].index
+    if cand.empty: cand = size.index
     rank = pd.DataFrame({"score": size[cand].rank(ascending=False) + spec[cand].rank(ascending=False), "count": size[cand]}).sort_values(["score", "count"], ascending=[True, False]).index
-    chosen = [cl for cl in rank if spec[cl] * 100 > MIN_PERCENT_SPECIFICITY] or list(rank[:1])
+    chosen = [cl for cl in rank if spec[cl] * 100 > MIN_PERCENT_SPECIFICITY]
+    if not chosen:
+        chosen = list(rank[:FALLBACK_TOP_N])
+        print(f"[PYTHON-INFO][LETTERS] No cluster > {MIN_CLUSTER_SIZE} proteins with > {MIN_PERCENT_SPECIFICITY}% specificity, lettering top {len(chosen)} regardless of specificity")
     return {cl: letter_code(i) for i, cl in enumerate(chosen)}
 def facet_letters(letters: dict[str, str], cluster_sp_frac: pd.DataFrame, sp: str) -> dict[str, str]:
-    """Select the lettered clusters whose majority species (> MIN_PERCENT_SPECIFICITY) is ``sp``.
+    """Select the lettered clusters whose majority species is ``sp``.
 
     Args:
         letters (dict[str, str]): Global mapping cluster -> letter.
@@ -164,9 +167,9 @@ def facet_letters(letters: dict[str, str], cluster_sp_frac: pd.DataFrame, sp: st
     Returns:
         dict[str, str]: Clusters -> letter, in letter order.
     """
-    return {cl: lt for cl, lt in letters.items() if cluster_sp_frac.loc[cl, sp] * 100 > MIN_PERCENT_SPECIFICITY}
+    return {cl: lt for cl, lt in letters.items() if cluster_sp_frac.loc[cl].idxmax() == sp}
 def top_intra_clusters(coords: np.ndarray, intra_cls: np.ndarray, counts: pd.Series) -> pd.Series:
-    """Select the top non-noise intra-species clusters of at least MIN_CLUSTER_SIZE proteins by the summed ranks of protein count and UMAP density.
+    """Select the top intra-species clusters of at least MIN_CLUSTER_SIZE proteins by the summed ranks of protein count and UMAP density.
 
     Args:
         coords (np.ndarray): UMAP coordinates of the species points.
@@ -176,43 +179,10 @@ def top_intra_clusters(coords: np.ndarray, intra_cls: np.ndarray, counts: pd.Ser
     Returns:
         pd.Series: Protein counts of up to MAX_INTRA_LABELS clusters, in combined-rank order.
     """
-    cand = counts[(counts >= MIN_CLUSTER_SIZE) & (counts.index != NOISE_LABEL)]
+    cand = counts[counts >= MIN_CLUSTER_SIZE]
     radius = pd.Series({cl: np.median(np.linalg.norm(coords[intra_cls == cl] - np.median(coords[intra_cls == cl], axis=0), axis=1)) for cl in cand.index}, dtype=float)
     score = cand.rank(ascending=False) + (cand / (radius ** 2 + 1e-9)).rank(ascending=False)
     return cand.loc[pd.DataFrame({"score": score, "count": cand}).sort_values(["score", "count"], ascending=[True, False]).head(MAX_INTRA_LABELS).index]
-def hdbscan_clusters(adata: ad.AnnData, key: str) -> None:
-    """Cluster the UMAP coordinates with HDBSCAN and store string labels (noise as NOISE_LABEL) as a categorical column.
-
-    Args:
-        adata (ad.AnnData): Data carrying ``obsm["X_umap"]``.
-        key (str): Observation column receiving the labels.
-    """
-    labels = HDBSCAN(min_cluster_size=args.min_cluster_size).fit_predict(adata.obsm["X_umap"])
-    adata.obs[key] = pd.Categorical(labels.astype(str))
-    print(f"[PYTHON-INFO][HDBSCAN] {key}: {len(set(labels) - {-1})} clusters, {(labels == -1).sum():,} noise points")
-def cluster_silhouette(space: np.ndarray, labels: pd.Series) -> float:
-    """Compute the cosine silhouette score of the non-noise points.
-
-    Args:
-        space (np.ndarray): Coordinates of all points.
-        labels (pd.Series): Cluster label of each point.
-
-    Returns:
-        float: Silhouette score, NaN when fewer than two clusters are found.
-    """
-    keep = (labels.astype(str) != NOISE_LABEL).values
-    if labels[keep].nunique() < 2: return float("nan")
-    return silhouette_score(space[keep], labels[keep].astype(str), metric="cosine", random_state=SEED)
-def marker_groups(labels: pd.Series) -> list[str] | str:
-    """Return the non-noise clusters to rank markers for, or ``all`` when none is found.
-
-    Args:
-        labels (pd.Series): Categorical cluster labels.
-
-    Returns:
-        list[str] | str: Groups passed to ``sc.tl.rank_genes_groups``.
-    """
-    return [g for g in labels.cat.categories if g != NOISE_LABEL] or "all"
 def letter_colors(letters: dict[str, str]) -> dict[str, str]:
     """Assign an alternating PALETTE colour to each letter, in letter order.
 
@@ -404,14 +374,14 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
     intra_dir.mkdir(parents=True, exist_ok=True)
     ###################################### JOINT_CLUSTERING
     sc.pp.neighbors(adata, n_neighbors=args.n_neighbors, use_rep=rep_key, n_pcs=n_pcs_use, metric="cosine")
+    sc.tl.leiden(adata, resolution=args.resolution, key_added="cluster", flavor="igraph")
     sc.tl.umap(adata)
-    hdbscan_clusters(adata, "cluster")
-    sil_score = cluster_silhouette(adata.obsm["X_pca"] if use_pca else adata.X, adata.obs["cluster"])
+    sil_score = silhouette_score(adata.obsm["X_pca"] if use_pca else adata.X, adata.obs["cluster"], metric="cosine", random_state=SEED)
     print(f"[PYTHON-INFO][METRIC] Joint Silhouette Score ({'PCA' if use_pca else 'Full'} space): {sil_score:.4f}")
     with open(target_dir / f"clustering_metrics__{param_tag}.txt", "w") as f:
         f.write(f"joint_silhouette_score_{'pca' if use_pca else 'full'}: {sil_score}\n")
     ###################################### JOINT_MARKERS
-    sc.tl.rank_genes_groups(adata, groupby="cluster", groups=marker_groups(adata.obs["cluster"]), method="wilcoxon")
+    sc.tl.rank_genes_groups(adata, groupby="cluster", method="wilcoxon")
     marker_dfs = []
     groups = adata.uns["rank_genes_groups"]["names"].dtype.names
     for group in groups:
@@ -450,7 +420,7 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
     cluster_enrichment_table = enrichment_table.merge(frac_table, on=["cluster", "species"], how="left")
     cluster_enrichment_table.to_csv(target_dir / f"species_cluster_enrichment__{param_tag}.csv", index=False)
     for sp in species_list:
-        for cl in counts_df.index.drop(NOISE_LABEL, errors="ignore"):
+        for cl in counts_df.index:
             if enrichment.loc[cl, sp] > MIN_PERCENT_ENRICHMENT and counts_df.loc[cl, sp] >= MIN_MODULE_SIZE:
                 numgenes = counts_df.loc[cl, sp]
                 adata.obs[(adata.obs["species"] == sp) & (adata.obs["cluster"] == cl)]["protein_id"].to_csv(modules_dir / f"{sp}_{numgenes:07d}_clust{cl}_{param_tag}.txt", index=False, header=False)
@@ -466,22 +436,22 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
             continue
         adata_sp = adata[mask].copy()
         sc.pp.neighbors(adata_sp, n_neighbors=min(args.n_neighbors, mask.sum() - 1), use_rep=rep_key, n_pcs=n_pcs_use, metric="cosine")
+        sc.tl.leiden(adata_sp, resolution=args.resolution, key_added="intra_cluster", flavor="igraph")
         sc.tl.umap(adata_sp)
-        hdbscan_clusters(adata_sp, "intra_cluster")
-        sil_sp = cluster_silhouette(adata_sp.obsm["X_pca"] if use_pca else adata_sp.X, adata_sp.obs["intra_cluster"])
+        sil_sp = silhouette_score(adata_sp.obsm["X_pca"] if use_pca else adata_sp.X, adata_sp.obs["intra_cluster"], metric="cosine", random_state=SEED)
         print(f"[PYTHON-INFO][METRIC] Intra Silhouette ({sp}): {sil_sp:.4f}")
         intra_metrics.append(f"intra_silhouette_{sp}: {sil_sp}")
         adata.obs.loc[mask, "intra_cluster"] = adata_sp.obs["intra_cluster"].astype(str).values
-        n_cl = sum(g != NOISE_LABEL for g in adata_sp.obs["intra_cluster"].cat.categories)
+        n_cl = adata_sp.obs["intra_cluster"].nunique()
         coords = adata_sp.obsm["X_umap"]
         counts_intra = adata_sp.obs["intra_cluster"].value_counts()
         counts_intra.index = counts_intra.index.astype(str)
         intra_cls = adata_sp.obs["intra_cluster"].astype(str).values
         intra_panel_data.append((sp, mask.sum(), n_cl, coords, intra_cls, top_intra_clusters(coords, intra_cls, counts_intra)))
         for cl, cnt in counts_intra.items():
-            if cnt >= MIN_MODULE_SIZE and cl != NOISE_LABEL:
+            if cnt >= MIN_MODULE_SIZE:
                 adata_sp.obs[adata_sp.obs["intra_cluster"] == cl]["protein_id"].to_csv(modules_dir / f"intra_{sp}_{cnt:07d}_clust{cl}_{param_tag}.txt", index=False, header=False)
-        sc.tl.rank_genes_groups(adata_sp, groupby="intra_cluster", groups=marker_groups(adata_sp.obs["intra_cluster"]), method="wilcoxon")
+        sc.tl.rank_genes_groups(adata_sp, groupby="intra_cluster", method="wilcoxon")
         marker_dfs_sp = []
         groups_sp = adata_sp.uns["rank_genes_groups"]["names"].dtype.names
         for group in groups_sp:
@@ -590,7 +560,7 @@ def main() -> None:
     if len(npz_files) < 2:
         raise ValueError("[PYTHON-ERROR] This comparative script requires at least two .npz files.")
     use_pca = args.n_pcs is not None and args.n_pcs > 0
-    param_tag = f"{Path(npz_files[0]).parent.name}__mcs{args.min_cluster_size}_nn{args.n_neighbors}" + (f"_npc{args.n_pcs}" if use_pca else "_full")
+    param_tag = f"{Path(npz_files[0]).parent.name}__res{args.resolution}_nn{args.n_neighbors}" + (f"_npc{args.n_pcs}" if use_pca else "_full")
     target_dir = Path(args.outdir) / "_".join([Path(f).stem.replace("_reps", "") for f in npz_files])
     target_dir.mkdir(parents=True, exist_ok=True)
     ###################################### LOAD_DATA

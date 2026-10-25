@@ -13,7 +13,7 @@ extract_reps_biohub:
   reps_outdir: data/esm-reps
 npz_scanpy:
   seed: 42
-  min_cluster_size: 150
+  resolution: 1.0
   n_neighbors: 15
   min_module_size: 200
   min_percent_enrichment: 80
