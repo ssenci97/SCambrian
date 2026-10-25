@@ -45,6 +45,7 @@ FONT_FACET = 12
 FONT_LABEL = 10
 FONT_TICK = 9
 FONT_TITLE = 14
+JOINT_LEIDEN_RES = 0.5
 LEGEND_CHAR_INCHES = 0.08
 LEGEND_COL_INCHES = 0.4
 LEGEND_MARKER = 7
@@ -70,12 +71,13 @@ parser.add_argument("--npzs", type=str, required=True, help="Comma-separated pat
 parser.add_argument("--outdir", type=str, default=DEFAULT_OUTDIR, help="Base output directory")
 parser.add_argument("--n_pcs", type=int, default=N_PCS, help="Number of PCs for dimensionality reduction")
 parser.add_argument("--n_neighbors", type=int, default=N_NEIGHBORS, help="Number of neighbors for KNN")
-parser.add_argument("--resolution", type=float, default=LEIDEN_RES, help="Leiden cluster resolution")
+parser.add_argument("--resolution", type=float, default=LEIDEN_RES, help="Leiden cluster resolution for intra-species clustering")
+parser.add_argument("--joint_resolution", type=float, default=JOINT_LEIDEN_RES, help="Leiden cluster resolution for joint inter-species clustering")
 parser.add_argument("--yaml-in", nargs="?", const=YAML_PATH, default=YAML_PATH)
 parser.add_argument("--yaml-out", nargs="?", const=YAML_PATH, default=None)
 yargs, _ = parser.parse_known_args()
 script_key = "npz_scanpy"
-params = dict(seed=SEED, resolution=LEIDEN_RES, n_neighbors=N_NEIGHBORS, min_module_size=MIN_MODULE_SIZE, min_percent_enrichment=MIN_PERCENT_ENRICHMENT, outdir=DEFAULT_OUTDIR)
+params = dict(seed=SEED, resolution=LEIDEN_RES, joint_resolution=JOINT_LEIDEN_RES, n_neighbors=N_NEIGHBORS, min_module_size=MIN_MODULE_SIZE, min_percent_enrichment=MIN_PERCENT_ENRICHMENT, outdir=DEFAULT_OUTDIR)
 if yargs.yaml_in and Path(yargs.yaml_in).exists():
     ydata = yaml.safe_load(Path(yargs.yaml_in).read_text()) or {}
     if script_key in ydata: params.update(ydata[script_key])
@@ -374,7 +376,7 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
     intra_dir.mkdir(parents=True, exist_ok=True)
     ###################################### JOINT_CLUSTERING
     sc.pp.neighbors(adata, n_neighbors=args.n_neighbors, use_rep=rep_key, n_pcs=n_pcs_use, metric="cosine")
-    sc.tl.leiden(adata, resolution=args.resolution, key_added="cluster", flavor="igraph")
+    sc.tl.leiden(adata, resolution=args.joint_resolution, key_added="cluster", flavor="igraph")
     sc.tl.umap(adata)
     sil_score = silhouette_score(adata.obsm["X_pca"] if use_pca else adata.X, adata.obs["cluster"], metric="cosine", random_state=SEED)
     print(f"[PYTHON-INFO][METRIC] Joint Silhouette Score ({'PCA' if use_pca else 'Full'} space): {sil_score:.4f}")
@@ -560,7 +562,7 @@ def main() -> None:
     if len(npz_files) < 2:
         raise ValueError("[PYTHON-ERROR] This comparative script requires at least two .npz files.")
     use_pca = args.n_pcs is not None and args.n_pcs > 0
-    param_tag = f"{Path(npz_files[0]).parent.name}__res{args.resolution}_nn{args.n_neighbors}" + (f"_npc{args.n_pcs}" if use_pca else "_full")
+    param_tag = f"{Path(npz_files[0]).parent.name}__res{args.resolution}_jres{args.joint_resolution}_nn{args.n_neighbors}" + (f"_npc{args.n_pcs}" if use_pca else "_full")
     target_dir = Path(args.outdir) / "_".join([Path(f).stem.replace("_reps", "") for f in npz_files])
     target_dir.mkdir(parents=True, exist_ok=True)
     ###################################### LOAD_DATA
