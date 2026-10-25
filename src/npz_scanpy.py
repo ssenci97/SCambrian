@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from pypdf import PdfWriter
+import pymupdf
 import resource
 import scanpy as sc
 from sklearn.metrics import silhouette_score
@@ -205,11 +205,11 @@ def merge_pdfs(pdfs: list[Path], out: Path) -> None:
         pdfs (list[Path]): PDF files in merge order.
         out (Path): Output report path.
     """
-    writer = PdfWriter()
-    for pdf in pdfs:
-        writer.append(pdf)
-    with open(out, "wb") as f:
-        writer.write(f)
+    with pymupdf.open() as doc:
+        for pdf in pdfs:
+            with pymupdf.open(pdf) as src:
+                doc.insert_pdf(src)
+        doc.save(out)
 def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, n_pcs_use: int | None, use_pca: bool) -> tuple[dict[str, str], dict[str, dict[str, str]], pd.DataFrame, pd.DataFrame]:
     """Run joint clustering, lettered species panel, module extraction, intra-group clustering and logging.
 
