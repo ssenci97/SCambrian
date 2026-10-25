@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Processes ESMC protein embeddings with intra-species clustering, joint clustering, species-specific cluster lettering, intra-to-inter cluster flux diagrams and module extraction.
 
-The report panels, each A4/4 wide, are: (a) intra-species UMAPs with clusters above MIN_CLUSTER_SIZE coloured by protein count, (b) joint UMAPs with the top species-specific clusters coloured by specificity index, (c) a second-pass UMAP of the lettered clusters only coloured by letter, (d) intra-to-inter cluster fluxes and (e) a per-species protein-count barplot of the lettered clusters. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
+The report panels, each A4/4 wide, are: (a) intra-species UMAPs with the top MAX_INTRA_LABELS clusters above MIN_CLUSTER_SIZE, ranked by protein count and UMAP density together, coloured by protein count, (b) joint UMAPs with the top species-specific clusters (specificity >= MIN_PERCENT_SPECIFICITY) coloured by specificity index, (c) a second-pass UMAP of the lettered clusters only coloured by letter, (d) intra-to-inter cluster fluxes of all clusters on a square-root (semi-quantitative) scale and (e) a per-species protein-count barplot of the lettered clusters. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -34,18 +34,21 @@ COLORMAP_SPEC = LinearSegmentedColormap.from_list("scambrian", ["#76BBE2", "#7b2
 DEFAULT_OUTDIR = "data/scanpy/"
 FIG_EXTRA_HEIGHT = 1.0
 FLUX_ALPHA = 0.6
-FLUX_GAP = 0.02
+FLUX_GAP_TOTAL = 0.15
 FLUX_NODE_WIDTH = 0.04
+FLUX_SCALE_POWER = 0.5
 FONT_FACET = 8
 FONT_LABEL = 7
 FONT_TICK = 6
 FONT_TITLE = 10
 LEIDEN_RES = 1.0
+MAX_INTRA_LABELS = 10
 MAX_SPECIFIC_LABELS = 5
 MIN_CLUSTER_SIZE = 150
 MIN_MODULE_SIZE = 200
 PALETTE = ["#ECDE90", "#93DEB6", "#F1B584", "#76BBE2", "#DA919B", "#899E64", "#8E81B9", "#A66C58", "#30767A", "#7A5271"]
 MIN_PERCENT_ENRICHMENT = 80
+MIN_PERCENT_SPECIFICITY = 50
 N_NEIGHBORS = 15
 N_PCS = None
 PANEL_DPI = 300
@@ -127,7 +130,7 @@ def letter_code(i: int) -> str:
         s = chr(97 + r) + s
     return s
 def assign_letters(counts_df: pd.DataFrame, cluster_sp_frac: pd.DataFrame, species_list: list[str]) -> dict[str, str]:
-    """Assign unique global letters to the top species-specific joint clusters of every species.
+    """Assign unique global letters to the top species-specific joint clusters (specificity >= MIN_PERCENT_SPECIFICITY) of every species.
 
     Args:
         counts_df (pd.DataFrame): Protein counts per cluster (rows) and species (columns).
@@ -140,7 +143,7 @@ def assign_letters(counts_df: pd.DataFrame, cluster_sp_frac: pd.DataFrame, speci
     chosen = set()
     for sp in species_list:
         cand = pd.DataFrame({"spec": cluster_sp_frac[sp], "count": counts_df[sp]})
-        chosen |= set(cand[cand["count"] >= MIN_CLUSTER_SIZE].sort_values(["spec", "count"], ascending=False).head(MAX_SPECIFIC_LABELS).index)
+        chosen |= set(cand[(cand["count"] >= MIN_CLUSTER_SIZE) & (cand["spec"] * 100 >= MIN_PERCENT_SPECIFICITY)].sort_values(["spec", "count"], ascending=False).head(MAX_SPECIFIC_LABELS).index)
     rank = pd.DataFrame({"spec": cluster_sp_frac.max(axis=1), "count": counts_df.sum(axis=1)}).loc[sorted(chosen)].sort_values(["spec", "count"], ascending=False)
     return {cl: letter_code(i) for i, cl in enumerate(rank.index)}
 def facet_letters(letters: dict[str, str], counts_df: pd.DataFrame, cluster_sp_frac: pd.DataFrame, sp: str) -> dict[str, str]:
@@ -156,8 +159,23 @@ def facet_letters(letters: dict[str, str], counts_df: pd.DataFrame, cluster_sp_f
         dict[str, str]: Up to MAX_SPECIFIC_LABELS clusters -> letter, the most specific for ``sp``, sorted by letter.
     """
     cand = pd.DataFrame({"spec": cluster_sp_frac[sp], "count": counts_df[sp]}).loc[list(letters)]
-    cand = cand[cand["count"] >= MIN_CLUSTER_SIZE].sort_values(["spec", "count"], ascending=False).head(MAX_SPECIFIC_LABELS)
+    cand = cand[(cand["count"] >= MIN_CLUSTER_SIZE) & (cand["spec"] * 100 >= MIN_PERCENT_SPECIFICITY)].sort_values(["spec", "count"], ascending=False).head(MAX_SPECIFIC_LABELS)
     return dict(sorted(((cl, letters[cl]) for cl in cand.index), key=lambda kv: (len(kv[1]), kv[1])))
+def top_intra_clusters(coords: np.ndarray, intra_cls: np.ndarray, counts: pd.Series) -> pd.Series:
+    """Select the top intra-species clusters above MIN_CLUSTER_SIZE by the summed ranks of protein count and UMAP density.
+
+    Args:
+        coords (np.ndarray): UMAP coordinates of the species points.
+        intra_cls (np.ndarray): Intra-cluster label of each point.
+        counts (pd.Series): Proteins per intra-cluster.
+
+    Returns:
+        pd.Series: Protein counts of up to MAX_INTRA_LABELS clusters, in combined-rank order.
+    """
+    cand = counts[counts >= MIN_CLUSTER_SIZE]
+    radius = pd.Series({cl: np.median(np.linalg.norm(coords[intra_cls == cl] - np.median(coords[intra_cls == cl], axis=0), axis=1)) for cl in cand.index}, dtype=float)
+    score = cand.rank(ascending=False) + (cand / (radius ** 2 + 1e-9)).rank(ascending=False)
+    return cand.loc[pd.DataFrame({"score": score, "count": cand}).sort_values(["score", "count"], ascending=[True, False]).head(MAX_INTRA_LABELS).index]
 def letter_colors(letters: dict[str, str]) -> dict[str, str]:
     """Assign an alternating PALETTE colour to each letter, in letter order.
 
@@ -237,39 +255,49 @@ def add_colorbar(cax: plt.Axes, norm: Normalize, label: str) -> None:
     cb.ax.tick_params(labelsize=FONT_TICK, length=2, pad=1)
     cb.outline.set_linewidth(0.4)
     cax.text(0.34, 0.5, label, fontsize=FONT_LABEL, ha="right", va="center", transform=cax.transAxes)
-def draw_flux(ax: plt.Axes, flows: pd.DataFrame, left_colors: dict[str, str], right_colors: dict[str, str], outlined: set[str], title: str) -> None:
-    """Draw an alluvial diagram of protein fluxes from intra-species clusters (left) to inter-species clusters (right).
+def flux_layout(sizes: pd.Series) -> tuple[pd.Series, pd.Series]:
+    """Scale node sizes semi-quantitatively and stack them to fill the unit height.
+
+    Args:
+        sizes (pd.Series): Protein count per node, in plotting order.
+
+    Returns:
+        tuple[pd.Series, pd.Series]: Node heights and top offsets.
+    """
+    h = sizes.astype(float) ** FLUX_SCALE_POWER
+    gap = FLUX_GAP_TOTAL / (len(h) - 1) if len(h) > 1 else 0.0
+    h = h / h.sum() * (1 - gap * (len(h) - 1))
+    return h, pd.Series(np.concatenate([[0], np.cumsum(h.values + gap)[:-1]]), index=h.index)
+def draw_flux(ax: plt.Axes, flows: pd.DataFrame, left_colors: dict[str, str], right_colors: dict[str, str], left_labels: dict[str, str], right_labels: dict[str, str], outlined: set[str], title: str) -> None:
+    """Draw an alluvial diagram of protein fluxes from all intra-species clusters (left) to all inter-species clusters (right) on a semi-quantitative scale.
 
     Args:
         ax (plt.Axes): Target axes.
-        flows (pd.DataFrame): Protein counts with intra-cluster ranks as rows and inter-cluster labels as columns, in plotting order.
+        flows (pd.DataFrame): Protein counts with intra-clusters as rows and inter-clusters as columns, in plotting order.
         left_colors (dict[str, str]): Colour of each intra-cluster node.
         right_colors (dict[str, str]): Colour of each inter-cluster node.
-        outlined (set[str]): Inter-cluster labels drawn with a thin black border.
+        left_labels (dict[str, str]): Text of the labelled intra-cluster nodes.
+        right_labels (dict[str, str]): Text of the labelled inter-cluster nodes.
+        outlined (set[str]): Inter-clusters drawn with a thin black border.
         title (str): Axes title.
     """
-    gap = FLUX_GAP * flows.values.sum()
     l_sz, r_sz = flows.sum(axis=1), flows.sum(axis=0)
-    l_off = pd.Series(np.concatenate([[0], np.cumsum(l_sz.values + gap)[:-1]]), index=l_sz.index)
-    r_off = pd.Series(np.concatenate([[0], np.cumsum(r_sz.values + gap)[:-1]]), index=r_sz.index)
+    (l_h, l_off), (r_h, r_off) = flux_layout(l_sz), flux_layout(r_sz)
     xs = np.linspace(FLUX_NODE_WIDTH, 1 - FLUX_NODE_WIDTH, 60)
     t = (1 - np.cos(np.pi * (xs - xs[0]) / (xs[-1] - xs[0]))) / 2
-    for side, sizes, offs, x0 in (("l", l_sz, l_off, 0.0), ("r", r_sz, r_off, 1 - FLUX_NODE_WIDTH)):
-        for lab, h in sizes.items():
-            color = left_colors[lab] if side == "l" else right_colors[lab]
-            ax.fill_betweenx([offs[lab], offs[lab] + h], x0, x0 + FLUX_NODE_WIDTH, facecolor=color, edgecolor="black" if side == "r" and lab in outlined else "none", lw=0.6)
-            ax.text(-0.02 if side == "l" else 1.02, offs[lab] + h / 2, lab, fontsize=FONT_LABEL, fontweight="bold", ha="right" if side == "l" else "left", va="center")
+    for side, heights, offs, x0, cols, labs in (("l", l_h, l_off, 0.0, left_colors, left_labels), ("r", r_h, r_off, 1 - FLUX_NODE_WIDTH, right_colors, right_labels)):
+        for lab, h in heights.items():
+            ax.fill_betweenx([offs[lab], offs[lab] + h], x0, x0 + FLUX_NODE_WIDTH, facecolor=cols[lab], edgecolor="black" if side == "r" and lab in outlined else "none", lw=0.6)
+            if lab in labs: ax.text(-0.02 if side == "l" else 1.02, offs[lab] + h / 2, labs[lab], fontsize=FONT_LABEL, fontweight="bold", ha="right" if side == "l" else "left", va="center")
     l_cur, r_cur = l_off.copy(), r_off.copy()
-    for i in flows.index:
-        for j in flows.columns:
-            v = flows.loc[i, j]
-            if v == 0: continue
-            bottom = l_cur[i] + (r_cur[j] - l_cur[i]) * t
-            ax.fill_between(xs, bottom, bottom + v, color=right_colors[j], alpha=FLUX_ALPHA, lw=0)
-            l_cur[i] += v
-            r_cur[j] += v
+    for (i, j), v in flows.stack().items():
+        if v == 0: continue
+        lh, rh = v / l_sz[i] * l_h[i], v / r_sz[j] * r_h[j]
+        ax.fill_between(xs, l_cur[i] + (r_cur[j] - l_cur[i]) * t, l_cur[i] + lh + (r_cur[j] + rh - l_cur[i] - lh) * t, color=right_colors[j], alpha=FLUX_ALPHA, lw=0)
+        l_cur[i] += lh
+        r_cur[j] += rh
     ax.set_xlim(-0.12, 1.12)
-    ax.set_ylim(max(l_off.iloc[-1] + l_sz.iloc[-1], r_off.iloc[-1] + r_sz.iloc[-1]), 0)
+    ax.set_ylim(1, 0)
     ax.axis("off")
     ax.set_title(title, fontsize=FONT_FACET, fontweight="bold", pad=2)
 def plot_counts_bar(lt_counts: pd.DataFrame, letters: dict[str, str], shown: set[str], species_list: list[str], title: str, path: Path) -> None:
@@ -358,7 +386,6 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
     letters = assign_letters(counts_df, cluster_sp_frac, species_list)
     facets = {sp: facet_letters(letters, counts_df, cluster_sp_frac, sp) for sp in species_list}
     colors = letter_colors(letters)
-    shown_colors = {lt: c for lt, c in colors.items() if any(lt in f.values() for f in facets.values())}
     print(f"[PYTHON-INFO][LETTERS] {len(letters)} lettered clusters: {letters}")
     n_sp = len(species_list)
     spec_vals = [cluster_sp_frac.loc[cl, sp] for sp in species_list for cl in facets[sp]] or [0.0, 1.0]
@@ -408,7 +435,8 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
         coords = adata_sp.obsm["X_umap"]
         counts_intra = adata_sp.obs["intra_cluster"].value_counts()
         counts_intra.index = counts_intra.index.astype(str)
-        intra_panel_data.append((sp, mask.sum(), n_cl, coords, adata_sp.obs["intra_cluster"].astype(str).values, counts_intra[counts_intra >= MIN_CLUSTER_SIZE]))
+        intra_cls = adata_sp.obs["intra_cluster"].astype(str).values
+        intra_panel_data.append((sp, mask.sum(), n_cl, coords, intra_cls, top_intra_clusters(coords, intra_cls, counts_intra)))
         for cl, cnt in counts_intra.items():
             if cnt >= MIN_MODULE_SIZE:
                 adata_sp.obs[adata_sp.obs["intra_cluster"] == cl]["protein_id"].to_csv(modules_dir / f"intra_{sp}_{cnt:07d}_clust{cl}_{param_tag}.txt", index=False, header=False)
@@ -449,19 +477,17 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
         fig, gs = row_figure(n_sp, "Intra- to Inter-species cluster fluxes", SANKEY_HEIGHT_SCALE)
         for idx, (sp, n_pts, n_cl, coords, intra_cls, big) in enumerate(intra_panel_data):
             ax = fig.add_subplot(gs[0, idx])
-            obs_sp = adata.obs[(adata.obs["species"] == sp) & adata.obs["intra_cluster"].isin(list(big.index))]
-            if obs_sp.empty:
-                ax.axis("off")
-                continue
+            obs_sp = adata.obs[adata.obs["species"] == sp]
             rank = {cl: str(c_idx + 1) for c_idx, cl in enumerate(big.index)}
-            left_colors = {rank[cl]: gradient_hex(cnt, norm_size) for cl, cnt in big.items()}
-            inter = obs_sp["cluster"].map(letters).fillna("other")
-            cols = list(letters.values()) + ["other"]
-            flows = pd.crosstab(obs_sp["intra_cluster"].map(rank), inter).reindex(index=list(rank.values()), columns=cols, fill_value=0)
-            flows = flows.loc[flows.sum(axis=1) > 0, flows.sum(axis=0) > 0]
-            right_colors = {lt: colors[lt] if lt in facets[sp].values() else COLOR_FG for lt in letters.values()} | {"other": COLOR_BG}
-            draw_flux(ax, flows, left_colors, right_colors, set(facets[sp].values()), f"{sp} (n={len(obs_sp):,})")
-        add_letter_legend(fig.add_subplot(gs[-1, :]), shown_colors)
+            flows = pd.crosstab(obs_sp["intra_cluster"].astype(str), obs_sp["cluster"].astype(str))
+            lettered = [cl for cl in letters if cl in flows.columns]
+            l_order = list(big.index) + flows.sum(axis=1).drop(list(big.index)).sort_values(ascending=False).index.tolist()
+            r_order = lettered + flows.sum(axis=0).drop(lettered).sort_values(ascending=False).index.tolist()
+            flows = flows.loc[l_order, r_order]
+            left_colors = {cl: gradient_hex(big[cl], norm_size) if cl in rank else COLOR_BG for cl in l_order}
+            right_colors = {cl: colors[letters[cl]] if cl in letters else COLOR_BG for cl in r_order}
+            draw_flux(ax, flows, left_colors, right_colors, rank, {cl: letters[cl] for cl in lettered}, set(facets[sp]), f"{sp} (n={len(obs_sp):,}, k={n_cl})")
+        add_letter_legend(fig.add_subplot(gs[-1, :]), colors)
         save_fig(fig, target_dir / f"sankey_intra_to_inter_clusters__{param_tag}.png")
         plt.close(fig)
     ###################################### LOGGING
