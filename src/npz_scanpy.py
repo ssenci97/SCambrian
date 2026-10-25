@@ -517,7 +517,7 @@ def main() -> None:
         raise ValueError("[PYTHON-ERROR] This comparative script requires at least two .npz files.")
     use_pca = args.n_pcs is not None and args.n_pcs > 0
     param_tag = f"{Path(npz_files[0]).parent.name}__res{args.resolution}_nn{args.n_neighbors}" + (f"_npc{args.n_pcs}" if use_pca else "_full")
-    target_dir = Path(args.outdir) / Path(npz_files[0]).parent.name / "_".join([Path(f).stem.replace("_reps", "") for f in npz_files])
+    target_dir = Path(args.outdir) / ("_".join([Path(f).stem.replace("_reps", "") for f in npz_files]) + f"__{Path(npz_files[0]).parent.name}")
     target_dir.mkdir(parents=True, exist_ok=True)
     ###################################### LOAD_DATA
     adatas = []
