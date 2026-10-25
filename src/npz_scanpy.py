@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Processes ESMC protein embeddings with joint clustering, globally lettered species-specificity UMAP panels, intra-species clustering, intra-to-inter cluster flux diagrams onto all lettered clusters (UMAP-shown ones outlined in black) and module extraction.
 
-A first pass runs the full analysis and assigns unique letters to the most species-specific joint clusters; a second pass recomputes neighbors, Leiden and UMAP on the lettered clusters only, plots their UMAP facets and per-species protein-count barplots of all lettered clusters (UMAP-shown ones outlined in black) and of the UMAP-shown clusters only. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
+A first pass runs the full analysis and assigns unique letters to the most species-specific joint clusters; a second pass recomputes neighbors, Leiden and UMAP on the lettered clusters only, plots their UMAP facets and a per-species protein-count barplot of the UMAP-shown clusters. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -50,7 +50,8 @@ N_NEIGHBORS = 15
 N_PCS = None
 PANEL_DPI = 300
 PT_SIZE = 1.0
-REPORT_ORDER = ["umap_joint_clusters_species_specificity", "umap_intra_species_top_clusters", "umap_reclustered_species_specific_clusters", "barplot_species_specific_clusters_protein_counts", "barplot_umap_labelled_clusters_protein_counts", "sankey_intra_to_inter_clusters"]
+REPORT_ORDER = ["umap_joint_clusters_species_specificity", "umap_intra_species_top_clusters", "umap_reclustered_species_specific_clusters", "barplot_umap_labelled_clusters_protein_counts", "sankey_intra_to_inter_clusters"]
+SANKEY_HEIGHT_SCALE = 2.0
 SEED = 42
 YAML_PATH = "configs/param_configs.yaml"
 ###################################### CONFIG_AND_PARSER
@@ -95,19 +96,21 @@ def fig_size(n_cols: int) -> tuple[float, float]:
         tuple[float, float]: Figure width and height in inches.
     """
     return A4_WIDTH_INCHES, A4_WIDTH_INCHES / n_cols + FIG_EXTRA_HEIGHT
-def row_figure(n_cols: int, title: str) -> tuple[plt.Figure, GridSpec]:
+def row_figure(n_cols: int, title: str, height_scale: float = 1.0) -> tuple[plt.Figure, GridSpec]:
     """Create a one-row panel figure with a bottom strip for a colorbar or legend.
 
     Args:
         n_cols (int): Number of panels in the row.
         title (str): Figure title.
+        height_scale (float): Multiplier applied to the figure height.
 
     Returns:
         tuple[plt.Figure, GridSpec]: Figure and its grid (row 0 panels, row 1 strip).
     """
-    fig = plt.figure(figsize=fig_size(n_cols), dpi=PANEL_DPI, layout="constrained")
+    width, height = fig_size(n_cols)
+    fig = plt.figure(figsize=(width, height * height_scale), dpi=PANEL_DPI, layout="constrained")
     fig.suptitle(title, fontsize=FONT_TITLE, fontweight="bold")
-    return fig, fig.add_gridspec(2, n_cols, height_ratios=[1, 0.04])
+    return fig, fig.add_gridspec(2, n_cols, height_ratios=[1, 0.04 / height_scale])
 def letter_code(i: int) -> str:
     """Convert a zero-based index to a lowercase letter code (a, ..., z, aa, ab, ...).
 
@@ -227,7 +230,7 @@ def draw_flux(ax: plt.Axes, flows: pd.DataFrame, right_colors: dict[str, tuple],
             v = flows.loc[i, j]
             if v == 0: continue
             bottom = l_cur[i] + (r_cur[j] - l_cur[i]) * t
-            ax.fill_between(xs, bottom, bottom + v, color=PALETTE[int(i) - 1], alpha=FLUX_ALPHA, lw=0)
+            ax.fill_between(xs, bottom, bottom + v, color=right_colors[j], alpha=FLUX_ALPHA, lw=0)
             l_cur[i] += v
             r_cur[j] += v
     ax.set_xlim(-0.12, 1.12)
@@ -407,7 +410,7 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
         plt.close(fig)
     ###################################### INTRA_INTER_FLUX
     if n_intra > 0:
-        fig, gs = row_figure(n_sp, "Intra- to Inter-species cluster fluxes")
+        fig, gs = row_figure(n_sp, "Intra- to Inter-species cluster fluxes", SANKEY_HEIGHT_SCALE)
         for idx, (sp, n_pts, n_cl, coords, intra_cls, top_cls, counts_intra) in enumerate(intra_panel_data):
             obs_sp = adata.obs[(adata.obs["species"] == sp) & adata.obs["intra_cluster"].isin(top_cls)]
             rank = {cl: str(c_idx + 1) for c_idx, cl in enumerate(top_cls)}
@@ -429,7 +432,7 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
     pd.concat(marker_frames, ignore_index=True).to_csv(target_dir / f"channel_importance_rankings__{param_tag}.csv", index=False)
     return letters, facets, cluster_sp_frac, counts_df
 def run_second_pass(adata: ad.AnnData, letters: dict[str, str], facets: dict[str, dict[str, str]], cluster_sp_frac: pd.DataFrame, counts_df: pd.DataFrame, target_dir: Path, param_tag: str, rep_key: str, n_pcs_use: int | None, use_pca: bool) -> None:
-    """Recompute neighbors, Leiden and UMAP on the lettered clusters, plot their facets and a per-species count barplot.
+    """Recompute neighbors, Leiden and UMAP on the lettered clusters, plot their facets and a per-species count barplot of the UMAP-shown clusters.
 
     Args:
         adata (ad.AnnData): First-pass embeddings carrying the ``cluster`` column.
@@ -469,7 +472,6 @@ def run_second_pass(adata: ad.AnnData, letters: dict[str, str], facets: dict[str
     lt_counts = counts_df.loc[list(letters), species_list]
     lt_counts = lt_counts.loc[lt_counts.sum(axis=1).sort_values(ascending=False).index]
     shown = {cl for sp_letters in facets.values() for cl in sp_letters}
-    plot_counts_bar(lt_counts, letters, shown, species_list, "Protein per cluster (number by species)", target_dir / f"barplot_species_specific_clusters_protein_counts__{param_tag}.png")
     plot_counts_bar(lt_counts.loc[[cl for cl in lt_counts.index if cl in shown]], letters, shown, species_list, "Protein per cluster (number by species)", target_dir / f"barplot_umap_labelled_clusters_protein_counts__{param_tag}.png")
 ###################################### MAIN
 def main() -> None:
