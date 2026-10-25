@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Processes ESMC protein embeddings with intra-species clustering, joint clustering, species-specific cluster lettering, intra-to-inter cluster flux diagrams and module extraction.
 
-Lettered clusters are joint Leiden clusters with more than MIN_CLUSTER_SIZE proteins, ranked by size and specificity index with equal weight, and kept when one species exceeds MIN_PERCENT_SPECIFICITY (at least one is always kept). The report panels, each A4/4 wide, are: (a) intra-species UMAPs with the top MAX_INTRA_LABELS clusters above MIN_CLUSTER_SIZE, ranked by protein count and UMAP density together, coloured by protein count, (b) joint UMAPs with the lettered clusters in the facet of their majority species, coloured by specificity index, (c) a re-projected (not reclustered) UMAP of all proteins of the lettered clusters coloured by letter, (d) intra-to-lettered cluster fluxes on a square-root (semi-quantitative) scale, where intra clusters inherit a letter colour only when a strict majority of their proteins flows into it, and (e) a per-species protein-count barplot of the lettered clusters. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
+Joint and intra-species clusters are found with HDBSCAN on the UMAP coordinates (minimum size --min_cluster_size), and noise points (label NOISE_LABEL) are never lettered, ranked or extracted as modules. Lettered clusters are joint clusters with at least MIN_CLUSTER_SIZE proteins, ranked by size and specificity index with equal weight, and kept when one species exceeds MIN_PERCENT_SPECIFICITY (at least one is always kept). The report panels, each A4/4 wide, are: (a) intra-species UMAPs with the top MAX_INTRA_LABELS clusters above MIN_CLUSTER_SIZE, ranked by protein count and UMAP density together, coloured by protein count, (b) joint UMAPs with the lettered clusters in the facet of their majority species, coloured by specificity index, (c) a re-projected (not reclustered) UMAP of all proteins of the lettered clusters coloured by letter, (d) intra-to-lettered cluster fluxes on a square-root (semi-quantitative) scale, where intra clusters inherit a letter colour only when a strict majority of their proteins flows into it, and (e) a per-species protein-count barplot of the lettered clusters. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -19,6 +19,7 @@ from pathlib import Path
 import pymupdf
 import resource
 import scanpy as sc
+from sklearn.cluster import HDBSCAN
 from sklearn.metrics import silhouette_score
 import time
 from tqdm import tqdm
@@ -35,7 +36,9 @@ COLORMAP_SPEC = LinearSegmentedColormap.from_list("scambrian", ["#76BBE2", "#7b2
 DEFAULT_OUTDIR = "data/scanpy/"
 FIG_EXTRA_HEIGHT = 1.0
 FLUX_ALPHA = 0.6
+FLUX_FONT_SCALE = 1.5
 FLUX_GAP_TOTAL = 0.15
+FLUX_MIN_NODE = 0.02
 FLUX_NODE_WIDTH = 0.04
 FLUX_SCALE_POWER = 0.5
 FONT_FACET = 12
@@ -45,20 +48,20 @@ FONT_TITLE = 14
 LEGEND_CHAR_INCHES = 0.08
 LEGEND_COL_INCHES = 0.4
 LEGEND_MARKER = 7
-LEIDEN_RES = 1.0
 MAX_INTRA_LABELS = 10
 MIN_CLUSTER_SIZE = 150
 MIN_MODULE_SIZE = 200
 PALETTE = ["#ECDE90", "#93DEB6", "#F1B584", "#76BBE2", "#DA919B", "#899E64", "#8E81B9", "#A66C58", "#30767A", "#7A5271"]
 MIN_PERCENT_ENRICHMENT = 80
-MIN_PERCENT_SPECIFICITY = 50
+MIN_PERCENT_SPECIFICITY = 25
 N_NEIGHBORS = 15
 N_PCS = None
+NOISE_LABEL = "-1"
 PANEL_DPI = 300
 PANEL_WIDTH_INCHES = A4_WIDTH_INCHES / 4
 PT_SIZE = 1.0
 REPORT_ORDER = ["umap_intra_species_top_clusters", "umap_joint_clusters_species_specificity", "umap_reprojected_species_specific_clusters", "sankey_intra_to_inter_clusters", "barplot_umap_labelled_clusters_protein_counts"]
-SANKEY_HEIGHT_SCALE = 2.0
+SANKEY_HEIGHT_SCALE = 3.0
 SEED = 42
 YAML_PATH = "configs/param_configs.yaml"
 ###################################### CONFIG_AND_PARSER
@@ -67,12 +70,12 @@ parser.add_argument("--npzs", type=str, required=True, help="Comma-separated pat
 parser.add_argument("--outdir", type=str, default=DEFAULT_OUTDIR, help="Base output directory")
 parser.add_argument("--n_pcs", type=int, default=N_PCS, help="Number of PCs for dimensionality reduction")
 parser.add_argument("--n_neighbors", type=int, default=N_NEIGHBORS, help="Number of neighbors for KNN")
-parser.add_argument("--resolution", type=float, default=LEIDEN_RES, help="Leiden cluster resolution")
+parser.add_argument("--min_cluster_size", type=int, default=MIN_CLUSTER_SIZE, help="HDBSCAN minimum cluster size")
 parser.add_argument("--yaml-in", nargs="?", const=YAML_PATH, default=YAML_PATH)
 parser.add_argument("--yaml-out", nargs="?", const=YAML_PATH, default=None)
 yargs, _ = parser.parse_known_args()
 script_key = "npz_scanpy"
-params = dict(seed=SEED, resolution=LEIDEN_RES, n_neighbors=N_NEIGHBORS, min_module_size=MIN_MODULE_SIZE, min_percent_enrichment=MIN_PERCENT_ENRICHMENT, outdir=DEFAULT_OUTDIR)
+params = dict(seed=SEED, min_cluster_size=MIN_CLUSTER_SIZE, n_neighbors=N_NEIGHBORS, min_module_size=MIN_MODULE_SIZE, min_percent_enrichment=MIN_PERCENT_ENRICHMENT, outdir=DEFAULT_OUTDIR)
 if yargs.yaml_in and Path(yargs.yaml_in).exists():
     ydata = yaml.safe_load(Path(yargs.yaml_in).read_text()) or {}
     if script_key in ydata: params.update(ydata[script_key])
@@ -103,7 +106,7 @@ def fig_size(n_cols: int) -> tuple[float, float]:
         tuple[float, float]: Figure width and height in inches.
     """
     return PANEL_WIDTH_INCHES * n_cols, PANEL_WIDTH_INCHES + FIG_EXTRA_HEIGHT
-def row_figure(n_cols: int, title: str, height_scale: float = 1.0, strip: bool = True) -> tuple[plt.Figure, GridSpec]:
+def row_figure(n_cols: int, title: str, height_scale: float = 1.0, strip: bool = True, font_scale: float = 1.0) -> tuple[plt.Figure, GridSpec]:
     """Create a one-row panel figure, optionally with a bottom strip for a colorbar.
 
     Args:
@@ -111,13 +114,14 @@ def row_figure(n_cols: int, title: str, height_scale: float = 1.0, strip: bool =
         title (str): Figure title.
         height_scale (float): Multiplier applied to the figure height.
         strip (bool): Whether to add the bottom colorbar strip.
+        font_scale (float): Multiplier applied to the title font size.
 
     Returns:
         tuple[plt.Figure, GridSpec]: Figure and its grid (row 0 panels, row 1 strip if requested).
     """
     width, height = fig_size(n_cols)
     fig = plt.figure(figsize=(width, height * height_scale), dpi=PANEL_DPI, layout="constrained")
-    fig.suptitle(title, fontsize=FONT_TITLE, fontweight="bold")
+    fig.suptitle(title, fontsize=FONT_TITLE * font_scale, fontweight="bold")
     return fig, fig.add_gridspec(2, n_cols, height_ratios=[1, 0.04 / height_scale]) if strip else fig.add_gridspec(1, n_cols)
 def letter_code(i: int) -> str:
     """Convert a zero-based index to a lowercase letter code (a, ..., z, aa, ab, ...).
@@ -134,7 +138,7 @@ def letter_code(i: int) -> str:
         s = chr(97 + r) + s
     return s
 def assign_letters(counts_df: pd.DataFrame, cluster_sp_frac: pd.DataFrame) -> dict[str, str]:
-    """Letter the joint clusters above MIN_CLUSTER_SIZE ranked by size and specificity index (equal weight) whose top species exceeds MIN_PERCENT_SPECIFICITY.
+    """Letter the non-noise joint clusters of at least MIN_CLUSTER_SIZE proteins ranked by size and specificity index (equal weight) whose top species exceeds MIN_PERCENT_SPECIFICITY.
 
     Args:
         counts_df (pd.DataFrame): Protein counts per cluster (rows) and species (columns).
@@ -143,8 +147,8 @@ def assign_letters(counts_df: pd.DataFrame, cluster_sp_frac: pd.DataFrame) -> di
     Returns:
         dict[str, str]: Mapping cluster -> letter in rank order; the top-ranked candidate is kept when none passes.
     """
-    size, spec = counts_df.sum(axis=1), cluster_sp_frac.max(axis=1)
-    cand = size[size > MIN_CLUSTER_SIZE].index
+    size, spec = counts_df.sum(axis=1).drop(NOISE_LABEL, errors="ignore"), cluster_sp_frac.max(axis=1)
+    cand = size[size >= MIN_CLUSTER_SIZE].index
     if cand.empty: cand = size.nlargest(1).index
     rank = pd.DataFrame({"score": size[cand].rank(ascending=False) + spec[cand].rank(ascending=False), "count": size[cand]}).sort_values(["score", "count"], ascending=[True, False]).index
     chosen = [cl for cl in rank if spec[cl] * 100 > MIN_PERCENT_SPECIFICITY] or list(rank[:1])
@@ -162,7 +166,7 @@ def facet_letters(letters: dict[str, str], cluster_sp_frac: pd.DataFrame, sp: st
     """
     return {cl: lt for cl, lt in letters.items() if cluster_sp_frac.loc[cl, sp] * 100 > MIN_PERCENT_SPECIFICITY}
 def top_intra_clusters(coords: np.ndarray, intra_cls: np.ndarray, counts: pd.Series) -> pd.Series:
-    """Select the top intra-species clusters above MIN_CLUSTER_SIZE by the summed ranks of protein count and UMAP density.
+    """Select the top non-noise intra-species clusters of at least MIN_CLUSTER_SIZE proteins by the summed ranks of protein count and UMAP density.
 
     Args:
         coords (np.ndarray): UMAP coordinates of the species points.
@@ -172,10 +176,43 @@ def top_intra_clusters(coords: np.ndarray, intra_cls: np.ndarray, counts: pd.Ser
     Returns:
         pd.Series: Protein counts of up to MAX_INTRA_LABELS clusters, in combined-rank order.
     """
-    cand = counts[counts >= MIN_CLUSTER_SIZE]
+    cand = counts[(counts >= MIN_CLUSTER_SIZE) & (counts.index != NOISE_LABEL)]
     radius = pd.Series({cl: np.median(np.linalg.norm(coords[intra_cls == cl] - np.median(coords[intra_cls == cl], axis=0), axis=1)) for cl in cand.index}, dtype=float)
     score = cand.rank(ascending=False) + (cand / (radius ** 2 + 1e-9)).rank(ascending=False)
     return cand.loc[pd.DataFrame({"score": score, "count": cand}).sort_values(["score", "count"], ascending=[True, False]).head(MAX_INTRA_LABELS).index]
+def hdbscan_clusters(adata: ad.AnnData, key: str) -> None:
+    """Cluster the UMAP coordinates with HDBSCAN and store string labels (noise as NOISE_LABEL) as a categorical column.
+
+    Args:
+        adata (ad.AnnData): Data carrying ``obsm["X_umap"]``.
+        key (str): Observation column receiving the labels.
+    """
+    labels = HDBSCAN(min_cluster_size=args.min_cluster_size).fit_predict(adata.obsm["X_umap"])
+    adata.obs[key] = pd.Categorical(labels.astype(str))
+    print(f"[PYTHON-INFO][HDBSCAN] {key}: {len(set(labels) - {-1})} clusters, {(labels == -1).sum():,} noise points")
+def cluster_silhouette(space: np.ndarray, labels: pd.Series) -> float:
+    """Compute the cosine silhouette score of the non-noise points.
+
+    Args:
+        space (np.ndarray): Coordinates of all points.
+        labels (pd.Series): Cluster label of each point.
+
+    Returns:
+        float: Silhouette score, NaN when fewer than two clusters are found.
+    """
+    keep = (labels.astype(str) != NOISE_LABEL).values
+    if labels[keep].nunique() < 2: return float("nan")
+    return silhouette_score(space[keep], labels[keep].astype(str), metric="cosine", random_state=SEED)
+def marker_groups(labels: pd.Series) -> list[str] | str:
+    """Return the non-noise clusters to rank markers for, or ``all`` when none is found.
+
+    Args:
+        labels (pd.Series): Categorical cluster labels.
+
+    Returns:
+        list[str] | str: Groups passed to ``sc.tl.rank_genes_groups``.
+    """
+    return [g for g in labels.cat.categories if g != NOISE_LABEL] or "all"
 def letter_colors(letters: dict[str, str]) -> dict[str, str]:
     """Assign an alternating PALETTE colour to each letter, in letter order.
 
@@ -231,7 +268,7 @@ def draw_facet(ax: plt.Axes, coords: np.ndarray, obs: pd.DataFrame, cluster_key:
     ax.set_ylabel("UMAP 2", fontsize=FONT_LABEL, labelpad=1)
     ax.tick_params(labelsize=FONT_TICK)
     ax.set_aspect("equal", "datalim")
-def add_bottom_legend(fig: plt.Figure, colors: dict[str, str], title: str, marker: str = "o") -> None:
+def add_bottom_legend(fig: plt.Figure, colors: dict[str, str], title: str, marker: str = "o", font_scale: float = 1.0) -> None:
     """Add a label -> colour legend below the panels, with as many columns as fit the figure width.
 
     Args:
@@ -239,11 +276,12 @@ def add_bottom_legend(fig: plt.Figure, colors: dict[str, str], title: str, marke
         colors (dict[str, str]): Mapping label -> colour, in legend order.
         title (str): Legend title.
         marker (str): Marker of the legend handles.
+        font_scale (float): Multiplier applied to the legend font sizes.
     """
     if not colors: return
-    handles = [Line2D([], [], ls="", marker=marker, color=c, markersize=LEGEND_MARKER, label=lab) for lab, c in colors.items()]
-    ncol = max(1, min(len(handles), int(fig.get_figwidth() / (LEGEND_COL_INCHES + LEGEND_CHAR_INCHES * max(len(str(lab)) for lab in colors)))))
-    fig.legend(handles=handles, loc="outside lower center", ncol=ncol, frameon=False, fontsize=FONT_TICK, title=title, title_fontsize=FONT_LABEL)
+    handles = [Line2D([], [], ls="", marker=marker, color=c, markersize=LEGEND_MARKER * font_scale, label=lab) for lab, c in colors.items()]
+    ncol = max(1, min(len(handles), int(fig.get_figwidth() / ((LEGEND_COL_INCHES + LEGEND_CHAR_INCHES * max(len(str(lab)) for lab in colors)) * font_scale))))
+    fig.legend(handles=handles, loc="outside lower center", ncol=ncol, frameon=False, fontsize=FONT_TICK * font_scale, title=title, title_fontsize=FONT_LABEL * font_scale)
 def add_colorbar(cax: plt.Axes, norm: Normalize, label: str) -> None:
     """Add a centred horizontal colorbar of the quantitative gradient.
 
@@ -258,7 +296,7 @@ def add_colorbar(cax: plt.Axes, norm: Normalize, label: str) -> None:
     cb.outline.set_linewidth(0.4)
     cax.text(0.34, 0.5, label, fontsize=FONT_LABEL, ha="right", va="center", transform=cax.transAxes)
 def flux_layout(sizes: pd.Series) -> tuple[pd.Series, pd.Series]:
-    """Scale node sizes semi-quantitatively and stack them to fill the unit height.
+    """Scale node sizes semi-quantitatively, with a floor of FLUX_MIN_NODE so small nodes are not crushed, and stack them to fill the unit height.
 
     Args:
         sizes (pd.Series): Protein count per node, in plotting order.
@@ -268,7 +306,9 @@ def flux_layout(sizes: pd.Series) -> tuple[pd.Series, pd.Series]:
     """
     h = sizes.astype(float) ** FLUX_SCALE_POWER
     gap = FLUX_GAP_TOTAL / (len(h) - 1) if len(h) > 1 else 0.0
-    h = h / h.sum() * (1 - gap * (len(h) - 1))
+    avail = 1 - gap * (len(h) - 1)
+    floor = min(FLUX_MIN_NODE, avail / len(h) / 2)
+    h = floor + h / h.sum() * (avail - floor * len(h))
     return h, pd.Series(np.concatenate([[0], np.cumsum(h.values + gap)[:-1]]), index=h.index)
 def draw_flux(ax: plt.Axes, flows: pd.DataFrame, left_colors: dict[str, str], right_colors: dict[str, str], left_labels: dict[str, str], right_labels: dict[str, str], outlined: set[str], title: str) -> None:
     """Draw an alluvial diagram of protein fluxes from intra-species clusters (left) to lettered inter-species clusters (right) on a semi-quantitative scale.
@@ -279,7 +319,7 @@ def draw_flux(ax: plt.Axes, flows: pd.DataFrame, left_colors: dict[str, str], ri
         left_colors (dict[str, str]): Colour of each intra-cluster node.
         right_colors (dict[str, str]): Colour of each inter-cluster node.
         left_labels (dict[str, str]): Text of the labelled intra-cluster nodes.
-        right_labels (dict[str, str]): Text of the labelled inter-cluster nodes.
+        right_labels (dict[str, str]): Text of the labelled inter-cluster nodes (letter and species protein count).
         outlined (set[str]): Inter-clusters drawn with a thin black border.
         title (str): Axes title.
     """
@@ -290,7 +330,7 @@ def draw_flux(ax: plt.Axes, flows: pd.DataFrame, left_colors: dict[str, str], ri
     for side, heights, offs, x0, cols, labs in (("l", l_h, l_off, 0.0, left_colors, left_labels), ("r", r_h, r_off, 1 - FLUX_NODE_WIDTH, right_colors, right_labels)):
         for lab, h in heights.items():
             ax.fill_betweenx([offs[lab], offs[lab] + h], x0, x0 + FLUX_NODE_WIDTH, facecolor=cols[lab], edgecolor="black" if side == "r" and lab in outlined else "none", lw=0.6)
-            if lab in labs: ax.text(-0.02 if side == "l" else 1.02, offs[lab] + h / 2, labs[lab], fontsize=FONT_LABEL, fontweight="bold", ha="right" if side == "l" else "left", va="center")
+            if lab in labs: ax.text(-0.02 if side == "l" else 1.02, offs[lab] + h / 2, labs[lab], fontsize=FONT_LABEL * FLUX_FONT_SCALE, fontweight="bold", ha="right" if side == "l" else "left", va="center")
     l_cur, r_cur = l_off.copy(), r_off.copy()
     for (i, j), v in flows.stack().items():
         if v == 0: continue
@@ -298,10 +338,10 @@ def draw_flux(ax: plt.Axes, flows: pd.DataFrame, left_colors: dict[str, str], ri
         ax.fill_between(xs, l_cur[i] + (r_cur[j] - l_cur[i]) * t, l_cur[i] + lh + (r_cur[j] + rh - l_cur[i] - lh) * t, color=right_colors[j], alpha=FLUX_ALPHA, lw=0)
         l_cur[i] += lh
         r_cur[j] += rh
-    ax.set_xlim(-0.12, 1.12)
+    ax.set_xlim(-0.15, 1.15)
     ax.set_ylim(1, 0)
     ax.axis("off")
-    ax.set_title(title, fontsize=FONT_FACET, fontweight="bold", pad=2)
+    ax.set_title(title, fontsize=FONT_FACET * FLUX_FONT_SCALE, fontweight="bold", pad=2)
 def plot_counts_bar(lt_counts: pd.DataFrame, letters: dict[str, str], shown: set[str], species_list: list[str], title: str, path: Path) -> None:
     """Plot per-species protein counts of lettered clusters, outlining clusters shown in the UMAP facets.
 
@@ -364,15 +404,14 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
     intra_dir.mkdir(parents=True, exist_ok=True)
     ###################################### JOINT_CLUSTERING
     sc.pp.neighbors(adata, n_neighbors=args.n_neighbors, use_rep=rep_key, n_pcs=n_pcs_use, metric="cosine")
-    sc.tl.leiden(adata, resolution=args.resolution, key_added="cluster", flavor="igraph")
     sc.tl.umap(adata)
-    sil_space = adata.obsm["X_pca"] if use_pca else adata.X
-    sil_score = silhouette_score(sil_space, adata.obs["cluster"], metric="cosine", random_state=SEED)
+    hdbscan_clusters(adata, "cluster")
+    sil_score = cluster_silhouette(adata.obsm["X_pca"] if use_pca else adata.X, adata.obs["cluster"])
     print(f"[PYTHON-INFO][METRIC] Joint Silhouette Score ({'PCA' if use_pca else 'Full'} space): {sil_score:.4f}")
     with open(target_dir / f"clustering_metrics__{param_tag}.txt", "w") as f:
         f.write(f"joint_silhouette_score_{'pca' if use_pca else 'full'}: {sil_score}\n")
     ###################################### JOINT_MARKERS
-    sc.tl.rank_genes_groups(adata, groupby="cluster", method="wilcoxon")
+    sc.tl.rank_genes_groups(adata, groupby="cluster", groups=marker_groups(adata.obs["cluster"]), method="wilcoxon")
     marker_dfs = []
     groups = adata.uns["rank_genes_groups"]["names"].dtype.names
     for group in groups:
@@ -411,7 +450,7 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
     cluster_enrichment_table = enrichment_table.merge(frac_table, on=["cluster", "species"], how="left")
     cluster_enrichment_table.to_csv(target_dir / f"species_cluster_enrichment__{param_tag}.csv", index=False)
     for sp in species_list:
-        for cl in counts_df.index:
+        for cl in counts_df.index.drop(NOISE_LABEL, errors="ignore"):
             if enrichment.loc[cl, sp] > MIN_PERCENT_ENRICHMENT and counts_df.loc[cl, sp] >= MIN_MODULE_SIZE:
                 numgenes = counts_df.loc[cl, sp]
                 adata.obs[(adata.obs["species"] == sp) & (adata.obs["cluster"] == cl)]["protein_id"].to_csv(modules_dir / f"{sp}_{numgenes:07d}_clust{cl}_{param_tag}.txt", index=False, header=False)
@@ -427,23 +466,22 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
             continue
         adata_sp = adata[mask].copy()
         sc.pp.neighbors(adata_sp, n_neighbors=min(args.n_neighbors, mask.sum() - 1), use_rep=rep_key, n_pcs=n_pcs_use, metric="cosine")
-        sc.tl.leiden(adata_sp, resolution=args.resolution, key_added="intra_cluster", flavor="igraph")
         sc.tl.umap(adata_sp)
-        sil_space_sp = adata_sp.obsm["X_pca"] if use_pca else adata_sp.X
-        sil_sp = silhouette_score(sil_space_sp, adata_sp.obs["intra_cluster"], metric="cosine", random_state=SEED)
+        hdbscan_clusters(adata_sp, "intra_cluster")
+        sil_sp = cluster_silhouette(adata_sp.obsm["X_pca"] if use_pca else adata_sp.X, adata_sp.obs["intra_cluster"])
         print(f"[PYTHON-INFO][METRIC] Intra Silhouette ({sp}): {sil_sp:.4f}")
         intra_metrics.append(f"intra_silhouette_{sp}: {sil_sp}")
         adata.obs.loc[mask, "intra_cluster"] = adata_sp.obs["intra_cluster"].astype(str).values
-        n_cl = adata_sp.obs["intra_cluster"].nunique()
+        n_cl = sum(g != NOISE_LABEL for g in adata_sp.obs["intra_cluster"].cat.categories)
         coords = adata_sp.obsm["X_umap"]
         counts_intra = adata_sp.obs["intra_cluster"].value_counts()
         counts_intra.index = counts_intra.index.astype(str)
         intra_cls = adata_sp.obs["intra_cluster"].astype(str).values
         intra_panel_data.append((sp, mask.sum(), n_cl, coords, intra_cls, top_intra_clusters(coords, intra_cls, counts_intra)))
         for cl, cnt in counts_intra.items():
-            if cnt >= MIN_MODULE_SIZE:
+            if cnt >= MIN_MODULE_SIZE and cl != NOISE_LABEL:
                 adata_sp.obs[adata_sp.obs["intra_cluster"] == cl]["protein_id"].to_csv(modules_dir / f"intra_{sp}_{cnt:07d}_clust{cl}_{param_tag}.txt", index=False, header=False)
-        sc.tl.rank_genes_groups(adata_sp, groupby="intra_cluster", method="wilcoxon")
+        sc.tl.rank_genes_groups(adata_sp, groupby="intra_cluster", groups=marker_groups(adata_sp.obs["intra_cluster"]), method="wilcoxon")
         marker_dfs_sp = []
         groups_sp = adata_sp.uns["rank_genes_groups"]["names"].dtype.names
         for group in groups_sp:
@@ -477,16 +515,16 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
         plt.close(fig)
     ###################################### INTRA_INTER_FLUX
     if n_intra > 0:
-        fig, gs = row_figure(n_sp, "Intra- to Inter-species cluster fluxes", SANKEY_HEIGHT_SCALE, strip=False)
+        fig, gs = row_figure(n_sp, "Intra- to Inter-species cluster fluxes", SANKEY_HEIGHT_SCALE, strip=False, font_scale=FLUX_FONT_SCALE)
         for idx, (sp, n_pts, n_cl, coords, intra_cls, big) in enumerate(intra_panel_data):
             ax = fig.add_subplot(gs[0, idx])
             obs_sp = adata.obs[adata.obs["species"] == sp]
-            title = f"{sp} (n={len(obs_sp):,}, k={n_cl})"
+            title = f"{sp}\n(n={len(obs_sp):,}, k={n_cl})"
             full = pd.crosstab(obs_sp["intra_cluster"].astype(str), obs_sp["cluster"].astype(str))
             lettered = [cl for cl in letters if cl in full.columns]
             if not lettered:
                 ax.axis("off")
-                ax.set_title(title, fontsize=FONT_FACET, fontweight="bold", pad=2)
+                ax.set_title(title, fontsize=FONT_FACET * FLUX_FONT_SCALE, fontweight="bold", pad=2)
                 continue
             flows = full[lettered]
             flows = flows[flows.sum(axis=1) > 0]
@@ -495,8 +533,8 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
             top = flows.idxmax(axis=1)
             left_colors = {cl: colors[letters[top[cl]]] if flows.loc[cl, top[cl]] > full.loc[cl].sum() / 2 else COLOR_BG for cl in l_order}
             rank = {cl: str(c_idx + 1) for c_idx, cl in enumerate(big.index) if cl in flows.index}
-            draw_flux(ax, flows, left_colors, {cl: colors[letters[cl]] for cl in lettered}, rank, {cl: letters[cl] for cl in lettered}, set(facets[sp]), title)
-        add_bottom_legend(fig, colors, "Inter-species cluster")
+            draw_flux(ax, flows, left_colors, {cl: colors[letters[cl]] for cl in lettered}, rank, {cl: f"{letters[cl]} ({counts_df.loc[cl, sp]:,})" for cl in lettered}, set(facets[sp]), title)
+        add_bottom_legend(fig, colors, "Inter-species cluster", font_scale=FLUX_FONT_SCALE)
         save_fig(fig, target_dir / f"sankey_intra_to_inter_clusters__{param_tag}.png")
         plt.close(fig)
     ###################################### LOGGING
@@ -552,7 +590,7 @@ def main() -> None:
     if len(npz_files) < 2:
         raise ValueError("[PYTHON-ERROR] This comparative script requires at least two .npz files.")
     use_pca = args.n_pcs is not None and args.n_pcs > 0
-    param_tag = f"{Path(npz_files[0]).parent.name}__res{args.resolution}_nn{args.n_neighbors}" + (f"_npc{args.n_pcs}" if use_pca else "_full")
+    param_tag = f"{Path(npz_files[0]).parent.name}__mcs{args.min_cluster_size}_nn{args.n_neighbors}" + (f"_npc{args.n_pcs}" if use_pca else "_full")
     target_dir = Path(args.outdir) / "_".join([Path(f).stem.replace("_reps", "") for f in npz_files])
     target_dir.mkdir(parents=True, exist_ok=True)
     ###################################### LOAD_DATA
