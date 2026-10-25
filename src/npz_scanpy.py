@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Processes ESMC protein embeddings with joint clustering, globally lettered species-specificity UMAP panels, intra-species clustering and module extraction.
 
-A first pass runs the full analysis and assigns unique letters to the most species-specific joint clusters; a second pass recomputes neighbors, Leiden and UMAP on the lettered clusters only and compares first- and second-pass memberships per species with Venn diagrams.
+A first pass runs the full analysis and assigns unique letters to the most species-specific joint clusters; a second pass recomputes neighbors, Leiden and UMAP on the lettered clusters only, plots their UMAP facets and a per-species protein-count barplot of the lettered clusters. All figures are saved as PNG and PDF.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -10,7 +10,6 @@ import datetime
 from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.patheffects as path_effects
 import matplotlib.pyplot as plt
-from matplotlib_venn import venn2
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -68,6 +67,15 @@ if args.yaml_out:
     Path(args.yaml_out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.yaml_out).write_text(yaml.dump(ydata, sort_keys=False))
 ###################################### HELPER_FUNCTIONS
+def save_fig(fig: plt.Figure, path: Path) -> None:
+    """Save a figure as both PNG and PDF.
+
+    Args:
+        fig (plt.Figure): Figure to save.
+        path (Path): Output path; its suffix is replaced by ``.png`` and ``.pdf``.
+    """
+    for ext in (".png", ".pdf"):
+        fig.savefig(path.with_suffix(ext), dpi=PANEL_DPI, bbox_inches="tight", facecolor="white")
 def letter_code(i: int) -> str:
     """Convert a zero-based index to a lowercase letter code (a, ..., z, aa, ab, ...).
 
@@ -131,7 +139,7 @@ def draw_facet(ax: plt.Axes, coords: np.ndarray, obs: pd.DataFrame, cluster_key:
     spec_scores = obs[cluster_key].map(sp_frac).astype(float).values
     ax.scatter(coords[~is_sp, 0], coords[~is_sp, 1], c=COLOR_BG, s=PT_SIZE, alpha=ALPHA_BG, rasterized=True, linewidths=0)
     fg_idx = np.where(is_sp)[0]
-    sort_order = fg_idx[np.argsort(spec_scores[is_sp])]
+    sort_order = fg_idx[np.lexsort((spec_scores[is_sp], obs[cluster_key].isin(list(facet)).values[is_sp]))]
     fg_scores = spec_scores[sort_order]
     fg_colors = COLORMAP_SPEC(fg_scores)
     fg_colors[:, 3] = ALPHA_MIN + (ALPHA_MAX - ALPHA_MIN) * fg_scores
@@ -217,7 +225,7 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
     for idx in range(n_sp, len(axes)):
         fig.delaxes(axes[idx])
     add_spec_cbar(fig, fig.add_subplot(gs[-1, :]))
-    plt.savefig(target_dir / f"umap_species_panel__{param_tag}.png", dpi=PANEL_DPI, bbox_inches="tight")
+    save_fig(fig, target_dir / f"umap_species_panel__{param_tag}.png")
     plt.close(fig)
     ###################################### JOINT_SAVE
     letter_rows = [(sp, cl, lt, counts_df.loc[cl, sp], cluster_sp_frac.loc[cl, sp]) for sp, sp_letters in facets.items() for cl, lt in sp_letters.items()]
@@ -312,7 +320,7 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
         cbar_intra = fig.colorbar(sm_intra, ax=list(axes[:n_intra]), orientation="horizontal", fraction=0.035, pad=0.08, aspect=35)
         cbar_intra.set_label("Proteins per highlighted cluster", fontsize=6)
         cbar_intra.ax.tick_params(labelsize=5)
-        fig.savefig(intra_dir / f"umap_intra_species_panel__{param_tag}.png", dpi=PANEL_DPI, bbox_inches="tight", facecolor="white")
+        save_fig(fig, intra_dir / f"umap_intra_species_panel__{param_tag}.png")
         plt.close(fig)
     ###################################### LOGGING
     with open(target_dir / f"clustering_metrics__{param_tag}.txt", "a") as f:
@@ -323,7 +331,7 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
     pd.concat(marker_frames, ignore_index=True).to_csv(target_dir / f"channel_importance_rankings__{param_tag}.csv", index=False)
     return letters, facets, cluster_sp_frac, counts_df
 def run_second_pass(adata: ad.AnnData, letters: dict[str, str], facets: dict[str, dict[str, str]], cluster_sp_frac: pd.DataFrame, counts_df: pd.DataFrame, target_dir: Path, param_tag: str, rep_key: str, n_pcs_use: int | None, use_pca: bool) -> None:
-    """Recompute neighbors, Leiden and UMAP on the lettered clusters and plot facets with first- vs second-pass Venn diagrams.
+    """Recompute neighbors, Leiden and UMAP on the lettered clusters, plot their facets and a per-species count barplot.
 
     Args:
         adata (ad.AnnData): First-pass embeddings carrying the ``cluster`` column.
@@ -353,27 +361,30 @@ def run_second_pass(adata: ad.AnnData, letters: dict[str, str], facets: dict[str
     obs, coords = adata_2.obs, adata_2.obsm["X_umap"]
     species_list = list(obs["species"].unique())
     n_sp = len(species_list)
-    fig = plt.figure(figsize=(PANEL_SIZE_INCHES * n_sp, PANEL_SIZE_INCHES * 2 + 0.4), dpi=PANEL_DPI)
-    gs = fig.add_gridspec(3, n_sp, height_ratios=[1, 1, 0.04], hspace=0.30, wspace=0.25)
+    fig = plt.figure(figsize=(PANEL_SIZE_INCHES * n_sp, PANEL_SIZE_INCHES + 0.4), dpi=PANEL_DPI)
+    gs = fig.add_gridspec(2, n_sp, height_ratios=[1, 0.04], hspace=0.30, wspace=0.25)
     for idx, sp in enumerate(species_list):
         draw_facet(fig.add_subplot(gs[0, idx]), coords, obs, "cluster_p1", sp, cluster_sp_frac[sp], facets[sp], counts_df[sp])
-        sub = gs[1, idx].subgridspec(2, 2, hspace=0.25, wspace=0.15)
-        sp_obs = obs[obs["species"] == sp]
-        facet_items = list(facets[sp].items())
-        for v_idx in range(4):
-            ax = fig.add_subplot(sub[v_idx // 2, v_idx % 2])
-            ax.set_axis_off()
-            if v_idx >= len(facet_items): continue
-            cl, letter = facet_items[v_idx]
-            p1_obs = sp_obs[sp_obs["cluster_p1"] == cl]
-            if p1_obs.empty: continue
-            best = p1_obs["cluster_p2"].value_counts().idxmax()
-            v = venn2([set(p1_obs["protein_id"]), set(sp_obs[sp_obs["cluster_p2"] == best]["protein_id"])], set_labels=(f"{letter} p1", f"p2 {best}"), set_colors=(PALETTE[0], PALETTE[3]), alpha=ALPHA_MAX, ax=ax)
-            for t in list(v.set_labels) + list(v.subset_labels):
-                if t is not None: t.set_fontsize(4)
-            ax.set_title(f"{letter} vs p2 cl{best}", fontsize=5, fontweight="bold", pad=1)
     add_spec_cbar(fig, fig.add_subplot(gs[-1, :]))
-    fig.savefig(target_dir / f"umap_lettered_panel__{param_tag}.png", dpi=PANEL_DPI, bbox_inches="tight", facecolor="white")
+    save_fig(fig, target_dir / f"umap_lettered_panel__{param_tag}.png")
+    plt.close(fig)
+    ###################################### LETTERED_COUNTS_BARPLOT
+    lt_counts = counts_df.loc[list(letters), species_list]
+    lt_counts = lt_counts.loc[lt_counts.sum(axis=1).sort_values(ascending=False).index]
+    x, width = np.arange(len(lt_counts)), 0.8 / n_sp
+    fig, ax = plt.subplots(figsize=(PANEL_SIZE_INCHES * n_sp, PANEL_SIZE_INCHES), dpi=PANEL_DPI)
+    for i, sp in enumerate(species_list):
+        ax.bar(x - 0.4 + width * (i + 0.5), lt_counts[sp].values, width=width, color=PALETTE[i % len(PALETTE)], label=sp, linewidth=0)
+    ax.set_xticks(x)
+    ax.set_xticklabels([letters[cl] for cl in lt_counts.index], fontsize=5)
+    ax.tick_params(axis="y", labelsize=5)
+    ax.set_xlim(-0.6, len(lt_counts) - 0.4)
+    ax.set_xlabel("Lettered cluster", fontsize=6, labelpad=1)
+    ax.set_ylabel("Proteins", fontsize=6, labelpad=1)
+    ax.set_title("Proteins per species in lettered clusters", fontsize=7, fontweight="bold", pad=2)
+    ax.legend(fontsize=5, frameon=False)
+    ax.spines[["top", "right"]].set_visible(False)
+    save_fig(fig, target_dir / f"lettered_species_counts__{param_tag}.png")
     plt.close(fig)
 ###################################### MAIN
 def main() -> None:
@@ -412,12 +423,13 @@ def main() -> None:
         print(f"[PYTHON-INFO][DATA-SHAPE] Operating in full-space dimensions: {adata.shape[1]}")
         rep_key, n_pcs_use = "X", None
     ###################################### FIRST_PASS
-    letters, facets, cluster_sp_frac, counts_df = run_pass(adata, target_dir / "first_pass", param_tag, rep_key, n_pcs_use, use_pca)
+    pass_dir = target_dir / "first_pass"
+    letters, facets, cluster_sp_frac, counts_df = run_pass(adata, pass_dir, param_tag, rep_key, n_pcs_use, use_pca)
     ###################################### SECOND_PASS
     if len(letters) < 2:
         print(f"[PYTHON-INFO][SECOND-PASS] Skipping: fewer than two lettered clusters ({len(letters)})")
     else:
-        run_second_pass(adata, letters, facets, cluster_sp_frac, counts_df, target_dir / "second_pass", param_tag, rep_key, n_pcs_use, use_pca)
+        run_second_pass(adata, letters, facets, cluster_sp_frac, counts_df, pass_dir, param_tag, rep_key, n_pcs_use, use_pca)
     max_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
     exec_time = time.time() - start_time
     date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
