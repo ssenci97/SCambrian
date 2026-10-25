@@ -7,4 +7,5 @@
 data/
 logs/
 tmp/
+CLAUDE.md
 __pycache__/
