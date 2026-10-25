@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Processes ESMC protein embeddings with intra-species clustering, joint clustering, species-specific cluster lettering, intra-to-inter cluster flux diagrams and module extraction.
 
-Lettered clusters are joint Leiden clusters with more than MIN_CLUSTER_SIZE proteins, ranked by size and specificity index with equal weight, and kept when one species exceeds MIN_PERCENT_SPECIFICITY; when none passes, the top FALLBACK_TOP_N candidates are lettered regardless of specificity. The report panels, each A4/4 wide, are: (a) intra-species UMAPs with the top MAX_INTRA_LABELS clusters above MIN_CLUSTER_SIZE, ranked by protein count and UMAP density together, coloured by protein count, (b) joint UMAPs with the lettered clusters in the facet of their majority species, coloured by specificity index, (c) a re-projected (not reclustered) UMAP of all proteins of the lettered clusters coloured by letter, (d) intra-to-lettered cluster fluxes on a square-root (semi-quantitative) scale, where intra clusters inherit a letter colour only when a strict majority of their proteins flows into it, and (e) a per-species protein-count barplot of the lettered clusters. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
+Embeddings are mean-centred and L2-normalised before cosine kNN. Lettered clusters are joint Leiden clusters with at least MIN_CLUSTER_SIZE proteins, ranked by size and specificity index with equal weight, and kept when one species exceeds MIN_PERCENT_SPECIFICITY; the specificity index is the species fraction of a cluster after normalising counts by proteome size. When none passes, the top FALLBACK_TOP_N candidates are lettered regardless of specificity. The report panels, each A4/4 wide, are: (a) intra-species UMAPs with the top MAX_INTRA_LABELS clusters above MIN_CLUSTER_SIZE, ranked by protein count and UMAP density together, coloured by protein count, (b) joint UMAPs with the lettered clusters in the facet of their majority species, coloured by specificity index, (c) a re-projected (not reclustered) UMAP of all proteins of the lettered clusters coloured by letter, (d) intra-to-lettered cluster fluxes on a square-root (semi-quantitative) scale, where intra clusters inherit a letter colour only when a strict majority of their proteins flows into it, and (e) a per-species protein-count barplot of the lettered clusters. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -45,7 +45,7 @@ FONT_FACET = 12
 FONT_LABEL = 10
 FONT_TICK = 9
 FONT_TITLE = 14
-JOINT_LEIDEN_RES = 0.5
+JOINT_LEIDEN_RES = 1.0
 LEGEND_CHAR_INCHES = 0.08
 LEGEND_COL_INCHES = 0.4
 LEGEND_MARKER = 7
@@ -55,7 +55,7 @@ MIN_CLUSTER_SIZE = 150
 MIN_MODULE_SIZE = 200
 PALETTE = ["#ECDE90", "#93DEB6", "#F1B584", "#76BBE2", "#DA919B", "#899E64", "#8E81B9", "#A66C58", "#30767A", "#7A5271"]
 MIN_PERCENT_ENRICHMENT = 80
-MIN_PERCENT_SPECIFICITY = 50
+MIN_PERCENT_SPECIFICITY = 45
 N_NEIGHBORS = 15
 N_PCS = None
 PANEL_DPI = 300
@@ -85,7 +85,7 @@ parser.set_defaults(**params)
 args = parser.parse_args()
 if args.yaml_out:
     ydata = yaml.safe_load(Path(args.yaml_out).read_text()) if Path(args.yaml_out).exists() else {}
-    ydata[script_key] = params
+    ydata[script_key] = {k: getattr(args, k) for k in params}
     Path(args.yaml_out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.yaml_out).write_text(yaml.dump(ydata, sort_keys=False))
 ###################################### HELPER_FUNCTIONS
@@ -140,23 +140,25 @@ def letter_code(i: int) -> str:
         s = chr(97 + r) + s
     return s
 def assign_letters(counts_df: pd.DataFrame, cluster_sp_frac: pd.DataFrame) -> dict[str, str]:
-    """Letter the joint clusters above MIN_CLUSTER_SIZE ranked by size and specificity index (equal weight) whose top species exceeds MIN_PERCENT_SPECIFICITY.
+    """Letter the joint clusters of at least MIN_CLUSTER_SIZE proteins ranked by size and specificity index (equal weight) whose top species exceeds MIN_PERCENT_SPECIFICITY.
 
     Args:
         counts_df (pd.DataFrame): Protein counts per cluster (rows) and species (columns).
-        cluster_sp_frac (pd.DataFrame): Species fraction per cluster (rows) and species (columns).
+        cluster_sp_frac (pd.DataFrame): Proteome-size-normalised species fraction per cluster (rows) and species (columns).
 
     Returns:
         dict[str, str]: Mapping cluster -> letter in rank order; the top FALLBACK_TOP_N candidates are kept when none passes.
     """
     size, spec = counts_df.sum(axis=1), cluster_sp_frac.max(axis=1)
-    cand = size[size > MIN_CLUSTER_SIZE].index
+    cand = size[size >= MIN_CLUSTER_SIZE].index
+    print(f"[PYTHON-INFO][LETTERS] {len(size)} joint clusters, largest {size.max():,} proteins, {len(cand)} with >= {MIN_CLUSTER_SIZE} proteins, best specificity among them {spec[cand].max() * 100 if len(cand) else float('nan'):.1f}%, {(spec[cand] * 100 > MIN_PERCENT_SPECIFICITY).sum()} above {MIN_PERCENT_SPECIFICITY}%")
+    reason = f"specificity > {MIN_PERCENT_SPECIFICITY}%" if len(cand) else f"size >= {MIN_CLUSTER_SIZE}"
     if cand.empty: cand = size.index
     rank = pd.DataFrame({"score": size[cand].rank(ascending=False) + spec[cand].rank(ascending=False), "count": size[cand]}).sort_values(["score", "count"], ascending=[True, False]).index
     chosen = [cl for cl in rank if spec[cl] * 100 > MIN_PERCENT_SPECIFICITY]
     if not chosen:
         chosen = list(rank[:FALLBACK_TOP_N])
-        print(f"[PYTHON-INFO][LETTERS] No cluster > {MIN_CLUSTER_SIZE} proteins with > {MIN_PERCENT_SPECIFICITY}% specificity, lettering top {len(chosen)} regardless of specificity")
+        print(f"[PYTHON-INFO][LETTERS] No cluster passes {reason}, lettering top {len(chosen)} regardless of specificity")
     return {cl: letter_code(i) for i, cl in enumerate(chosen)}
 def facet_letters(letters: dict[str, str], cluster_sp_frac: pd.DataFrame, sp: str) -> dict[str, str]:
     """Select the lettered clusters whose majority species is ``sp``.
@@ -397,21 +399,23 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
     umap_coords = adata.obsm["X_umap"]
     cluster_sp_frac = pd.crosstab(adata.obs["cluster"], adata.obs["species"], normalize="index")
     counts_df = pd.crosstab(adata.obs["cluster"], adata.obs["species"])
-    letters = assign_letters(counts_df, cluster_sp_frac)
-    facets = {sp: facet_letters(letters, cluster_sp_frac, sp) for sp in species_list}
+    spec_frac = counts_df.div(counts_df.sum(axis=0), axis=1)
+    spec_frac = spec_frac.div(spec_frac.sum(axis=1), axis=0)
+    letters = assign_letters(counts_df, spec_frac)
+    facets = {sp: facet_letters(letters, spec_frac, sp) for sp in species_list}
     colors = letter_colors(letters)
     print(f"[PYTHON-INFO][LETTERS] {len(letters)} lettered clusters: {letters}")
     n_sp = len(species_list)
-    spec_vals = [cluster_sp_frac.loc[cl, sp] for sp in species_list for cl in facets[sp]] or [0.0, 1.0]
+    spec_vals = [spec_frac.loc[cl, sp] for sp in species_list for cl in facets[sp]] or [0.0, 1.0]
     norm_spec = Normalize(min(spec_vals), max(spec_vals))
     fig, gs = row_figure(n_sp, "Inter-species")
     for idx, sp in enumerate(species_list):
-        draw_facet(fig.add_subplot(gs[0, idx]), umap_coords, adata.obs, "cluster", sp, colors, facets[sp], counts_df[sp], cluster_sp_frac[sp], norm_spec)
+        draw_facet(fig.add_subplot(gs[0, idx]), umap_coords, adata.obs, "cluster", sp, colors, facets[sp], counts_df[sp], spec_frac[sp], norm_spec)
     add_colorbar(fig.add_subplot(gs[-1, :]), norm_spec, "Species specificity index")
     save_fig(fig, target_dir / f"umap_joint_clusters_species_specificity__{param_tag}.png")
     plt.close(fig)
     ###################################### JOINT_SAVE
-    letter_rows = [(sp, cl, lt, counts_df.loc[cl, sp], cluster_sp_frac.loc[cl, sp]) for sp, sp_letters in facets.items() for cl, lt in sp_letters.items()]
+    letter_rows = [(sp, cl, lt, counts_df.loc[cl, sp], spec_frac.loc[cl, sp]) for sp, sp_letters in facets.items() for cl, lt in sp_letters.items()]
     pd.DataFrame(letter_rows, columns=["species", "cluster", "letter", "protein_count", "specificity"]).to_csv(target_dir / f"species_specific_cluster_letters__{param_tag}.csv", index=False)
     adata.obs[["protein_id", "species", "cluster"]].to_csv(target_dir / f"protein_clusters_metadata__{param_tag}.csv", index=False)
     enrichment = cluster_sp_frac * 100
@@ -579,6 +583,7 @@ def main() -> None:
     adata.obs_names_make_unique()
     print(f"[PYTHON-INFO][DATA-SHAPE] Initial data shape: {adata.shape}")
     ###################################### PREPROCESSING
+    adata.X = adata.X - adata.X.mean(axis=0)
     norms = np.linalg.norm(adata.X, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     adata.X = adata.X / norms
