@@ -174,7 +174,6 @@ def draw_facet(ax: plt.Axes, coords: np.ndarray, obs: pd.DataFrame, sp: str, col
     """
     is_sp = (obs["species"] == sp).values
     cl_str = obs["cluster"].astype(str)
-    ax.scatter(coords[~is_sp, 0], coords[~is_sp, 1], c=COLOR_BG, s=PT_SIZE, alpha=ALPHA_BG, rasterized=True, linewidths=0)
     in_facet = cl_str.isin(list(facet)).values
     if spec is not None:
         scores = cl_str.map(spec).values.astype(float)
