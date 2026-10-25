@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Processes ESMC protein embeddings with joint clustering, globally lettered species-specific UMAP panels coloured by letter, intra-species clustering whose clusters inherit a letter colour when more than INHERIT_FRAC of their proteins fall in it, intra-to-inter cluster flux diagrams onto all lettered clusters (UMAP-shown ones outlined in black) and module extraction.
+"""Processes ESMC protein embeddings with intra-species clustering, joint clustering, species-specific cluster lettering, intra-to-inter cluster flux diagrams and module extraction.
 
-A first pass runs the full analysis and assigns unique letters to the most species-specific joint clusters; a second pass recomputes neighbors, Leiden and UMAP on the lettered clusters only, plots their UMAP facets and a per-species protein-count barplot of the UMAP-shown clusters. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
+The report panels, each A4/4 wide, are: (a) intra-species UMAPs with clusters above MIN_CLUSTER_SIZE coloured by protein count, (b) joint UMAPs with the top species-specific clusters coloured by specificity index, (c) a second-pass UMAP of the lettered clusters only coloured by letter, (d) intra-to-inter cluster fluxes and (e) a per-species protein-count barplot of the lettered clusters. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
 import argparse
 import datetime
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import LinearSegmentedColormap, Normalize, to_hex
 from matplotlib.gridspec import GridSpec
 import matplotlib.patheffects as path_effects
 import matplotlib.pyplot as plt
@@ -28,6 +30,7 @@ ALPHA_BG = 0.50
 ALPHA_MAX = 0.95
 COLOR_BG = "#BFC5CE"
 COLOR_FG = "#8A929E"
+COLORMAP_SPEC = LinearSegmentedColormap.from_list("scambrian", ["#76BBE2", "#7b2c6d"])
 DEFAULT_OUTDIR = "data/scanpy/"
 FIG_EXTRA_HEIGHT = 1.0
 FLUX_ALPHA = 0.6
@@ -37,18 +40,18 @@ FONT_FACET = 8
 FONT_LABEL = 7
 FONT_TICK = 6
 FONT_TITLE = 10
-INHERIT_FRAC = 0.66
 LEIDEN_RES = 1.0
-MAX_LETTERED = 8
 MAX_SPECIFIC_LABELS = 5
+MIN_CLUSTER_SIZE = 150
 MIN_MODULE_SIZE = 200
 PALETTE = ["#ECDE90", "#93DEB6", "#F1B584", "#76BBE2", "#DA919B", "#899E64", "#8E81B9", "#A66C58", "#30767A", "#7A5271"]
 MIN_PERCENT_ENRICHMENT = 80
 N_NEIGHBORS = 15
 N_PCS = None
 PANEL_DPI = 300
+PANEL_WIDTH_INCHES = A4_WIDTH_INCHES / 4
 PT_SIZE = 1.0
-REPORT_ORDER = ["umap_joint_clusters_species_specificity", "umap_intra_species_top_clusters", "umap_reclustered_species_specific_clusters", "barplot_umap_labelled_clusters_protein_counts", "sankey_intra_to_inter_clusters"]
+REPORT_ORDER = ["umap_intra_species_top_clusters", "umap_joint_clusters_species_specificity", "umap_reclustered_species_specific_clusters", "sankey_intra_to_inter_clusters", "barplot_umap_labelled_clusters_protein_counts"]
 SANKEY_HEIGHT_SCALE = 2.0
 SEED = 42
 YAML_PATH = "configs/param_configs.yaml"
@@ -85,7 +88,7 @@ def save_fig(fig: plt.Figure, path: Path) -> None:
     for ext in (".png", ".pdf"):
         fig.savefig(path.with_suffix(ext), dpi=PANEL_DPI, facecolor="white")
 def fig_size(n_cols: int) -> tuple[float, float]:
-    """Return the shared figure size: landscape A4 width and a height fitting one row of square panels.
+    """Return the shared figure size: one A4/4-wide square panel per column plus a strip for titles and legends.
 
     Args:
         n_cols (int): Number of panels in the row.
@@ -93,7 +96,7 @@ def fig_size(n_cols: int) -> tuple[float, float]:
     Returns:
         tuple[float, float]: Figure width and height in inches.
     """
-    return A4_WIDTH_INCHES, A4_WIDTH_INCHES / n_cols + FIG_EXTRA_HEIGHT
+    return PANEL_WIDTH_INCHES * n_cols, PANEL_WIDTH_INCHES + FIG_EXTRA_HEIGHT
 def row_figure(n_cols: int, title: str, height_scale: float = 1.0) -> tuple[plt.Figure, GridSpec]:
     """Create a one-row panel figure with a bottom strip for a colorbar or legend.
 
@@ -137,7 +140,7 @@ def assign_letters(counts_df: pd.DataFrame, cluster_sp_frac: pd.DataFrame, speci
     chosen = set()
     for sp in species_list:
         cand = pd.DataFrame({"spec": cluster_sp_frac[sp], "count": counts_df[sp]})
-        chosen |= set(cand[cand["count"] >= MIN_MODULE_SIZE].sort_values(["spec", "count"], ascending=False).head(MAX_LETTERED).index)
+        chosen |= set(cand[cand["count"] >= MIN_CLUSTER_SIZE].sort_values(["spec", "count"], ascending=False).head(MAX_SPECIFIC_LABELS).index)
     rank = pd.DataFrame({"spec": cluster_sp_frac.max(axis=1), "count": counts_df.sum(axis=1)}).loc[sorted(chosen)].sort_values(["spec", "count"], ascending=False)
     return {cl: letter_code(i) for i, cl in enumerate(rank.index)}
 def facet_letters(letters: dict[str, str], counts_df: pd.DataFrame, cluster_sp_frac: pd.DataFrame, sp: str) -> dict[str, str]:
@@ -153,7 +156,7 @@ def facet_letters(letters: dict[str, str], counts_df: pd.DataFrame, cluster_sp_f
         dict[str, str]: Up to MAX_SPECIFIC_LABELS clusters -> letter, the most specific for ``sp``, sorted by letter.
     """
     cand = pd.DataFrame({"spec": cluster_sp_frac[sp], "count": counts_df[sp]}).loc[list(letters)]
-    cand = cand[cand["count"] >= MIN_MODULE_SIZE].sort_values(["spec", "count"], ascending=False).head(MAX_SPECIFIC_LABELS)
+    cand = cand[cand["count"] >= MIN_CLUSTER_SIZE].sort_values(["spec", "count"], ascending=False).head(MAX_SPECIFIC_LABELS)
     return dict(sorted(((cl, letters[cl]) for cl in cand.index), key=lambda kv: (len(kv[1]), kv[1])))
 def letter_colors(letters: dict[str, str]) -> dict[str, str]:
     """Assign an alternating PALETTE colour to each letter, in letter order.
@@ -165,24 +168,19 @@ def letter_colors(letters: dict[str, str]) -> dict[str, str]:
         dict[str, str]: Mapping letter -> colour.
     """
     return {lt: PALETTE[i % len(PALETTE)] for i, lt in enumerate(sorted(letters.values(), key=lambda lt: (len(lt), lt)))}
-def inherit_colors(intra: pd.Series, inter: pd.Series, facet: dict[str, str], colors: dict[str, str]) -> dict[str, str]:
-    """Give each intra cluster the colour of the facet letter cluster holding more than INHERIT_FRAC of its proteins.
+def gradient_hex(value: float, norm: Normalize) -> str:
+    """Map a value to a hex colour on the quantitative gradient.
 
     Args:
-        intra (pd.Series): Intra cluster of each protein of one species.
-        inter (pd.Series): Joint cluster of the same proteins.
-        facet (dict[str, str]): Lettered clusters -> letters labelled in the species facet.
-        colors (dict[str, str]): Mapping letter -> colour.
+        value (float): Value to map.
+        norm (Normalize): Normalisation shared by the panel.
 
     Returns:
-        dict[str, str]: Mapping inheriting intra cluster -> colour.
+        str: Hex colour.
     """
-    frac = pd.crosstab(intra.astype(str).values, inter.astype(str).values, normalize="index").reindex(columns=list(facet), fill_value=0)
-    if frac.empty: return {}
-    best, best_frac = frac.idxmax(axis=1), frac.max(axis=1)
-    return {cl: colors[facet[best[cl]]] for cl in frac.index if best_frac[cl] > INHERIT_FRAC}
-def draw_facet(ax: plt.Axes, coords: np.ndarray, obs: pd.DataFrame, cluster_key: str, sp: str, colors: dict[str, str], facet: dict[str, str], sp_counts: pd.Series) -> None:
-    """Draw one species facet coloured by labelled letter cluster with letter labels at cluster centroids.
+    return to_hex(COLORMAP_SPEC(norm(value)))
+def draw_facet(ax: plt.Axes, coords: np.ndarray, obs: pd.DataFrame, cluster_key: str, sp: str, colors: dict[str, str], facet: dict[str, str], sp_counts: pd.Series, spec: pd.Series | None = None, norm: Normalize | None = None) -> None:
+    """Draw one species facet coloured by letter, or by specificity index when ``norm`` is given, with letter labels at cluster centroids.
 
     Args:
         ax (plt.Axes): Target axes.
@@ -193,13 +191,16 @@ def draw_facet(ax: plt.Axes, coords: np.ndarray, obs: pd.DataFrame, cluster_key:
         colors (dict[str, str]): Mapping letter -> colour.
         facet (dict[str, str]): Clusters -> letters to label.
         sp_counts (pd.Series): Proteins of ``sp`` per cluster.
+        spec (pd.Series | None): Specificity index of ``sp`` per cluster, used with ``norm``.
+        norm (Normalize | None): Gradient normalisation; when None clusters are coloured by letter.
     """
+    cl_colors = {cl: gradient_hex(spec[cl], norm) if norm is not None else colors[lt] for cl, lt in facet.items()}
     is_sp = (obs["species"] == sp).values
     in_facet = obs[cluster_key].astype(str).isin(list(facet)).values
     ax.scatter(coords[~is_sp, 0], coords[~is_sp, 1], c=COLOR_BG, s=PT_SIZE, alpha=ALPHA_BG, rasterized=True, linewidths=0)
     ax.scatter(coords[is_sp & ~in_facet, 0], coords[is_sp & ~in_facet, 1], c=COLOR_FG, s=PT_SIZE, alpha=ALPHA_BG, rasterized=True, linewidths=0)
     fg = is_sp & in_facet
-    ax.scatter(coords[fg, 0], coords[fg, 1], c=obs[cluster_key].astype(str).map(facet).map(colors).values[fg], s=PT_SIZE, alpha=ALPHA_MAX, rasterized=True, linewidths=0)
+    ax.scatter(coords[fg, 0], coords[fg, 1], c=obs[cluster_key].astype(str).map(cl_colors).values[fg], s=PT_SIZE, alpha=ALPHA_MAX, rasterized=True, linewidths=0)
     max_cnt_sp = max((sp_counts[cl] for cl in facet), default=1)
     for cl, letter in facet.items():
         cl_pts = coords[(obs[cluster_key] == cl).values]
@@ -223,6 +224,19 @@ def add_letter_legend(cax: plt.Axes, colors: dict[str, str]) -> None:
     for lt, color in colors.items():
         cax.scatter([], [], c=color, s=15, label=lt)
     if colors: cax.legend(loc="center", ncol=len(colors), frameon=False, fontsize=FONT_TICK, title="Inter-species cluster", title_fontsize=FONT_LABEL)
+def add_colorbar(cax: plt.Axes, norm: Normalize, label: str) -> None:
+    """Add a centred horizontal colorbar of the quantitative gradient.
+
+    Args:
+        cax (plt.Axes): Strip axes hosting the colorbar.
+        norm (Normalize): Normalisation of the plotted values.
+        label (str): Colorbar label, written on its left.
+    """
+    cax.axis("off")
+    cb = plt.colorbar(ScalarMappable(norm=norm, cmap=COLORMAP_SPEC), cax=cax.inset_axes([0.35, 0.0, 0.3, 1.0]), orientation="horizontal")
+    cb.ax.tick_params(labelsize=FONT_TICK, length=2, pad=1)
+    cb.outline.set_linewidth(0.4)
+    cax.text(0.34, 0.5, label, fontsize=FONT_LABEL, ha="right", va="center", transform=cax.transAxes)
 def draw_flux(ax: plt.Axes, flows: pd.DataFrame, left_colors: dict[str, str], right_colors: dict[str, str], outlined: set[str], title: str) -> None:
     """Draw an alluvial diagram of protein fluxes from intra-species clusters (left) to inter-species clusters (right).
 
@@ -347,10 +361,12 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
     shown_colors = {lt: c for lt, c in colors.items() if any(lt in f.values() for f in facets.values())}
     print(f"[PYTHON-INFO][LETTERS] {len(letters)} lettered clusters: {letters}")
     n_sp = len(species_list)
-    fig, gs = row_figure(n_sp, "Inter-Species")
+    spec_vals = [cluster_sp_frac.loc[cl, sp] for sp in species_list for cl in facets[sp]] or [0.0, 1.0]
+    norm_spec = Normalize(min(spec_vals), max(spec_vals))
+    fig, gs = row_figure(n_sp, "Inter-species")
     for idx, sp in enumerate(species_list):
-        draw_facet(fig.add_subplot(gs[0, idx]), umap_coords, adata.obs, "cluster", sp, colors, facets[sp], counts_df[sp])
-    add_letter_legend(fig.add_subplot(gs[-1, :]), shown_colors)
+        draw_facet(fig.add_subplot(gs[0, idx]), umap_coords, adata.obs, "cluster", sp, colors, facets[sp], counts_df[sp], cluster_sp_frac[sp], norm_spec)
+    add_colorbar(fig.add_subplot(gs[-1, :]), norm_spec, "Species specificity index")
     save_fig(fig, target_dir / f"umap_joint_clusters_species_specificity__{param_tag}.png")
     plt.close(fig)
     ###################################### JOINT_SAVE
@@ -391,9 +407,8 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
         n_cl = adata_sp.obs["intra_cluster"].nunique()
         coords = adata_sp.obsm["X_umap"]
         counts_intra = adata_sp.obs["intra_cluster"].value_counts()
-        top_cls = list(counts_intra.head(len(PALETTE)).index)
-        inherited = inherit_colors(adata_sp.obs["intra_cluster"], adata_sp.obs["cluster"], facets[sp], colors)
-        intra_panel_data.append((sp, mask.sum(), n_cl, coords, adata_sp.obs["intra_cluster"].astype(str).values, top_cls, counts_intra, inherited))
+        counts_intra.index = counts_intra.index.astype(str)
+        intra_panel_data.append((sp, mask.sum(), n_cl, coords, adata_sp.obs["intra_cluster"].astype(str).values, counts_intra[counts_intra >= MIN_CLUSTER_SIZE]))
         for cl, cnt in counts_intra.items():
             if cnt >= MIN_MODULE_SIZE:
                 adata_sp.obs[adata_sp.obs["intra_cluster"] == cl]["protein_id"].to_csv(modules_dir / f"intra_{sp}_{cnt:07d}_clust{cl}_{param_tag}.txt", index=False, header=False)
@@ -409,38 +424,43 @@ def run_pass(adata: ad.AnnData, target_dir: Path, param_tag: str, rep_key: str, 
         intra_marker_dfs.append(marker_df_sp)
     n_intra = len(intra_panel_data)
     if n_intra > 0:
+        big_vals = [cnt for *_, big in intra_panel_data for cnt in big.values] or [MIN_CLUSTER_SIZE, MIN_CLUSTER_SIZE + 1]
+        norm_size = Normalize(min(big_vals), max(big_vals))
         fig, gs = row_figure(n_sp, "Intra-species")
-        for idx, (sp, n_pts, n_cl, coords, intra_cls, top_cls, counts_intra, inherited) in enumerate(intra_panel_data):
+        for idx, (sp, n_pts, n_cl, coords, intra_cls, big) in enumerate(intra_panel_data):
             ax = fig.add_subplot(gs[0, idx])
-            is_shown = np.isin(intra_cls, list(inherited))
+            is_shown = np.isin(intra_cls, list(big.index))
             ax.scatter(coords[~is_shown, 0], coords[~is_shown, 1], c=COLOR_BG, s=PT_SIZE, alpha=ALPHA_BG, rasterized=True, linewidths=0, zorder=1)
-            for c_idx, cl in enumerate(counts_intra.index.astype(str)):
-                if cl not in inherited: continue
+            for c_idx, (cl, cnt) in enumerate(big.items()):
                 cl_pts = coords[intra_cls == cl]
-                ax.scatter(cl_pts[:, 0], cl_pts[:, 1], c=inherited[cl], s=PT_SIZE, alpha=ALPHA_MAX, rasterized=True, linewidths=0, zorder=3)
+                ax.scatter(cl_pts[:, 0], cl_pts[:, 1], c=gradient_hex(cnt, norm_size), s=PT_SIZE, alpha=ALPHA_MAX, rasterized=True, linewidths=0, zorder=3)
                 txt = ax.text(np.median(cl_pts[:, 0]), np.median(cl_pts[:, 1]), str(c_idx + 1), fontsize=FONT_LABEL, ha="center", va="center", fontweight="bold", color="black", zorder=6)
                 txt.set_path_effects([path_effects.withStroke(linewidth=1.25, foreground="white")])
-            ax.set_title(f"{sp} ({len(inherited)} inherited clusters, k={n_cl})", fontsize=FONT_FACET, fontweight="bold", pad=2)
+            ax.set_title(f"{sp} (n={n_pts:,}, k={n_cl})", fontsize=FONT_FACET, fontweight="bold", pad=2)
             ax.set_xlabel("UMAP 1", fontsize=FONT_LABEL, labelpad=1)
             ax.set_ylabel("UMAP 2", fontsize=FONT_LABEL, labelpad=1)
             ax.tick_params(labelsize=FONT_TICK)
             ax.set_aspect("equal", "datalim")
-        add_letter_legend(fig.add_subplot(gs[-1, :]), shown_colors)
+        add_colorbar(fig.add_subplot(gs[-1, :]), norm_size, f"Proteins per cluster (\u2265{MIN_CLUSTER_SIZE})")
         save_fig(fig, intra_dir / f"umap_intra_species_top_clusters__{param_tag}.png")
         plt.close(fig)
     ###################################### INTRA_INTER_FLUX
     if n_intra > 0:
         fig, gs = row_figure(n_sp, "Intra- to Inter-species cluster fluxes", SANKEY_HEIGHT_SCALE)
-        for idx, (sp, n_pts, n_cl, coords, intra_cls, top_cls, counts_intra, inherited) in enumerate(intra_panel_data):
-            obs_sp = adata.obs[(adata.obs["species"] == sp) & adata.obs["intra_cluster"].isin(top_cls)]
-            rank = {cl: str(c_idx + 1) for c_idx, cl in enumerate(top_cls)}
-            left_colors = {rank[cl]: inherited.get(str(cl), COLOR_BG) for cl in top_cls}
+        for idx, (sp, n_pts, n_cl, coords, intra_cls, big) in enumerate(intra_panel_data):
+            ax = fig.add_subplot(gs[0, idx])
+            obs_sp = adata.obs[(adata.obs["species"] == sp) & adata.obs["intra_cluster"].isin(list(big.index))]
+            if obs_sp.empty:
+                ax.axis("off")
+                continue
+            rank = {cl: str(c_idx + 1) for c_idx, cl in enumerate(big.index)}
+            left_colors = {rank[cl]: gradient_hex(cnt, norm_size) for cl, cnt in big.items()}
             inter = obs_sp["cluster"].map(letters).fillna("other")
             cols = list(letters.values()) + ["other"]
             flows = pd.crosstab(obs_sp["intra_cluster"].map(rank), inter).reindex(index=list(rank.values()), columns=cols, fill_value=0)
             flows = flows.loc[flows.sum(axis=1) > 0, flows.sum(axis=0) > 0]
             right_colors = {lt: colors[lt] if lt in facets[sp].values() else COLOR_FG for lt in letters.values()} | {"other": COLOR_BG}
-            draw_flux(fig.add_subplot(gs[0, idx]), flows, left_colors, right_colors, set(facets[sp].values()), f"{sp} (n={len(obs_sp):,})")
+            draw_flux(ax, flows, left_colors, right_colors, set(facets[sp].values()), f"{sp} (n={len(obs_sp):,})")
         add_letter_legend(fig.add_subplot(gs[-1, :]), shown_colors)
         save_fig(fig, target_dir / f"sankey_intra_to_inter_clusters__{param_tag}.png")
         plt.close(fig)
