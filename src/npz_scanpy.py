@@ -138,13 +138,13 @@ def assign_letters(counts_df: pd.DataFrame, cluster_sp_frac: pd.DataFrame, speci
         species_list (list[str]): Species to consider.
 
     Returns:
-        dict[str, str]: Mapping cluster -> letter, ordered by decreasing specificity and size; no letter is shared by two clusters.
+        dict[str, str]: Mapping cluster -> letter, ordered by decreasing size and specificity; no letter is shared by two clusters.
     """
     chosen = set()
     for sp in species_list:
         cand = pd.DataFrame({"spec": cluster_sp_frac[sp], "count": counts_df[sp]})
-        chosen |= set(cand[(cand["count"] >= MIN_CLUSTER_SIZE) & (cand["spec"] * 100 >= MIN_PERCENT_SPECIFICITY)].sort_values(["spec", "count"], ascending=False).head(MAX_SPECIFIC_LABELS).index)
-    rank = pd.DataFrame({"spec": cluster_sp_frac.max(axis=1), "count": counts_df.sum(axis=1)}).loc[sorted(chosen)].sort_values(["spec", "count"], ascending=False)
+        chosen |= set(cand[(cand["count"] >= MIN_CLUSTER_SIZE) & (cand["spec"] * 100 >= MIN_PERCENT_SPECIFICITY)].sort_values(["count", "spec"], ascending=False).head(MAX_SPECIFIC_LABELS).index)
+    rank = pd.DataFrame({"spec": cluster_sp_frac.max(axis=1), "count": counts_df.sum(axis=1)}).loc[sorted(chosen)].sort_values(["count", "spec"], ascending=False)
     return {cl: letter_code(i) for i, cl in enumerate(rank.index)}
 def facet_letters(letters: dict[str, str], counts_df: pd.DataFrame, cluster_sp_frac: pd.DataFrame, sp: str) -> dict[str, str]:
     """Select the lettered clusters shown in a species facet.
@@ -156,10 +156,10 @@ def facet_letters(letters: dict[str, str], counts_df: pd.DataFrame, cluster_sp_f
         sp (str): Species of the facet.
 
     Returns:
-        dict[str, str]: Up to MAX_SPECIFIC_LABELS clusters -> letter, the most specific for ``sp``, sorted by letter.
+        dict[str, str]: Up to MAX_SPECIFIC_LABELS clusters -> letter, the largest specific ones for ``sp``, sorted by letter.
     """
     cand = pd.DataFrame({"spec": cluster_sp_frac[sp], "count": counts_df[sp]}).loc[list(letters)]
-    cand = cand[(cand["count"] >= MIN_CLUSTER_SIZE) & (cand["spec"] * 100 >= MIN_PERCENT_SPECIFICITY)].sort_values(["spec", "count"], ascending=False).head(MAX_SPECIFIC_LABELS)
+    cand = cand[(cand["count"] >= MIN_CLUSTER_SIZE) & (cand["spec"] * 100 >= MIN_PERCENT_SPECIFICITY)].sort_values(["count", "spec"], ascending=False).head(MAX_SPECIFIC_LABELS)
     return dict(sorted(((cl, letters[cl]) for cl in cand.index), key=lambda kv: (len(kv[1]), kv[1])))
 def top_intra_clusters(coords: np.ndarray, intra_cls: np.ndarray, counts: pd.Series) -> pd.Series:
     """Select the top intra-species clusters above MIN_CLUSTER_SIZE by the summed ranks of protein count and UMAP density.
