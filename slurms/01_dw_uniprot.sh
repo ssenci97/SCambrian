@@ -7,7 +7,7 @@
 #SBATCH --mem=2G
 #SBATCH --time=02:00:00
 #SBATCH --output=logs/uniprot/dw_UP_%A_%a.log
-#SBATCH --array=1-2
+#SBATCH --array=1-3
 #SBATCH --open-mode=append
 ###################################### conda
 source ~/scratch/miniconda/etc/profile.d/conda.sh
@@ -26,6 +26,15 @@ eval "$(awk -F'\t' -v idx="${SLURM_ARRAY_TASK_ID}" '{sub(/\r$/,"")} NR==1 {for(i
 mkdir -p "${SEQ_DIR}" "${FEAT_DIR}"
 [ "${EXC}" = "true" ] && echo "[SLURM-INFO] Task exceeds TSV length" && exit 0
 [ -z "${QUERY_STR}" ] && echo "[SLURM-INFO] Missing query" && exit 0
+###################################### local-source
+if [[ "${QUERY_STR}" =~ \.(fa|faa|fasta)$ ]]; then
+  FP_FAST="${SEQ_DIR}/${LABEL}_seqs.fasta"
+  [ ! -f "${QUERY_STR}" ] && echo "[SLURM-INFO] Missing local source ${QUERY_STR}" && exit 1
+  [ -f "${FP_FAST}" ] && echo "[SLURM-INFO] Files exist" && exit 0
+  cp "${QUERY_STR}" "${FP_FAST}" && echo "[SLURM-INFO] Copied ${QUERY_STR} -> ${FP_FAST}"
+  echo "[SLURM-INFO] $(date +'%Y-%m-%d %H:%M:%S') $(( $(date +%s) - START_TIME ))s $(free -m | awk 'NR==2 {print $3"MB"}')"
+  exit 0
+fi
 ###################################### run-downloads
 FP_SEQ="${SEQ_DIR}/${LABEL}_seqs.tsv"
 FP_FAST="${SEQ_DIR}/${LABEL}_seqs.fasta"

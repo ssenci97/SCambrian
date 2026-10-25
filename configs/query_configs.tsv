@@ -1,4 +1,4 @@
 label	query	exact_species
 aegypti	(organism_id:7159)	Ae. aegypti
 albopictus	(organism_id:7160)	Ae. albopictus
-
+koreicus	../KOREICUS/proteomes/koreicus_seqs.fasta	Ae. koreicus

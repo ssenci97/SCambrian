@@ -49,13 +49,19 @@ configs/query_config.tsv
 
 `configs/param_config.json` — all paths and parameters.
 
-`configs/query_config.tsv` — input queries:
+`configs/query_configs.tsv` — input sources, one row per label. The `query` column takes one of two modes:
+
+- **UniProtKB query**: any UniProt query string. Step 01 downloads the sequences (TSV + FASTA + IDs) and features.
+- **Local FASTA**: a path ending in `.fa`/`.faa`/`.fasta`, relative to the repo root. Step 01 copies it to `<seq_out_dir>/<label>_seqs.fasta`, which MMseqs2 picks up automatically. The TSV/IDs/features downloads are skipped, and a missing file makes the task fail.
 
 ```
 label	query	exact_species
 nucleus	(taxonomy_id:9606) AND (cc_scl_term:SL-0191) AND (reviewed:true)	H.sapiens nuclear proteins
+koreicus	../KOREICUS/proteomes/koreicus_seqs.fasta	Ae. koreicus
 ...
 ```
+
+Keep the TSV comment-free, because the slurm awk and pandas parsers read every line.
 
 Key parameters:
 
@@ -88,8 +94,8 @@ Array sizes are computed from the configs (labels in `query_configs.tsv`, models
 sbatch slurms/01_dw_uniprot.sh
 ```
 
-- Reads queries from `query_config.tsv`
-- Downloads sequences (TSV + FASTA + IDs) and features
+- Reads queries from `query_configs.tsv`
+- Downloads sequences (TSV + FASTA + IDs) and features, or copies a local FASTA source to `<label>_seqs.fasta`
 - Output: `data/raw_seqs/`, `data/features/`
 
 ### 02 — Deduplicate
