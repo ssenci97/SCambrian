@@ -59,7 +59,7 @@ fi
 ###################################### analysis (uniprot / dimred / scanpy) — also runs on an existing .env
 # numpy pinned: numba (scanpy) and torch 2.4.1 break on newer numpy
 echo "[SLURM-INFO] Installing analysis deps..."
-pip install "numpy<2.3" pyyaml tqdm seaborn scikit-learn umap-learn scanpy anndata numba safetensors igraph
+pip install "numpy<2.3" pyyaml tqdm seaborn scikit-learn umap-learn scanpy anndata matplotlib-venn numba safetensors igraph
 
 ###################################### verify
 echo "[SLURM-INFO] Comprehensive verification..."
