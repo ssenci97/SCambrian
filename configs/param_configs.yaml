@@ -12,12 +12,12 @@ extract_reps_biohub:
   - esmc_6b
   reps_outdir: data/esm-reps
 npz_scanpy:
+  seed: 42
+  resolution: 1.0
+  n_neighbors: 15
   min_module_size: 100
   min_percent_enrichment: 80
-  n_neighbors: 15
   outdir: data/scanpy/
-  resolution: 1.0
-  seed: 42
 npz_tsne:
   early_exaggeration: 12.0
   init: pca
