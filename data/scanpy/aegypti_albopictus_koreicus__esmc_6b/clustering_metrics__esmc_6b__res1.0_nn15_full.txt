@@ -1,0 +1,4 @@
+joint_silhouette_score_full: -0.15504157543182373
+intra_silhouette_aegypti: -0.07404644787311554
+intra_silhouette_albopictus: -0.07966408133506775
+intra_silhouette_koreicus: -0.01311932597309351
