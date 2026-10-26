@@ -5,7 +5,7 @@
 !.gitignore
 !.here
 
-data/
+data/esm-reps/
 logs/
 tmp/
 CLAUDE.md
