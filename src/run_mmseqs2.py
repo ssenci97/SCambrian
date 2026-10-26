@@ -15,7 +15,7 @@ import yaml
 
 SEED = 42
 random.seed(SEED)
-DEFAULT_PARAMS = {"mmseqs_path": "mmseqs", "seq_out_dir": "data/sequences", "dedup_out_dir": "data/dedup", "clusters_out_dir": "data/clusters", "mmseqs": {"dedup_min_seq_id": 0.9, "dedup_cov": 0.8, "dedup_cov_mode": 0, "clust_cov": 0.8, "clust_cov_mode": 0, "thresholds": [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2]}}
+DEFAULT_PARAMS = {"overwrite": False, "mmseqs_path": "mmseqs", "seq_out_dir": "data/sequences", "dedup_out_dir": "data/dedup", "clusters_out_dir": "data/clusters", "mmseqs": {"dedup_min_seq_id": 0.9, "dedup_cov": 0.8, "dedup_cov_mode": 0, "clust_cov": 0.8, "clust_cov_mode": 0, "thresholds": [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2]}}
 
 ###################################### config
 def get_params():
@@ -23,6 +23,7 @@ def get_params():
     parser.add_argument("--yaml-in", nargs="?", const=Path("configs/param_configs.yaml"), type=Path, default=Path("configs/param_configs.yaml"))
     parser.add_argument("--yaml-out", nargs="?", const=Path("configs/param_configs.yaml"), type=Path, default=None)
     parser.add_argument("--index", type=int, default=None)
+    parser.add_argument("--overwrite", action="store_true")
     args, _ = parser.parse_known_args()
     script_name = Path(__file__).stem
     params = DEFAULT_PARAMS.copy()
@@ -30,6 +31,7 @@ def get_params():
         data = yaml.safe_load(args.yaml_in.read_text())
         if isinstance(data, dict) and script_name in data:
             params.update(data[script_name])
+    params["overwrite"] = bool(params["overwrite"] or args.overwrite)
     if args.yaml_out:
         yaml_out_path = args.yaml_out if isinstance(args.yaml_out, Path) else Path("configs/param_configs.yaml")
         yaml_out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -76,12 +78,13 @@ def main() -> None:
             if not (final_dir / f"{base_name}_ids_id{t_clean}_{param_tag}.txt").exists() or not (final_dir / f"{base_name}_representatives_id{t_clean}_{param_tag}.fasta").exists():
                 all_exist = False
                 break
-        if all_exist and (final_dir / "clustering_summary.txt").exists():
+        if all_exist and (final_dir / "clustering_summary.txt").exists() and not params["overwrite"]:
+            print(f"[PYTHON-INFO] Clusters of '{base_name}' already exist. Skipping.")
             shutil.rmtree(tmp_run_dir, ignore_errors=True)
             continue
         out_dedup = dedup_dir / f"{base_name}_dedup.fasta"
         tmp_dir = dedup_dir / f"tmp_{base_name}"
-        if not out_dedup.exists():
+        if not out_dedup.exists() or params["overwrite"]:
             tmp_dir.mkdir(parents=True, exist_ok=True)
             subprocess.run([mmseqs, "easy-linclust", str(in_fasta), str(dedup_dir / f"{base_name}_tmp"), str(tmp_dir), "--min-seq-id", str(min_seq_id), "-c", str(cov), "--cov-mode", str(cov_mode), "--threads", str(threads)], check=True)
             rep_file = dedup_dir / f"{base_name}_tmp_rep_seq.fasta"

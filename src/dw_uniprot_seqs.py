@@ -52,15 +52,17 @@ def main() -> None:
     parser.add_argument("--fp_seqs", type=Path)
     parser.add_argument("--fp_fasta", type=Path)
     parser.add_argument("--fp_ids", type=Path)
+    parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--yaml-in", nargs="?", const=Path("configs/param_configs.yaml"), type=Path, default=Path("configs/param_configs.yaml"))
     parser.add_argument("--yaml-out", nargs="?", const=Path("configs/param_configs.yaml"), type=Path)
     args = parser.parse_args()
     script_name = Path(__file__).stem
-    params = {"config_path": DEFAULT_CONFIG_PATH, "seq_out_dir": DEFAULT_OUT_DIR}
+    params = {"config_path": DEFAULT_CONFIG_PATH, "seq_out_dir": DEFAULT_OUT_DIR, "overwrite": False}
     if args.yaml_in and args.yaml_in.exists():
         data = yaml.safe_load(args.yaml_in.read_text())
         if isinstance(data, dict) and script_name in data:
             params.update(data[script_name])
+    params["overwrite"] = bool(params["overwrite"] or args.overwrite)
     if args.yaml_out:
         yaml_out_path = args.yaml_out if isinstance(args.yaml_out, Path) else Path("configs/param_configs.yaml")
         yaml_out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -73,10 +75,13 @@ def main() -> None:
     fields = ["accession", "sequence", "length"]
     feature_map = get_feature_map(fields)
     if args.query:
-        df_sub = fetch_uniprot(args.query, fields).rename(columns=feature_map)
-        save_tsv(df_sub, args.fp_seqs or (out_dir / f"{args.label}_seqs.tsv"))
-        save_fasta(df_sub, args.fp_fasta or (out_dir / f"{args.label}_seqs.fasta"))
-        save_ids(df_sub, args.fp_ids or (out_dir / f"{args.label}_ids.txt"))
+        fps = [args.fp_seqs or (out_dir / f"{args.label}_seqs.tsv"), args.fp_fasta or (out_dir / f"{args.label}_seqs.fasta"), args.fp_ids or (out_dir / f"{args.label}_ids.txt")]
+        if not params["overwrite"] and all(p.exists() for p in fps): print(f"[PYTHON-INFO] Sequences of '{args.label}' already exist. Skipping.")
+        else:
+            df_sub = fetch_uniprot(args.query, fields).rename(columns=feature_map)
+            save_tsv(df_sub, fps[0])
+            save_fasta(df_sub, fps[1])
+            save_ids(df_sub, fps[2])
     else:
         df_config = load_config(config_path)
         if df_config.empty:
@@ -88,10 +93,14 @@ def main() -> None:
             if pd.isna(q_val) or not str(q_val).strip():
                 print(f"[PYTHON-INFO] Error: query missing for label '{lbl}'.")
                 raise ValueError(f"query missing for label '{lbl}'.")
+            fps = [args.fp_seqs or (out_dir / f"{lbl}_seqs.tsv"), args.fp_fasta or (out_dir / f"{lbl}_seqs.fasta"), args.fp_ids or (out_dir / f"{lbl}_ids.txt")]
+            if not params["overwrite"] and all(p.exists() for p in fps):
+                print(f"[PYTHON-INFO] Sequences of '{lbl}' already exist. Skipping.")
+                continue
             df_sub = fetch_uniprot(str(q_val).strip(), fields).rename(columns=feature_map)
-            save_tsv(df_sub, args.fp_seqs or (out_dir / f"{lbl}_seqs.tsv"))
-            save_fasta(df_sub, args.fp_fasta or (out_dir / f"{lbl}_seqs.fasta"))
-            save_ids(df_sub, args.fp_ids or (out_dir / f"{lbl}_ids.txt"))
+            save_tsv(df_sub, fps[0])
+            save_fasta(df_sub, fps[1])
+            save_ids(df_sub, fps[2])
     exec_time, max_mem, dt = f"{time.time() - start_time:.2f}s", f"{resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024:.2f}MB", datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"[PYTHON-INFO] {dt} {exec_time} {max_mem}")
 if __name__ == "__main__": main()

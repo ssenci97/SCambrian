@@ -41,15 +41,17 @@ def main() -> None:
     parser.add_argument("--query", default=None)
     parser.add_argument("--label", default="example")
     parser.add_argument("--fp_feats", type=Path)
+    parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--yaml-in", nargs="?", const=Path("configs/param_configs.yaml"), type=Path, default=Path("configs/param_configs.yaml"))
     parser.add_argument("--yaml-out", nargs="?", const=Path("configs/param_configs.yaml"), type=Path)
     args = parser.parse_args()
     script_name = Path(__file__).stem
-    params = {"config_path": DEFAULT_CONFIG_PATH, "features_out_dir": DEFAULT_OUT_DIR}
+    params = {"config_path": DEFAULT_CONFIG_PATH, "features_out_dir": DEFAULT_OUT_DIR, "overwrite": False}
     if args.yaml_in and args.yaml_in.exists():
         data = yaml.safe_load(args.yaml_in.read_text())
         if isinstance(data, dict) and script_name in data:
             params.update(data[script_name])
+    params["overwrite"] = bool(params["overwrite"] or args.overwrite)
     if args.yaml_out:
         yaml_out_path = args.yaml_out if isinstance(args.yaml_out, Path) else Path("configs/param_configs.yaml")
         yaml_out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -63,8 +65,9 @@ def main() -> None:
     keys_noseq = [col for col in all_fields if col != "sequence"]
     feature_map = get_feature_map(all_fields)
     if args.query:
-        df_feats = rename_columns(fetch_uniprot(args.query, fields=keys_noseq), feature_map)
-        save_tsv(df_feats, args.fp_feats or (out_dir / f"{args.label}_feats.tsv"))
+        fp = args.fp_feats or (out_dir / f"{args.label}_feats.tsv")
+        if not params["overwrite"] and fp.exists(): print(f"[PYTHON-INFO] Features of '{args.label}' already exist. Skipping.")
+        else: save_tsv(rename_columns(fetch_uniprot(args.query, fields=keys_noseq), feature_map), fp)
     else:
         df_config = load_config(config_path)
         if df_config.empty:
@@ -76,8 +79,11 @@ def main() -> None:
             if pd.isna(q_val) or not str(q_val).strip():
                 print(f"[PYTHON-INFO] Error: query missing for label '{label}'.")
                 raise ValueError(f"query missing for label '{label}'.")
-            df_feats = rename_columns(fetch_uniprot(str(q_val).strip(), fields=keys_noseq), feature_map)
-            save_tsv(df_feats, args.fp_feats or (out_dir / f"{label}_feats.tsv"))
+            fp = args.fp_feats or (out_dir / f"{label}_feats.tsv")
+            if not params["overwrite"] and fp.exists():
+                print(f"[PYTHON-INFO] Features of '{label}' already exist. Skipping.")
+                continue
+            save_tsv(rename_columns(fetch_uniprot(str(q_val).strip(), fields=keys_noseq), feature_map), fp)
     exec_time, max_mem, dt = f"{time.time() - start_time:.2f}s", f"{resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024:.2f}MB", datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"[PYTHON-INFO] {dt} {exec_time} {max_mem}")
 if __name__ == "__main__": main()

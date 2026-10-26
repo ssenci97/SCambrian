@@ -194,10 +194,11 @@ if __name__ == "__main__":
     parser.add_argument("--reps_outdir", default=REPS_OUTDIR)
     parser.add_argument("--out")
     parser.add_argument("--batch_size", type=int, default=BATCH_SIZE)
+    parser.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--yaml-in", nargs="?", const=YAML_PATH, type=Path, default=YAML_PATH)
     parser.add_argument("--yaml-out", nargs="?", const=YAML_PATH, type=Path, default=None)
     yargs, _ = parser.parse_known_args()
-    params = {"model_name": MODEL_NAMES, "batch_size": BATCH_SIZE, "reps_outdir": REPS_OUTDIR}
+    params = {"model_name": MODEL_NAMES, "batch_size": BATCH_SIZE, "reps_outdir": REPS_OUTDIR, "overwrite": False}
     if yargs.yaml_in and yargs.yaml_in.exists():
         data = yaml.safe_load(yargs.yaml_in.read_text()) or {}
         params.update(data.get(SCRIPT_NAME, {}))
@@ -219,7 +220,7 @@ if __name__ == "__main__":
     records = None
     for model_name in model_names:
         out = args.out or os.path.join(args.reps_outdir, model_name, f"{label}_reps.npz")
-        if Path(out).exists():
+        if Path(out).exists() and not args.overwrite:
             print(f"[PYTHON-INFO] Target file '{out}' already exists. Skipping {model_name}.")
             continue
         if records is None: records = parse_fasta(args.fasta) if args.fasta else parse_tsv(args.seqs_tsv)

@@ -22,4 +22,7 @@ mapfile -t H5ADS < <(find "$OUT_DIR" -mindepth 2 -maxdepth 2 -name "*.h5ad" | so
 
 ###################################### run
 echo "[SLURM-INFO] --- Reporting ${#H5ADS[@]} .h5ad files ---"
-python3 src/h5ad_scanpy.py --h5ad "$(printf "%s\n" "${H5ADS[@]}" | paste -sd, -)" --yaml-in --yaml-out
+H5AD_LIST=$(printf "%s\n" "${H5ADS[@]}" | paste -sd, -)
+python3 src/h5ad_scanpy.py --h5ad "$H5AD_LIST" --yaml-in --yaml-out
+echo "[SLURM-INFO] --- Writing interactive 3D UMAP/t-SNE and HDBSCAN HTML views ---"
+python3 src/h5ad_interactive.py --h5ad "$H5AD_LIST" --n_jobs "${SLURM_CPUS_PER_TASK:-1}" --yaml-in --yaml-out

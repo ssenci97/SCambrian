@@ -55,6 +55,7 @@ MIN_INTRA_SIZE = 150
 MIN_JOINT_SIZE = 100
 MIN_MODULE_SIZE = 100
 MIN_PERCENT_ENRICHMENT = 80
+OVERWRITE = False
 PALETTE = ["#ECDE90", "#93DEB6", "#F1B584", "#76BBE2", "#DA919B", "#899E64", "#8E81B9", "#A66C58", "#30767A", "#7A5271"]
 PANEL_DPI = 300
 PANEL_WIDTH_INCHES = A4_WIDTH_INCHES / 4
@@ -73,11 +74,12 @@ parser.add_argument("--min_joint_size", type=int, default=MIN_JOINT_SIZE, help="
 parser.add_argument("--min_intra_size", type=int, default=MIN_INTRA_SIZE, help="Minimum proteins of a highlighted intra cluster")
 parser.add_argument("--min_module_size", type=int, default=MIN_MODULE_SIZE, help="Minimum proteins of a saved module")
 parser.add_argument("--min_percent_enrichment", type=float, default=MIN_PERCENT_ENRICHMENT, help="Species percentage of a joint module")
+parser.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=OVERWRITE, help="Redraw a report whose outputs already exist")
 parser.add_argument("--yaml-in", nargs="?", const=YAML_PATH, default=YAML_PATH)
 parser.add_argument("--yaml-out", nargs="?", const=YAML_PATH, default=None)
 yargs, _ = parser.parse_known_args()
 script_key = "h5ad_scanpy"
-params = dict(methods=METHODS, max_joint_labels=MAX_JOINT_LABELS, min_joint_size=MIN_JOINT_SIZE, min_intra_size=MIN_INTRA_SIZE, min_module_size=MIN_MODULE_SIZE, min_percent_enrichment=MIN_PERCENT_ENRICHMENT)
+params = dict(methods=METHODS, max_joint_labels=MAX_JOINT_LABELS, min_joint_size=MIN_JOINT_SIZE, min_intra_size=MIN_INTRA_SIZE, min_module_size=MIN_MODULE_SIZE, min_percent_enrichment=MIN_PERCENT_ENRICHMENT, overwrite=OVERWRITE)
 if yargs.yaml_in and Path(yargs.yaml_in).exists():
     ydata = yaml.safe_load(Path(yargs.yaml_in).read_text()) or {}
     if script_key in ydata: params.update(ydata[script_key])
@@ -341,9 +343,15 @@ def report(h5ad_path: Path) -> None:
     Args:
         h5ad_path (Path): .h5ad written by npz_scanpy.py.
     """
-    adata = ad.read_h5ad(h5ad_path)
-    param_tag = adata.uns["param_tag"]
+    head = ad.read_h5ad(h5ad_path, backed="r")
+    param_tag = head.uns["param_tag"]
+    head.file.close()
     target_dir = Path(args.outdir) / h5ad_path.parent.name if args.outdir else h5ad_path.parent
+    done = [target_dir / f"protein_clusters_metadata__{param_tag}.csv", target_dir / f"{target_dir.name}_scanpy.pdf"] + [target_dir / f"{m}_joint_clusters_species_specificity__{param_tag}.pdf" for m in args.methods]
+    if not args.overwrite and all(p.exists() for p in done):
+        print(f"[PYTHON-INFO] Report of {h5ad_path.name} already exists in {target_dir}. Skipping.")
+        return
+    adata = ad.read_h5ad(h5ad_path)
     modules_dir, intra_dir = target_dir / "protein-modules", target_dir / "intra_group"
     for d in (modules_dir, intra_dir): d.mkdir(parents=True, exist_ok=True)
     obs = adata.obs

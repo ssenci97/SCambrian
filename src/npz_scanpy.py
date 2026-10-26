@@ -35,6 +35,7 @@ N_COMPONENTS = [2, 3]
 N_JOBS = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count() or 1))
 N_NEIGHBORS = 15
 N_PCS = None
+OVERWRITE = False
 PERPLEXITY = 30.0
 SEED = 42
 YAML_PATH = "configs/param_configs.yaml"
@@ -50,11 +51,12 @@ parser.add_argument("--min_dist", type=float, default=MIN_DIST, help="UMAP minim
 parser.add_argument("--perplexity", type=float, default=PERPLEXITY, help="t-SNE perplexity")
 parser.add_argument("--max_iter", type=int, default=MAX_ITER, help="t-SNE iterations")
 parser.add_argument("--n_jobs", type=int, default=N_JOBS, help="CPU threads")
+parser.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=OVERWRITE, help="Recompute an .h5ad that already exists")
 parser.add_argument("--yaml-in", nargs="?", const=YAML_PATH, default=YAML_PATH)
 parser.add_argument("--yaml-out", nargs="?", const=YAML_PATH, default=None)
 yargs, _ = parser.parse_known_args()
 script_key = "npz_scanpy"
-params = dict(seed=SEED, resolution=LEIDEN_RES, n_neighbors=N_NEIGHBORS, n_pcs=N_PCS, n_components=N_COMPONENTS, min_dist=MIN_DIST, perplexity=PERPLEXITY, max_iter=MAX_ITER, outdir=DEFAULT_OUTDIR)
+params = dict(seed=SEED, resolution=LEIDEN_RES, n_neighbors=N_NEIGHBORS, n_pcs=N_PCS, n_components=N_COMPONENTS, min_dist=MIN_DIST, perplexity=PERPLEXITY, max_iter=MAX_ITER, outdir=DEFAULT_OUTDIR, overwrite=OVERWRITE)
 if yargs.yaml_in and Path(yargs.yaml_in).exists():
     ydata = yaml.safe_load(Path(yargs.yaml_in).read_text()) or {}
     if script_key in ydata: params.update(ydata[script_key])
@@ -134,6 +136,10 @@ def main() -> None:
     use_pca = args.n_pcs is not None and args.n_pcs > 0
     param_tag = f"{Path(npz_files[0]).parent.name}__res{args.resolution}_nn{args.n_neighbors}" + (f"_npc{args.n_pcs}" if use_pca else "_full")
     target_dir = Path(args.outdir) / ("_".join([Path(f).stem.replace("_reps", "") for f in npz_files]) + f"__{Path(npz_files[0]).parent.name}")
+    h5ad_path = target_dir / f"{target_dir.name}__{param_tag.removeprefix(Path(npz_files[0]).parent.name + '__')}.h5ad"
+    if h5ad_path.exists() and not args.overwrite:
+        print(f"[PYTHON-INFO] Target file '{h5ad_path}' already exists. Skipping.")
+        return
     target_dir.mkdir(parents=True, exist_ok=True)
     ###################################### LOAD_DATA
     adatas = []
@@ -184,9 +190,8 @@ def main() -> None:
         markers.append(markers_table(sub, "intra_cluster", "intra_group", sp))
     adata.obs["intra_cluster"] = pd.Categorical(intra)
     ###################################### SAVE
-    run_params = {k: v for k, v in vars(args).items() if v is not None and k not in ("yaml_in", "yaml_out")}
+    run_params = {k: v for k, v in vars(args).items() if v is not None and k not in ("yaml_in", "yaml_out", "overwrite")}
     out = ad.AnnData(obs=adata.obs[["protein_id", "species", "cluster", "intra_cluster"]].copy(), obsm={k: v for k, v in adata.obsm.items() if k.startswith(("X_umap", "X_tsne"))}, obsp=dict(adata.obsp), uns={"neighbors": adata.uns["neighbors"], "params": run_params, "npz_files": npz_files, "param_tag": param_tag, "metrics": metrics, "markers": pd.concat(markers, ignore_index=True)})
-    h5ad_path = target_dir / f"{target_dir.name}__{param_tag.removeprefix(Path(npz_files[0]).parent.name + '__')}.h5ad"
     out.write_h5ad(h5ad_path, compression="gzip")
     print(f"[PYTHON-INFO][SAVE] {h5ad_path} | obsm: {', '.join(out.obsm.keys())}")
     max_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
