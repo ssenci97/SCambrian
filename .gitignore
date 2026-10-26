@@ -3,6 +3,7 @@
 .*
 # Keep .gitignore tracked
 !.gitignore
+!.here
 
 data/
 logs/
