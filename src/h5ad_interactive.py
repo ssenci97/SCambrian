@@ -21,6 +21,7 @@ import yaml
 ALPHA = 0.8
 COLOR_BG = "#BFC5CE"
 COLOR_BY = ["species", "cluster", "intra_cluster"]
+DEFAULT_QUERY_TSV = "configs/query_configs.tsv"
 DIM = 3
 FIGURE_HEIGHT = 900
 FIGURE_WIDTH = 1700
@@ -68,6 +69,17 @@ if args.yaml_out:
     Path(args.yaml_out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.yaml_out).write_text(yaml.dump(ydata, sort_keys=False))
 ###################################### HELPER_FUNCTIONS
+def species_names() -> dict[str, str]:
+    """Map each label of the query configuration to its exact_species display name.
+
+    Returns:
+        dict[str, str]: Label -> display name (empty if the configuration is missing).
+    """
+    ydata = (yaml.safe_load(Path(args.yaml_in).read_text()) or {}) if args.yaml_in and Path(args.yaml_in).exists() else {}
+    tsv = Path(ydata.get("dw_uniprot_seqs", {}).get("config_path", DEFAULT_QUERY_TSV))
+    df = pd.read_csv(tsv, sep="\t", dtype=str) if tsv.exists() else pd.DataFrame(columns=["label"])
+    names = df["exact_species"] if "exact_species" in df else df["label"]
+    return {lbl: (nm if pd.notna(nm) and str(nm).strip() else lbl) for lbl, nm in zip(df["label"], names) if pd.notna(lbl)}
 def list_views(obs: pd.DataFrame, keys: set[str]) -> list[str]:
     """List the joint view and every species with 3D intra layouts of all methods.
 
@@ -200,12 +212,13 @@ def interactive(h5ad_path: Path) -> None:
         return
     target_dir.mkdir(parents=True, exist_ok=True)
     adata = ad.read_h5ad(h5ad_path)
-    obs, rng, rows = adata.obs.astype({"species": str}), np.random.default_rng(SEED), []
+    obs, rng, rows, names = adata.obs.astype({"species": str}), np.random.default_rng(SEED), [], species_names()
     for view in tqdm(views, desc=f"{h5ad_path.parent.name} views"):
         mask = np.ones(adata.n_obs, dtype=bool) if view == "joint" else (obs["species"] == view).values
         suffix = "" if view == "joint" else "_intra"
         coords = {m: np.asarray(adata.obsm[f"X_{m}_{DIM}d{suffix}"][mask], dtype=np.float64) for m in METHODS}
         vobs = obs[mask].reset_index(drop=True)
+        vobs["species"] = vobs["species"].map(lambda s: names.get(s, s))
         intra = vobs["species"] + ":" + vobs["intra_cluster"].astype(str) if view == "joint" else vobs["intra_cluster"]
         intra = intra.where(vobs["intra_cluster"].notna())
         hover = np.column_stack([vobs["protein_id"].astype(str), vobs["species"], vobs["cluster"].astype(str), intra.astype(str)])
@@ -220,7 +233,7 @@ def interactive(h5ad_path: Path) -> None:
         for mcs, lab in hd.items():
             codes, cats = categories(pd.Series(np.where(lab > 0, [f"U-{x:02d}" for x in lab], None)))
             hd_sets[str(mcs)] = (codes[keep], cats)
-        title = f"{h5ad_path.parent.name} | {view} | {param_tag}" + (f" | {len(keep):,}/{len(vobs):,} points shown" if len(keep) < len(vobs) else f" | {len(vobs):,} points")
+        title = f"{h5ad_path.parent.name} | {names.get(view, view) if view != 'joint' else 'all species'} | {param_tag}" + (f" | {len(keep):,}/{len(vobs):,} points shown" if len(keep) < len(vobs) else f" | {len(vobs):,} points")
         build_figure(sub, hover[keep], layout_sets, title, "buttons").write_html(outs[f"{view}|layouts"], include_plotlyjs="cdn")
         build_figure(sub, hover[keep], hd_sets, f"HDBSCAN on {DIM}D UMAP | {title}", "slider").write_html(outs[f"{view}|hdbscan"], include_plotlyjs="cdn")
         print(f"[PYTHON-INFO][SAVE] {outs[f'{view}|layouts']} and {outs[f'{view}|hdbscan'].name}")
