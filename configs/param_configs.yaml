@@ -15,29 +15,14 @@ npz_scanpy:
   seed: 42
   resolution: 1.0
   n_neighbors: 15
-  min_module_size: 200
-  min_percent_enrichment: 80
-  outdir: data/scanpy/
-npz_tsne:
-  early_exaggeration: 12.0
-  init: pca
-  learning_rate: auto
-  max_iter: 1000
-  metric: euclidean
-  n_components: 2
-  output_dir: data/dimred
+  n_pcs: null
+  n_components:
+  - 2
+  - 3
+  min_dist: 0.5
   perplexity: 30.0
-  seed: 42
-npz_umap:
-  init: spectral
-  learning_rate: 1.0
-  metric: euclidean
-  min_dist: 0.1
-  n_components: 2
-  n_epochs: null
-  n_neighbors: 15
-  output_dir: data/dimred
-  seed: 42
+  max_iter: 1000
+  outdir: data/scanpy/
 run_mmseqs2:
   clusters_out_dir: data/clusters
   dedup_out_dir: data/dedup
@@ -58,3 +43,12 @@ run_mmseqs2:
     - 0.2
   mmseqs_path: mmseqs
   seq_out_dir: data/sequences
+h5ad_scanpy:
+  methods:
+  - umap
+  - tsne
+  max_joint_labels: 6
+  min_joint_size: 100
+  min_intra_size: 150
+  min_module_size: 200
+  min_percent_enrichment: 80

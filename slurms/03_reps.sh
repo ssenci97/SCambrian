@@ -8,7 +8,7 @@
 #SBATCH --time=04:00:00
 #SBATCH --job-name=ESMC
 #SBATCH --output=logs/ESMC/ESMC_%A_%a.log
-#SBATCH --array=0-11
+#SBATCH --array=0-11%2
 # one task per (file, model): task = file_idx * n_models + model_idx, files = every *_dedup.fasta in dedup dir
 # default above is a fallback; slurms/run_all.sh sets --array from the dedup dir contents
 #SBATCH --open-mode=append

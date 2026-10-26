@@ -20,11 +20,11 @@ print(f'DEDUP_DIR={d.get(\"run_mmseqs2\", {}).get(\"dedup_out_dir\", \"data/dedu
 [ ! -f "${TSV_PATH}" ] && echo "[SLURM-INFO] Missing TSV file" && exit 1
 N=$(awk -F'\t' '{sub(/\r$/,"")} NR==1{for(i=1;i<=NF;i++)if($i=="label"){col=i;break};next} col&&$col!=""{n++} END{print n+0}' "${TSV_PATH}")
 [ "${N}" -eq 0 ] && echo "[SLURM-INFO] No labels in ${TSV_PATH}" && exit 1
-# files for 03/supp_01: TSV labels (produced by 02 if chained) + any *_dedup.fasta already in the dedup dir
+# files for 03: TSV labels (produced by 02 if chained) + any *_dedup.fasta already in the dedup dir
 N_FILES=$( { awk -F'\t' '{sub(/\r$/,"")} NR==1{for(i=1;i<=NF;i++)if($i=="label"){col=i;break};next} col&&$col!=""{print $col}' "${TSV_PATH}"
   find "${DEDUP_DIR}" -maxdepth 1 -name "*_dedup.fasta" -printf '%f\n' 2>/dev/null | sed 's/_dedup\.fasta$//'; } | sort -u | wc -l)
 echo "[SLURM-INFO] ${N} labels, ${N_FILES} dedup files x ${N_MODELS} models"
-mkdir -p logs logs/ESMC
+mkdir -p logs logs/ESMC logs/scanpy
 ###################################### submit
 PREV=""
 submit() {
@@ -45,9 +45,9 @@ for step in "${STEPS[@]}"; do
   case "${step}" in
     01) submit slurms/01_dw_uniprot.sh --array=1-${N} ;;
     02) submit slurms/02_mmseqs2.sh --array=1-${N}%3 ;;
-    03) submit slurms/03_reps.sh --array=0-$((N_FILES * N_MODELS - 1)) ;;
-    supp_01) submit slurms/supp_01_dimred.sh --array=0-${N_FILES} ;;
-    supp_02) submit slurms/supp_02_scanpy.sh ;;
+    03) submit slurms/03_reps.sh --array=0-$((N_FILES * N_MODELS - 1))%2 ;;
+    supp_01) submit slurms/supp_01_scanpy.sh --array=0-$((N_MODELS - 1)) ;;
+    supp_02) submit slurms/supp_02_scanpy_report.sh ;;
     *) echo "[SLURM-INFO] Unknown step: ${step}" && exit 1 ;;
   esac
 done
