@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Deduplicates each label's sequences with MMseqs2 and clusters the deduplicated set at successively lower identity thresholds.
 
-For every ``<sequences_dir>/<label>_seqs.fasta``, easy-linclust at ``dedup_min_identity`` writes ``<dedup_dir>/<label>_dedup.fasta`` and a ``<label>_dedup.params`` sidecar holding its parameter tag. Each threshold of ``cluster_identity_thresholds`` then clusters the representatives of the previous threshold (cascade), and the member -> representative assignments are propagated back to every deduplicated sequence. MMseqs2 databases stay in a temporary run directory; only the assignment tables, representative FASTAs, metrics and summaries are copied to ``<clusters_dir>/<label>/``. The dedup is redone when its FASTA or sidecar is missing, the sidecar tag differs from the current parameters or the input FASTA is newer; the clustering is redone when any of its outputs is missing or older than the dedup FASTA; ``--overwrite`` forces both.
+For every label of the query table (``dw_uniprot_seqs.query_table``, in row order), from ``<sequences_dir>/<label>_seqs.fasta``, easy-linclust at ``dedup_min_identity`` writes ``<dedup_dir>/<label>_dedup.fasta`` and a ``<label>_dedup.params`` sidecar holding its parameter tag. Each threshold of ``cluster_identity_thresholds`` then clusters the representatives of the previous threshold (cascade), and the member -> representative assignments are propagated back to every deduplicated sequence. MMseqs2 databases stay in a temporary run directory; only the assignment tables, representative FASTAs, metrics and summaries are copied to ``<clusters_dir>/<label>/``. The dedup is redone when its FASTA or sidecar is missing, the sidecar tag differs from the current parameters or the input FASTA is newer; the clustering is redone when any of its outputs is missing or older than the dedup FASTA; ``--overwrite`` forces both.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import argparse
@@ -26,12 +26,13 @@ DEDUP_MIN_COVERAGE = 0.8
 DEDUP_MIN_IDENTITY = 0.95
 MMSEQS_EXECUTABLE = "mmseqs"
 OVERWRITE = False
+QUERY_TABLE = "configs/query_configs.tsv"
 SEQUENCES_DIR = "data/sequences"
 THREADS = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count() or 1))
 YAML_PATH = "configs/param_configs.yaml"
 ###################################### CONFIG_AND_PARSER
 parser = argparse.ArgumentParser(description="MMseqs2 deduplication and cascaded clustering")
-parser.add_argument("--index", type=int, default=None, help="1-based position of the label among the sorted *_seqs.fasta files (SLURM array task); all labels when omitted")
+parser.add_argument("--index", type=int, default=None, help="1-based row of the label in the query table (SLURM array task); all labels when omitted")
 parser.add_argument("--sequences_dir", type=str, default=SEQUENCES_DIR, help="Folder of the <label>_seqs.fasta inputs")
 parser.add_argument("--dedup_dir", type=str, default=DEDUP_DIR, help="Folder of the deduplicated <label>_dedup.fasta outputs")
 parser.add_argument("--clusters_dir", type=str, default=CLUSTERS_DIR, help="Folder of the per-label cluster outputs")
@@ -59,6 +60,15 @@ if args.yaml_out:
     Path(args.yaml_out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.yaml_out).write_text(yaml.dump(config_data, sort_keys=False))
 ###################################### HELPER_FUNCTIONS
+def query_labels() -> list[str]:
+    """List the labels of the query table named in the dw_uniprot_seqs section of the YAML configuration.
+
+    Returns:
+        list[str]: Non-empty labels in row order.
+    """
+    config_data = (yaml.safe_load(Path(args.yaml_in).read_text()) or {}) if args.yaml_in and Path(args.yaml_in).exists() else {}
+    df = pd.read_csv(config_data.get("dw_uniprot_seqs", {}).get("query_table", QUERY_TABLE), sep="\t", dtype=str)
+    return [str(lbl).strip() for lbl in df["label"] if pd.notna(lbl) and str(lbl).strip()]
 def mmseqs(*command: str | Path | float | int) -> None:
     """Run one MMseqs2 subcommand and fail on a non-zero exit.
 
@@ -198,10 +208,13 @@ def main() -> None:
     if not shutil.which(args.mmseqs_executable) and not Path(args.mmseqs_executable).exists():
         raise FileNotFoundError(f"[PYTHON-ERROR] MMseqs2 executable '{args.mmseqs_executable}' not found.")
     for folder in (args.dedup_dir, args.clusters_dir): Path(folder).mkdir(parents=True, exist_ok=True)
-    in_fastas = sorted(Path(args.sequences_dir).glob("*_seqs.fasta"))
-    if args.index is not None: in_fastas = in_fastas[args.index - 1:args.index] if 1 <= args.index <= len(in_fastas) else []
-    for in_fasta in tqdm(in_fastas, desc="Labels"):
-        label = in_fasta.name.removesuffix("_seqs.fasta")
+    labels = query_labels()
+    if args.index is not None: labels = labels[args.index - 1:args.index] if 1 <= args.index <= len(labels) else []
+    for label in tqdm(labels, desc="Labels"):
+        in_fasta = Path(args.sequences_dir) / f"{label}_seqs.fasta"
+        if not in_fasta.exists():
+            print(f"[PYTHON-WARNING] Missing {in_fasta}. Skipping '{label}'.")
+            continue
         dedup_fasta = dedup(label, in_fasta)
         final_dir, run_dir = Path(args.clusters_dir) / label, Path(args.clusters_dir) / f"{label}_tmp"
         if not args.overwrite and not is_stale(cluster_outputs(label, final_dir), [dedup_fasta]):

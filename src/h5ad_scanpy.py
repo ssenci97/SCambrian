@@ -30,6 +30,7 @@ import resource
 from scipy.stats import chi2_contingency, false_discovery_control
 import time
 from tqdm import tqdm
+from typing import NamedTuple
 from umap.umap_ import find_ab_params, simplicial_set_embedding
 import warnings
 import yaml
@@ -384,6 +385,198 @@ def reproject(adata: ad.AnnData, keep: np.ndarray) -> np.ndarray:
     coords, _ = simplicial_set_embedding(data=np.asarray(sub.obsm["X_umap_2d"]), graph=sub.obsp["connectivities"].tocoo(), n_components=2, initial_alpha=1.0, a=a, b=b, gamma=1.0, negative_sample_rate=5, n_epochs=None, init="spectral", random_state=np.random.RandomState(SEED), metric="euclidean", metric_kwds={}, densmap=False, densmap_kwds={}, output_dens=False)
     return coords
 ###################################### REPORT
+class JointStats(NamedTuple):
+    """Per joint cluster statistics and selection of one saved clustering."""
+    counts: pd.DataFrame
+    spec: pd.DataFrame
+    fold_change: pd.Series
+    chi2_q: pd.Series
+    valid: pd.Series
+    significant: pd.Series
+    balanced: pd.Series
+    ranked: dict[str, list[str]]
+    selected: list[str]
+    colors: dict[str, str]
+def joint_stats(obs: pd.DataFrame, species_list: list[str]) -> JointStats:
+    """Rename joint clusters by letters in place and compute their counts, specificity, fold change, chi-square q-values and selection.
+
+    Args:
+        obs (pd.DataFrame): Observation table with ``species`` and integer ``cluster`` columns, modified in place.
+        species_list (list[str]): Species in column order.
+
+    Returns:
+        JointStats: Statistics and selection of every joint cluster.
+    """
+    ids = obs["cluster"].astype(int)
+    obs["cluster"] = pd.Categorical(ids.map(letter), categories=[letter(i) for i in sorted(ids.unique())])
+    counts_df = pd.crosstab(obs["cluster"], obs["species"])[species_list]
+    counts_df.index = counts_df.index.astype(str)
+    share_df = counts_df / counts_df.sum()
+    spec_df = share_df.div(share_df.sum(axis=1), axis=0)
+    fold_change = share_df.max(axis=1) / share_df.min(axis=1)
+    p_vals, valid = homogeneity_test(counts_df)
+    chi2_q = pd.Series(false_discovery_control(p_vals.to_numpy()), index=counts_df.index)
+    significant = valid & (chi2_q < args.chi2_max_q) & (fold_change >= args.min_fold_change)
+    balanced = (fold_change <= 1 / args.balanced_min_share_ratio) & (counts_df.min(axis=1) >= args.min_species_proteins)
+    ranked = {sp: top_joint_clusters(counts_df, spec_df, significant, sp) for sp in species_list}
+    selected = list(dict.fromkeys(cl for cls in ranked.values() for cl in cls))
+    print(f"[PYTHON-INFO][CHI2] {valid.sum()}/{len(valid)} joint clusters testable, {(valid & (chi2_q < args.chi2_max_q)).sum()} with q < {args.chi2_max_q}, {significant.sum()} also with fold change >= {args.min_fold_change}")
+    print(f"[PYTHON-INFO][BALANCED] {balanced.sum()} balanced joint clusters: {', '.join(balanced.index[balanced])}")
+    print(f"[PYTHON-INFO][SELECTION] {len(selected)} selected joint clusters: {', '.join(selected)}")
+    return JointStats(counts_df, spec_df, fold_change, chi2_q, valid, significant, balanced, ranked, selected, {cl: PALETTE[i % len(PALETTE)] for i, cl in enumerate(selected)})
+def write_tables(adata: ad.AnnData, js: JointStats, target_dir: Path, modules_dir: Path, param_tag: str) -> None:
+    """Write the metrics, top-cluster, metadata, enrichment and channel tables and the protein lists of every species module.
+
+    Args:
+        adata (ad.AnnData): Saved clusters with letter-named joint clusters.
+        js (JointStats): Joint cluster statistics.
+        target_dir (Path): Report folder.
+        modules_dir (Path): Folder of the protein module lists.
+        param_tag (str): Parameter tag of the clustering.
+    """
+    obs = adata.obs
+    with open(target_dir / f"clustering_metrics__{param_tag}.txt", "w") as f:
+        f.writelines(f"{k}: {v}\n" for k, v in adata.uns["metrics"].items())
+    top_rows = [(sp, cl, rk + 1, js.counts.loc[cl, sp], js.spec.loc[cl, sp], js.chi2_q[cl], js.fold_change[cl]) for sp, cls in js.ranked.items() for rk, cl in enumerate(cls)]
+    pd.DataFrame(top_rows, columns=["species", "cluster", "rank", "protein_count", "specificity", "chi2_q", "fold_change"]).to_csv(target_dir / f"species_top_clusters__{param_tag}.csv", index=False)
+    obs[["protein_id", "species", "cluster", "intra_cluster"]].to_csv(target_dir / f"protein_clusters_metadata__{param_tag}.csv", index=False)
+    stats = pd.DataFrame({"chi2_q": js.chi2_q, "chi2_valid": js.valid, "fold_change": js.fold_change, "significant": js.significant, "balanced": js.balanced, "selected": js.counts.index.isin(js.selected)}, index=js.counts.index)
+    enrichment = pd.concat({"protein_count": js.counts.stack(), "specificity": js.spec.stack()}, axis=1).rename_axis(["cluster", "species"]).reset_index().join(stats, on="cluster")
+    enrichment.to_csv(target_dir / f"species_cluster_enrichment__{param_tag}.csv", index=False)
+    markers = adata.uns["markers"].astype({"cluster": str})
+    inter = markers["analysis"] == "inter_group"
+    markers.loc[inter, "cluster"] = markers.loc[inter, "cluster"].astype(int).map(letter)
+    markers.to_csv(target_dir / f"channel_importance_rankings__{param_tag}.csv", index=False)
+    cluster_labels, species_labels = obs["cluster"].astype(str), obs["species"].astype(str)
+    for sp in js.counts.columns:
+        for cl in js.counts.index[js.significant & (js.spec[sp] >= args.module_min_specificity_percent / 100) & (js.counts[sp] >= args.min_module_proteins)]:
+            obs.loc[(species_labels == sp).values & (cluster_labels == cl).values, "protein_id"].to_csv(modules_dir / f"{sp}_{js.counts.loc[cl, sp]:07d}_clust{cl}_{param_tag}.txt", index=False, header=False)
+def intra_summary(obs: pd.DataFrame, species_list: list[str], modules_dir: Path, param_tag: str) -> dict[str, tuple[np.ndarray, int, pd.Series]]:
+    """Summarise the intra-species clusters of every species and write the protein lists of the large ones.
+
+    Args:
+        obs (pd.DataFrame): Observation table with ``species``, ``intra_cluster`` and ``protein_id`` columns.
+        species_list (list[str]): Species to summarise.
+        modules_dir (Path): Folder of the protein module lists.
+        param_tag (str): Parameter tag of the clustering.
+
+    Returns:
+        dict[str, tuple[np.ndarray, int, pd.Series]]: Species -> (protein mask, number of intra clusters, counts of the clusters with at least min_intra_cluster_proteins proteins).
+    """
+    intra, intra_labels = {}, obs["intra_cluster"].astype(str)
+    for sp in species_list:
+        is_sp = (obs["species"] == sp).values
+        if obs.loc[is_sp, "intra_cluster"].isna().all(): continue
+        counts_intra = intra_labels[is_sp].value_counts()
+        intra[sp] = (is_sp, counts_intra.size, counts_intra[counts_intra >= args.min_intra_cluster_proteins])
+        for cl, cnt in counts_intra.items():
+            if cnt >= args.min_module_proteins:
+                obs.loc[is_sp & (intra_labels == cl).values, "protein_id"].to_csv(modules_dir / f"intra_{sp}_{cnt:07d}_clust{cl}_{param_tag}.txt", index=False, header=False)
+    return intra
+def plot_intra_panel(adata: ad.AnnData, intra: dict[str, tuple[np.ndarray, int, pd.Series]], method: str, name: str, path: Path) -> None:
+    """Draw the intra-species layouts of one method with the large intra clusters coloured by protein count.
+
+    Args:
+        adata (ad.AnnData): Saved clusters carrying ``obsm["X_<method>_2d_intra"]``.
+        intra (dict[str, tuple[np.ndarray, int, pd.Series]]): Output of intra_summary.
+        method (str): Layout method key.
+        name (str): Display name of the method.
+        path (Path): Output PNG path.
+    """
+    intra_labels = adata.obs["intra_cluster"].astype(str)
+    top_vals = [cnt for *_, top in intra.values() for cnt in top.values] or [0]
+    norm_size = Normalize(min(top_vals), max(top_vals) if max(top_vals) > min(top_vals) else min(top_vals) + 1)
+    fig, gs = row_figure(len(adata.obs["species"].unique()), f"Intra-species ({name})")
+    for idx, (sp, (is_sp, _, top)) in enumerate(intra.items()):
+        ax = fig.add_subplot(gs[0, idx])
+        coords, intra_cls = adata.obsm[f"X_{method}_2d_intra"][is_sp], intra_labels.values[is_sp]
+        is_shown = np.isin(intra_cls, list(top.index))
+        ax.scatter(coords[~is_shown, 0], coords[~is_shown, 1], c=COLOR_BG, s=PT_SIZE, alpha=ALPHA_BG, rasterized=True, linewidths=0, zorder=1)
+        for cl, cnt in top.items():
+            cl_pts = coords[intra_cls == cl]
+            ax.scatter(cl_pts[:, 0], cl_pts[:, 1], c=gradient_hex(cnt, norm_size), s=PT_SIZE, alpha=ALPHA_MAX, rasterized=True, linewidths=0, zorder=3)
+            txt = ax.text(np.median(cl_pts[:, 0]), np.median(cl_pts[:, 1]), cl, fontsize=FONT_LABEL, ha="center", va="center", fontweight="bold", color="black", zorder=6)
+            txt.set_path_effects([path_effects.withStroke(linewidth=1.25, foreground="white")])
+        style_axes(ax, f"{sp} (n={is_sp.sum():,})", name)
+    add_colorbar(fig.add_subplot(gs[-1, :]), norm_size, "Proteins per highlighted cluster")
+    save_fig(fig, path)
+    plt.close(fig)
+def plot_layout_panels(adata: ad.AnnData, js: JointStats, intra: dict[str, tuple[np.ndarray, int, pd.Series]], target_dir: Path, intra_dir: Path, param_tag: str) -> None:
+    """Draw for every layout method the joint layouts coloured by specificity index and the intra-species layouts.
+
+    Args:
+        adata (ad.AnnData): Saved clusters with letter-named joint clusters.
+        js (JointStats): Joint cluster statistics.
+        intra (dict[str, tuple[np.ndarray, int, pd.Series]]): Output of intra_summary.
+        target_dir (Path): Report folder.
+        intra_dir (Path): Folder of the intra-species panels.
+        param_tag (str): Parameter tag of the clustering.
+    """
+    species_list = list(js.counts.columns)
+    for m in tqdm(args.layout_methods, desc="Layout panels"):
+        if f"X_{m}_2d" not in adata.obsm:
+            print(f"[PYTHON-INFO][PANELS] Skipping {m}: X_{m}_2d not in the .h5ad")
+            continue
+        name = METHOD_NAMES.get(m, m)
+        fig, gs = row_figure(len(species_list), f"Inter-species ({name})")
+        for idx, sp in enumerate(species_list):
+            draw_facet(fig.add_subplot(gs[0, idx]), adata.obsm[f"X_{m}_2d"], adata.obs, sp, js.colors, js.ranked[sp], js.counts[sp], name, js.spec[sp])
+        add_colorbar(fig.add_subplot(gs[-1, :]), Normalize(0, 1), CBAR_LABEL)
+        save_fig(fig, target_dir / f"{m}_joint_clusters_species_specificity__{param_tag}.png")
+        plt.close(fig)
+        if intra: plot_intra_panel(adata, intra, m, name, intra_dir / f"{m}_intra_species_top_clusters__{param_tag}.png")
+def plot_flux(obs: pd.DataFrame, js: JointStats, intra: dict[str, tuple[np.ndarray, int, pd.Series]], path: Path) -> None:
+    """Draw per species the fluxes from its intra clusters to its selected joint clusters, coloured by specificity index.
+
+    Args:
+        obs (pd.DataFrame): Observation table with letter-named ``cluster`` and ``intra_cluster`` columns.
+        js (JointStats): Joint cluster statistics.
+        intra (dict[str, tuple[np.ndarray, int, pd.Series]]): Output of intra_summary.
+        path (Path): Output PNG path.
+    """
+    cluster_labels, intra_labels = obs["cluster"].astype(str), obs["intra_cluster"].astype(str)
+    fig, gs = row_figure(len(js.counts.columns), "Intra- to Inter-species cluster fluxes", SANKEY_HEIGHT_SCALE, font_scale=FLUX_FONT_SCALE)
+    norm_spec, spec_cut = Normalize(0, 1), args.module_min_specificity_percent / 100
+    for idx, (sp, (is_sp, n_cl, top)) in enumerate(intra.items()):
+        ax = fig.add_subplot(gs[0, idx])
+        title = f"{sp}\n(n={is_sp.sum():,}, k={n_cl})"
+        full = pd.crosstab(intra_labels[is_sp], cluster_labels[is_sp])
+        sp_ranked = [cl for cl in js.ranked[sp] if cl in full.columns]
+        if not sp_ranked:
+            ax.axis("off")
+            ax.set_title(title, fontsize=FONT_FACET * FLUX_FONT_SCALE, fontweight="bold", pad=2)
+            continue
+        flows = full[sp_ranked]
+        flows = flows[flows.sum(axis=1) > 0]
+        l_order = [cl for cl in top.index if cl in flows.index] + flows.sum(axis=1).drop(list(top.index), errors="ignore").sort_values(ascending=False).index.tolist()
+        flows = flows.loc[l_order]
+        best, spec = flows.idxmax(axis=1), js.spec[sp]
+        right_colors = {cl: gradient_hex(spec[cl], norm_spec) for cl in sp_ranked}
+        left_colors = {cl: right_colors[best[cl]] if flows.loc[cl, best[cl]] > full.loc[cl].sum() / 2 else COLOR_BG for cl in l_order}
+        draw_flux(ax, flows, left_colors, right_colors, {cl: cl for cl in top.index if cl in flows.index}, {cl: f"{cl} ({js.counts.loc[cl, sp]:,})" for cl in sp_ranked}, {cl for cl in sp_ranked if spec[cl] >= spec_cut}, title)
+    add_colorbar(fig.add_subplot(gs[-1, :]), norm_spec, f"{CBAR_LABEL}; black border: $S_{{i}} \\geq$ {spec_cut:.2f}")
+    save_fig(fig, path)
+    plt.close(fig)
+def plot_reprojection(adata: ad.AnnData, js: JointStats, path: Path) -> None:
+    """Re-project the proteins of the selected joint clusters and draw them per species, coloured by cluster.
+
+    Args:
+        adata (ad.AnnData): Saved clusters with letter-named joint clusters.
+        js (JointStats): Joint cluster statistics.
+        path (Path): Output PNG path.
+    """
+    keep = adata.obs["cluster"].astype(str).isin(js.selected).values
+    if "X_umap_2d" not in adata.obsm or keep.sum() <= 2: return
+    obs_selected = adata.obs[keep]
+    print(f"[PYTHON-INFO][SELECTION] Re-projecting {keep.sum():,} proteins of {len(js.selected)} selected joint clusters from all species: {', '.join(js.selected)}")
+    coords_selected = reproject(adata, keep)
+    species_selected = [sp for sp in js.counts.columns if (obs_selected["species"] == sp).any()]
+    fig, gs = row_figure(len(species_selected), "Selected inter-species clusters (re-projected)", strip=False)
+    for idx, sp in enumerate(species_selected):
+        draw_facet(fig.add_subplot(gs[0, idx]), coords_selected, obs_selected, sp, js.colors, js.selected, js.counts[sp], "UMAP")
+    add_bottom_legend(fig, js.colors, "Joint cluster")
+    save_fig(fig, path)
+    plt.close(fig)
 def report(h5ad_path: Path) -> None:
     """Write tables, modules, panels, fluxes and the merged PDF of one saved clustering.
 
@@ -402,127 +595,18 @@ def report(h5ad_path: Path) -> None:
     adata = ad.read_h5ad(h5ad_path)
     modules_dir, intra_dir = target_dir / "protein-modules", target_dir / "intra_group"
     for d in (modules_dir, intra_dir): d.mkdir(parents=True, exist_ok=True)
-    obs = adata.obs
-    species_list = list(obs["species"].unique())
-    n_sp = len(species_list)
-    print(f"[PYTHON-INFO][DATA-SHAPE] {h5ad_path.name}: {adata.n_obs:,} proteins, {n_sp} species, obsm: {', '.join(adata.obsm.keys())}")
-    ###################################### JOINT_SELECTION
-    ids = obs["cluster"].astype(int)
-    obs["cluster"] = pd.Categorical(ids.map(letter), categories=[letter(i) for i in sorted(ids.unique())])
-    cluster_labels, intra_labels, species_labels = obs["cluster"].astype(str), obs["intra_cluster"].astype(str), obs["species"].astype(str)
-    counts_df = pd.crosstab(obs["cluster"], obs["species"])[species_list]
-    counts_df.index = counts_df.index.astype(str)
-    share_df = counts_df / counts_df.sum()
-    spec_df = share_df.div(share_df.sum(axis=1), axis=0)
-    fold_change = share_df.max(axis=1) / share_df.min(axis=1)
-    p_vals, valid = homogeneity_test(counts_df)
-    chi2_q = pd.Series(false_discovery_control(p_vals.to_numpy()), index=counts_df.index)
-    significant = valid & (chi2_q < args.chi2_max_q) & (fold_change >= args.min_fold_change)
-    balanced = (fold_change <= 1 / args.balanced_min_share_ratio) & (counts_df.min(axis=1) >= args.min_species_proteins)
-    ranked = {sp: top_joint_clusters(counts_df, spec_df, significant, sp) for sp in species_list}
-    selected = list(dict.fromkeys(cl for cls in ranked.values() for cl in cls))
-    colors = {cl: PALETTE[i % len(PALETTE)] for i, cl in enumerate(selected)}
-    print(f"[PYTHON-INFO][CHI2] {valid.sum()}/{len(valid)} joint clusters testable, {(valid & (chi2_q < args.chi2_max_q)).sum()} with q < {args.chi2_max_q}, {significant.sum()} also with fold change >= {args.min_fold_change}")
-    print(f"[PYTHON-INFO][BALANCED] {balanced.sum()} balanced joint clusters: {', '.join(balanced.index[balanced])}")
-    print(f"[PYTHON-INFO][SELECTION] {len(selected)} selected joint clusters: {', '.join(selected)}")
-    ###################################### TABLES_AND_MODULES
-    with open(target_dir / f"clustering_metrics__{param_tag}.txt", "w") as f:
-        f.writelines(f"{k}: {v}\n" for k, v in adata.uns["metrics"].items())
-    pd.DataFrame([(sp, cl, rk + 1, counts_df.loc[cl, sp], spec_df.loc[cl, sp], chi2_q[cl], fold_change[cl]) for sp, cls in ranked.items() for rk, cl in enumerate(cls)], columns=["species", "cluster", "rank", "protein_count", "specificity", "chi2_q", "fold_change"]).to_csv(target_dir / f"species_top_clusters__{param_tag}.csv", index=False)
-    obs[["protein_id", "species", "cluster", "intra_cluster"]].to_csv(target_dir / f"protein_clusters_metadata__{param_tag}.csv", index=False)
-    stats = pd.DataFrame({"chi2_q": chi2_q, "chi2_valid": valid, "fold_change": fold_change, "significant": significant, "balanced": balanced, "selected": counts_df.index.isin(selected)}, index=counts_df.index)
-    pd.concat({"protein_count": counts_df.stack(), "specificity": spec_df.stack()}, axis=1).rename_axis(["cluster", "species"]).reset_index().join(stats, on="cluster").to_csv(target_dir / f"species_cluster_enrichment__{param_tag}.csv", index=False)
-    markers = adata.uns["markers"].astype({"cluster": str})
-    inter = markers["analysis"] == "inter_group"
-    markers.loc[inter, "cluster"] = markers.loc[inter, "cluster"].astype(int).map(letter)
-    markers.to_csv(target_dir / f"channel_importance_rankings__{param_tag}.csv", index=False)
-    for sp in species_list:
-        for cl in counts_df.index[significant & (spec_df[sp] >= args.module_min_specificity_percent / 100) & (counts_df[sp] >= args.min_module_proteins)]:
-            obs.loc[(species_labels == sp).values & (cluster_labels == cl).values, "protein_id"].to_csv(modules_dir / f"{sp}_{counts_df.loc[cl, sp]:07d}_clust{cl}_{param_tag}.txt", index=False, header=False)
-    ###################################### INTRA_SUMMARY
-    intra = {}
-    for sp in species_list:
-        is_sp = (obs["species"] == sp).values
-        if obs.loc[is_sp, "intra_cluster"].isna().all(): continue
-        counts_intra = intra_labels[is_sp].value_counts()
-        intra[sp] = (is_sp, counts_intra.size, counts_intra[counts_intra >= args.min_intra_cluster_proteins])
-        for cl, cnt in counts_intra.items():
-            if cnt >= args.min_module_proteins:
-                obs.loc[is_sp & (intra_labels == cl).values, "protein_id"].to_csv(modules_dir / f"intra_{sp}_{cnt:07d}_clust{cl}_{param_tag}.txt", index=False, header=False)
-    ###################################### LAYOUT_PANELS
-    for m in tqdm(args.layout_methods, desc="Layout panels"):
-        if f"X_{m}_2d" not in adata.obsm:
-            print(f"[PYTHON-INFO][PANELS] Skipping {m}: X_{m}_2d not in {h5ad_path.name}")
-            continue
-        name = METHOD_NAMES.get(m, m)
-        fig, gs = row_figure(n_sp, f"Inter-species ({name})")
-        for idx, sp in enumerate(species_list):
-            draw_facet(fig.add_subplot(gs[0, idx]), adata.obsm[f"X_{m}_2d"], obs, sp, colors, ranked[sp], counts_df[sp], name, spec_df[sp])
-        add_colorbar(fig.add_subplot(gs[-1, :]), Normalize(0, 1), CBAR_LABEL)
-        save_fig(fig, target_dir / f"{m}_joint_clusters_species_specificity__{param_tag}.png")
-        plt.close(fig)
-        if not intra: continue
-        top_vals = [cnt for *_, top in intra.values() for cnt in top.values] or [0]
-        norm_size = Normalize(min(top_vals), max(top_vals) if max(top_vals) > min(top_vals) else min(top_vals) + 1)
-        fig, gs = row_figure(n_sp, f"Intra-species ({name})")
-        for idx, (sp, (is_sp, _, top)) in enumerate(intra.items()):
-            ax = fig.add_subplot(gs[0, idx])
-            coords, intra_cls = adata.obsm[f"X_{m}_2d_intra"][is_sp], intra_labels.values[is_sp]
-            is_shown = np.isin(intra_cls, list(top.index))
-            ax.scatter(coords[~is_shown, 0], coords[~is_shown, 1], c=COLOR_BG, s=PT_SIZE, alpha=ALPHA_BG, rasterized=True, linewidths=0, zorder=1)
-            for cl, cnt in top.items():
-                cl_pts = coords[intra_cls == cl]
-                ax.scatter(cl_pts[:, 0], cl_pts[:, 1], c=gradient_hex(cnt, norm_size), s=PT_SIZE, alpha=ALPHA_MAX, rasterized=True, linewidths=0, zorder=3)
-                txt = ax.text(np.median(cl_pts[:, 0]), np.median(cl_pts[:, 1]), cl, fontsize=FONT_LABEL, ha="center", va="center", fontweight="bold", color="black", zorder=6)
-                txt.set_path_effects([path_effects.withStroke(linewidth=1.25, foreground="white")])
-            style_axes(ax, f"{sp} (n={is_sp.sum():,})", name)
-        add_colorbar(fig.add_subplot(gs[-1, :]), norm_size, "Proteins per highlighted cluster")
-        save_fig(fig, intra_dir / f"{m}_intra_species_top_clusters__{param_tag}.png")
-        plt.close(fig)
-    ###################################### INTRA_INTER_FLUX
-    if intra:
-        fig, gs = row_figure(n_sp, "Intra- to Inter-species cluster fluxes", SANKEY_HEIGHT_SCALE, font_scale=FLUX_FONT_SCALE)
-        norm_spec, spec_cut = Normalize(0, 1), args.module_min_specificity_percent / 100
-        for idx, (sp, (is_sp, n_cl, top)) in enumerate(intra.items()):
-            ax = fig.add_subplot(gs[0, idx])
-            title = f"{sp}\n(n={is_sp.sum():,}, k={n_cl})"
-            full = pd.crosstab(intra_labels[is_sp], cluster_labels[is_sp])
-            sp_ranked = [cl for cl in ranked[sp] if cl in full.columns]
-            if not sp_ranked:
-                ax.axis("off")
-                ax.set_title(title, fontsize=FONT_FACET * FLUX_FONT_SCALE, fontweight="bold", pad=2)
-                continue
-            flows = full[sp_ranked]
-            flows = flows[flows.sum(axis=1) > 0]
-            l_order = [cl for cl in top.index if cl in flows.index] + flows.sum(axis=1).drop(list(top.index), errors="ignore").sort_values(ascending=False).index.tolist()
-            flows = flows.loc[l_order]
-            best = flows.idxmax(axis=1)
-            spec = spec_df[sp]
-            right_colors = {cl: gradient_hex(spec[cl], norm_spec) for cl in sp_ranked}
-            left_colors = {cl: right_colors[best[cl]] if flows.loc[cl, best[cl]] > full.loc[cl].sum() / 2 else COLOR_BG for cl in l_order}
-            draw_flux(ax, flows, left_colors, right_colors, {cl: cl for cl in top.index if cl in flows.index}, {cl: f"{cl} ({counts_df.loc[cl, sp]:,})" for cl in sp_ranked}, {cl for cl in sp_ranked if spec[cl] >= spec_cut}, title)
-        add_colorbar(fig.add_subplot(gs[-1, :]), norm_spec, f"{CBAR_LABEL}; black border: $S_{{i}} \\geq$ {spec_cut:.2f}")
-        save_fig(fig, target_dir / f"sankey_intra_to_inter_clusters__{param_tag}.png")
-        plt.close(fig)
-    ###################################### REPROJECTION
-    keep = cluster_labels.isin(selected).values
-    if "X_umap_2d" in adata.obsm and keep.sum() > 2:
-        obs_selected = obs[keep]
-        print(f"[PYTHON-INFO][SELECTION] Re-projecting {keep.sum():,} proteins of {len(selected)} selected joint clusters from all species: {', '.join(selected)}")
-        coords_selected = reproject(adata, keep)
-        species_selected = [sp for sp in species_list if (obs_selected["species"] == sp).any()]
-        fig, gs = row_figure(len(species_selected), "Selected inter-species clusters (re-projected)", strip=False)
-        for idx, sp in enumerate(species_selected):
-            draw_facet(fig.add_subplot(gs[0, idx]), coords_selected, obs_selected, sp, colors, selected, counts_df[sp], "UMAP")
-        add_bottom_legend(fig, colors, "Joint cluster")
-        save_fig(fig, target_dir / f"umap_reprojected_top_clusters__{param_tag}.png")
-        plt.close(fig)
-    ###################################### TOP_COUNTS_BARPLOT
-    if selected:
-        top_counts = counts_df.loc[selected, species_list]
+    species_list = list(adata.obs["species"].unique())
+    print(f"[PYTHON-INFO][DATA-SHAPE] {h5ad_path.name}: {adata.n_obs:,} proteins, {len(species_list)} species, obsm: {', '.join(adata.obsm.keys())}")
+    js = joint_stats(adata.obs, species_list)
+    write_tables(adata, js, target_dir, modules_dir, param_tag)
+    intra = intra_summary(adata.obs, species_list, modules_dir, param_tag)
+    plot_layout_panels(adata, js, intra, target_dir, intra_dir, param_tag)
+    if intra: plot_flux(adata.obs, js, intra, target_dir / f"sankey_intra_to_inter_clusters__{param_tag}.png")
+    plot_reprojection(adata, js, target_dir / f"umap_reprojected_top_clusters__{param_tag}.png")
+    if js.selected:
+        top_counts = js.counts.loc[js.selected, species_list]
         top_counts = top_counts.loc[top_counts.sum(axis=1).sort_values(ascending=False, kind="stable").index]
-        plot_counts_bar(top_counts, species_list, chi2_q.loc[selected].map(sig_stars), "Protein per cluster (number by species)", target_dir / f"barplot_umap_labelled_clusters_protein_counts__{param_tag}.png")
-    ###################################### PDF_REPORT
+        plot_counts_bar(top_counts, species_list, js.chi2_q.loc[js.selected].map(sig_stars), "Protein per cluster (number by species)", target_dir / f"barplot_umap_labelled_clusters_protein_counts__{param_tag}.png")
     out = target_dir / f"{target_dir.name}_scanpy.pdf"
     pdfs = sorted((p for p in target_dir.rglob(f"*__{param_tag}.pdf") if p != out), key=lambda p: next((i for i, s in enumerate(REPORT_ORDER) if p.stem.startswith(s)), len(REPORT_ORDER)))
     merge_pdfs(pdfs, out)

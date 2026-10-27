@@ -3,7 +3,7 @@ Area Science Park -- Laboratory of Data Engineering
 
 ## Overview
 
-The pipeline compares the proteomes of several species (currently *Ae. aegypti*, *Ae. albopictus* and *Ae. koreicus*) in ESMC embedding space. It finds groups of proteins whose share **differs across species**, and groups that are conserved. Every step is a SLURM script under `slurms/` that runs a Python script under `src/`. All parameters live in `configs/param_configs.yaml`, under one section per Python script.
+The pipeline compares the proteomes of several species (currently *Ae. aegypti*, *Ae. albopictus*, *Ae. koreicus* and *Ae. japonicus*) in ESMC embedding space. It finds groups of proteins whose share **differs across species**, and groups that are conserved. Every step is a SLURM script under `slurms/` that runs a Python script under `src/`. All parameters live in `configs/param_configs.yaml`, under one section per Python script.
 
 ```
 configs/query_configs.tsv + configs/param_configs.yaml
@@ -65,7 +65,7 @@ Every step decides on its own whether its outputs are fresh, so after any change
 
 ### `configs/query_configs.tsv`
 
-One row per label. Keep it comment-free, because the slurm awk and pandas parsers read every line.
+One row per label. Keep it comment-free, because the slurm awk and pandas parsers read every line. It is the single list of labels: every step (01, 02, 03, supp_01) processes its labels in row order and ignores files of labels that are not in it, and `run_all.sh` sizes the SLURM arrays from it (the `#SBATCH --array` headers match the current 4 labels and 3 models).
 
 | column | meaning |
 |---|---|

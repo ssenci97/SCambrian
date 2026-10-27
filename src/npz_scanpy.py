@@ -147,23 +147,15 @@ def markers_table(adata: ad.AnnData, groupby: str, analysis: str, species: str) 
     df.insert(0, "analysis", analysis)
     df.insert(1, "species", species)
     return df
-###################################### MAIN
-def main() -> None:
-    """Load embeddings, preprocess, cluster and embed jointly and per species, then save everything to .h5ad."""
-    start_time = time.time()
-    sc.settings.n_jobs = args.n_jobs
-    npz_files = [p.strip() for p in args.npzs.split(",")]
-    if len(npz_files) < 2:
-        raise ValueError("[PYTHON-ERROR] This comparative script requires at least two .npz files.")
-    use_pca = args.pca_components is not None and args.pca_components > 0
-    param_tag = f"{Path(npz_files[0]).parent.name}__res{args.leiden_resolution}_nn{args.knn_neighbors}" + (f"_npc{args.pca_components}" if use_pca else "_full")
-    target_dir = Path(args.scanpy_dir) / ("_".join([Path(f).stem.replace("_reps", "") for f in npz_files]) + f"__{Path(npz_files[0]).parent.name}")
-    h5ad_path = target_dir / f"{target_dir.name}__{param_tag.removeprefix(Path(npz_files[0]).parent.name + '__')}.h5ad"
-    if not args.overwrite and is_fresh(h5ad_path, npz_files):
-        print(f"[PYTHON-INFO] '{h5ad_path}' is newer than its inputs and has the current parameters. Skipping.")
-        return
-    target_dir.mkdir(parents=True, exist_ok=True)
-    ###################################### LOAD_DATA
+def load_embeddings(npz_files: list[str]) -> ad.AnnData:
+    """Load the embeddings of every .npz into one AnnData, the species being the file label.
+
+    Args:
+        npz_files (list[str]): ``<label>_reps.npz`` files of one model.
+
+    Returns:
+        ad.AnnData: Concatenated embeddings with ``protein_id`` and ``species`` observations.
+    """
     adatas = []
     for f in tqdm(npz_files, desc="Loading embeddings"):
         data = np.load(f)
@@ -175,7 +167,17 @@ def main() -> None:
     adata = ad.concat(adatas, join="outer")
     adata.obs_names_make_unique()
     print(f"[PYTHON-INFO][DATA-SHAPE] Initial data shape: {adata.shape}")
-    ###################################### PREPROCESSING
+    return adata
+def preprocess(adata: ad.AnnData, use_pca: bool) -> tuple[str, int | None]:
+    """L2-normalise the embeddings in place and optionally reduce them to ``pca_components`` PCs.
+
+    Args:
+        adata (ad.AnnData): Embeddings to preprocess.
+        use_pca (bool): Whether to run the PCA.
+
+    Returns:
+        tuple[str, int | None]: Representation key and number of PCs for the kNN graph.
+    """
     norms = np.linalg.norm(adata.X, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     adata.X = adata.X / norms
@@ -183,16 +185,19 @@ def main() -> None:
     if use_pca:
         sc.tl.pca(adata, n_comps=args.pca_components)
         print(f"[PYTHON-INFO][DATA-SHAPE] Shape after PCA ({args.pca_components} PCs): {adata.obsm['X_pca'].shape}")
-        rep_key, pcs_for_neighbors = "X_pca", args.pca_components
-    else:
-        print(f"[PYTHON-INFO][DATA-SHAPE] Operating in full-space dimensions: {adata.shape[1]}")
-        rep_key, pcs_for_neighbors = "X", None
-    space = "pca" if use_pca else "full"
-    ###################################### JOINT
-    metrics = {f"joint_silhouette_{space}": cluster_and_embed(adata, rep_key, pcs_for_neighbors, "cluster", "Joint")}
-    print(f"[PYTHON-INFO][METRIC] Joint Silhouette Score ({space} space): {metrics[f'joint_silhouette_{space}']:.4f}")
-    markers = [markers_table(adata, "cluster", "inter_group", "all")]
-    ###################################### INTRA_GROUP
+        return "X_pca", args.pca_components
+    print(f"[PYTHON-INFO][DATA-SHAPE] Operating in full-space dimensions: {adata.shape[1]}")
+    return "X", None
+def intra_clustering(adata: ad.AnnData, rep_key: str, pcs_for_neighbors: int | None, metrics: dict[str, float], markers: list[pd.DataFrame]) -> None:
+    """Cluster and embed every species alone, writing ``intra_cluster`` and the ``*_intra`` layouts into the joint AnnData.
+
+    Args:
+        adata (ad.AnnData): Joint embeddings, modified in place.
+        rep_key (str): Representation key of the kNN graph.
+        pcs_for_neighbors (int | None): Number of PCs of the kNN graph.
+        metrics (dict[str, float]): Silhouette scores, extended in place.
+        markers (list[pd.DataFrame]): Channel marker tables, extended in place.
+    """
     intra = pd.Series(index=adata.obs.index, dtype="object")
     for m in METHODS:
         for nc in args.layout_dimensions:
@@ -211,7 +216,29 @@ def main() -> None:
                 adata.obsm[f"X_{m}_{nc}d_intra"][mask] = sub.obsm[f"X_{m}_{nc}d"]
         markers.append(markers_table(sub, "intra_cluster", "intra_group", sp))
     adata.obs["intra_cluster"] = pd.Categorical(intra)
-    ###################################### SAVE
+###################################### MAIN
+def main() -> None:
+    """Load embeddings, preprocess, cluster and embed jointly and per species, then save everything to .h5ad."""
+    start_time = time.time()
+    sc.settings.n_jobs = args.n_jobs
+    npz_files = [p.strip() for p in args.npzs.split(",")]
+    if len(npz_files) < 2:
+        raise ValueError("[PYTHON-ERROR] This comparative script requires at least two .npz files.")
+    use_pca = args.pca_components is not None and args.pca_components > 0
+    param_tag = f"{Path(npz_files[0]).parent.name}__res{args.leiden_resolution}_nn{args.knn_neighbors}" + (f"_npc{args.pca_components}" if use_pca else "_full")
+    target_dir = Path(args.scanpy_dir) / ("_".join([Path(f).stem.replace("_reps", "") for f in npz_files]) + f"__{Path(npz_files[0]).parent.name}")
+    h5ad_path = target_dir / f"{target_dir.name}__{param_tag.removeprefix(Path(npz_files[0]).parent.name + '__')}.h5ad"
+    if not args.overwrite and is_fresh(h5ad_path, npz_files):
+        print(f"[PYTHON-INFO] '{h5ad_path}' is newer than its inputs and has the current parameters. Skipping.")
+        return
+    target_dir.mkdir(parents=True, exist_ok=True)
+    adata = load_embeddings(npz_files)
+    rep_key, pcs_for_neighbors = preprocess(adata, use_pca)
+    space = "pca" if use_pca else "full"
+    metrics = {f"joint_silhouette_{space}": cluster_and_embed(adata, rep_key, pcs_for_neighbors, "cluster", "Joint")}
+    print(f"[PYTHON-INFO][METRIC] Joint Silhouette Score ({space} space): {metrics[f'joint_silhouette_{space}']:.4f}")
+    markers = [markers_table(adata, "cluster", "inter_group", "all")]
+    intra_clustering(adata, rep_key, pcs_for_neighbors, metrics, markers)
     out = ad.AnnData(obs=adata.obs[["protein_id", "species", "cluster", "intra_cluster"]].copy(), obsm={k: v for k, v in adata.obsm.items() if k.startswith(("X_umap", "X_tsne"))}, obsp=dict(adata.obsp), uns={"neighbors": adata.uns["neighbors"], "params": run_params(), "npz_files": npz_files, "param_tag": param_tag, "metrics": metrics, "markers": pd.concat(markers, ignore_index=True)})
     out.write_h5ad(h5ad_path, compression="gzip")
     print(f"[PYTHON-INFO][SAVE] {h5ad_path} | obsm: {', '.join(out.obsm.keys())}")

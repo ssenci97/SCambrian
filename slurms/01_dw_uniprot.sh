@@ -7,7 +7,7 @@
 #SBATCH --mem=2G
 #SBATCH --time=02:00:00
 #SBATCH --output=logs/uniprot/dw_UP_%A_%a.log
-#SBATCH --array=1-3
+#SBATCH --array=1-4
 #SBATCH --open-mode=append
 ###################################### conda
 source ~/scratch/miniconda/etc/profile.d/conda.sh

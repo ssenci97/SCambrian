@@ -172,6 +172,65 @@ def write_views(pages: list[dict], title: str, out_path: Path) -> None:
     payload = json.dumps(dict(title=title, config=config, hover_keys=list(LABEL_SETS.values()), cluster_keys=cluster_keys, leiden_key=LABEL_SETS["cluster"], pages=pages), separators=(",", ":")).replace("</", "<\\/")
     out_path.write_text(TEMPLATE.read_text().replace("__TITLE__", escape(title), 1).replace("__PLOTLYJS__", get_plotlyjs(), 1).replace("__DATA__", payload, 1), encoding="utf-8")
 ###################################### REPORT
+def load_enrichment(enrichment_csv: Path) -> tuple[dict[str, str], set[str]]:
+    """Read the significance asterisks and the selection of the joint clusters from the enrichment table of h5ad_scanpy.py.
+
+    Args:
+        enrichment_csv (Path): species_cluster_enrichment table (may be missing).
+
+    Returns:
+        tuple[dict[str, str], set[str]]: Significant cluster -> asterisks, and the selected clusters.
+    """
+    columns = ["cluster", "chi2_q", "significant", "selected"]
+    table = pd.read_csv(enrichment_csv).drop_duplicates("cluster") if enrichment_csv.exists() else pd.DataFrame()
+    table = table.astype({"cluster": str}) if set(columns) <= set(table.columns) else pd.DataFrame(columns=columns)
+    significant_rows = table[table["significant"].astype(bool)]
+    stars = {c: next((st for cut, st in SIG_LEVELS if q < cut), "") for c, q in zip(significant_rows["cluster"], significant_rows["chi2_q"])}
+    selected = set(table.loc[table["selected"].astype(bool), "cluster"])
+    print(f"[PYTHON-INFO][SELECTION] {len(selected)} selected joint clusters from {enrichment_csv.name}: {', '.join(sorted(selected, key=lambda c: (len(c), c)))}")
+    return stars, selected
+def build_page(adata: ad.AnnData, obs: pd.DataFrame, view: str, names: dict[str, str], stars: dict[str, str], selected: set[str], rng: np.random.Generator, run_name: str, param_tag: str) -> tuple[dict, pd.DataFrame]:
+    """Build the HTML page payload of one view and its HDBSCAN labels.
+
+    Args:
+        adata (ad.AnnData): Saved clusters with 3D layouts.
+        obs (pd.DataFrame): Observations with string ``species``.
+        view (str): ``joint`` or a species label.
+        names (dict[str, str]): Label -> display name.
+        stars (dict[str, str]): Significant joint cluster -> asterisks.
+        selected (set[str]): Selected joint clusters.
+        rng (np.random.Generator): Generator of the point subsampling.
+        run_name (str): Run folder name.
+        param_tag (str): Parameter tag of the .h5ad.
+
+    Returns:
+        tuple[dict, pd.DataFrame]: Page payload and HDBSCAN labels per protein.
+    """
+    joint = view == "joint"
+    mask = np.ones(adata.n_obs, dtype=bool) if joint else (obs["species"] == view).values
+    coords = {m: np.asarray(adata.obsm[f"X_{m}_{DIM}d{'' if joint else '_intra'}"][mask], dtype=np.float64) for m in METHODS}
+    view_obs = obs[mask].reset_index(drop=True)
+    view_obs["species"] = view_obs["species"].map(lambda s: names.get(s, s))
+    intra = view_obs["intra_cluster"].astype("object").map(lambda c: str(c) if pd.notna(c) else None)
+    intra = (view_obs["species"] + " · " + intra).where(intra.notna()) if joint else intra
+    hdbscan_name = (lambda x: letter(x - 1)) if joint else (lambda x: str(x - 1))
+    hdbscan_labels = {mcs: fit_hdbscan_auto(coords["umap"], mcs) for mcs in tqdm(args.hdbscan_min_cluster_sizes, desc=f"{view} HDBSCAN", leave=False)}
+    rows = pd.DataFrame({"protein_id": view_obs["protein_id"].astype(str), "species": view_obs["species"], "view": view} | {f"mcs_{mcs}": lab for mcs, lab in hdbscan_labels.items()})
+    n_max = args.max_points_per_view
+    keep = np.sort(rng.choice(len(view_obs), n_max, replace=False)) if n_max and len(view_obs) > n_max else np.arange(len(view_obs))
+    series = {"species": view_obs["species"], "cluster": view_obs["cluster"].map(lambda c: letter(int(c))), "intra_cluster": intra}
+    sets = {LABEL_SETS[k]: categories(series[k]) for k in LABEL_SETS} | {f"HDBSCAN mcs={mcs}": categories(pd.Series([hdbscan_name(int(x)) if x > 0 else None for x in lab], dtype="object")) for mcs, lab in hdbscan_labels.items()}
+    counts_by_cluster = pd.crosstab(series["cluster"], view_obs["species"])
+    counts_by_cluster = counts_by_cluster.loc[sorted(counts_by_cluster.index, key=lambda c: (len(c), c))]
+    species_order = [c[0] for c in sets["species"][1][1:] if c[0] in counts_by_cluster.columns]
+    bars = dict(clusters=list(counts_by_cluster.index), stars=[stars.get(c, "") if joint else "" for c in counts_by_cluster.index], species=species_order, counts=[counts_by_cluster[sp].astype(int).tolist() for sp in species_order])
+    selected_here = [c for c in counts_by_cluster.index if c in selected]
+    if joint and len(selected_here) < len(selected): print(f"[PYTHON-WARNING][SELECTION] Selected clusters missing from the Leiden labels: {', '.join(sorted(selected - set(selected_here)))}")
+    points = f"{len(keep):,}/{len(view_obs):,} points shown" if len(keep) < len(view_obs) else f"{len(view_obs):,} points"
+    page = dict(title="All species" if joint else names.get(view, view), subtitle=f"{run_name} · {param_tag} · {points}", slug=f"{view}_{param_tag}", methods=[[m, t] for m, t in METHODS.items()],
+                coords={m: encode(c[keep], np.float32) for m, c in coords.items()}, ids="\n".join(view_obs["protein_id"].astype(str).values[keep]),
+                sets={k: dict(codes=encode(codes[keep], np.uint16), cats=cats) for k, (codes, cats) in sets.items()}, bars=bars, selected=selected_here)
+    return page, rows
 def interactive(h5ad_path: Path) -> None:
     """Write the paged HTML viewer of every view of one .h5ad, and the HDBSCAN TSV.
 
@@ -193,33 +252,10 @@ def interactive(h5ad_path: Path) -> None:
         return
     target_dir.mkdir(parents=True, exist_ok=True)
     adata = ad.read_h5ad(h5ad_path)
-    obs, rng, rows, pages, names = adata.obs.astype({"species": str}), np.random.default_rng(SEED), [], [], species_names()
-    enrichment_table = pd.read_csv(enrichment_csv).drop_duplicates("cluster") if enrichment_csv.exists() else pd.DataFrame()
-    enrichment_table = enrichment_table.astype({"cluster": str}) if {"cluster", "chi2_q", "significant", "selected"} <= set(enrichment_table.columns) else pd.DataFrame(columns=["cluster", "chi2_q", "significant", "selected"])
-    significant_rows = enrichment_table[enrichment_table["significant"].astype(bool)]
-    stars, selected = {c: next((st for cut, st in SIG_LEVELS if q < cut), "") for c, q in zip(significant_rows["cluster"], significant_rows["chi2_q"])}, set(enrichment_table.loc[enrichment_table["selected"].astype(bool), "cluster"])
-    print(f"[PYTHON-INFO][SELECTION] {len(selected)} selected joint clusters from {enrichment_csv.name}: {', '.join(sorted(selected, key=lambda c: (len(c), c)))}")
-    for view in tqdm(views, desc=f"{h5ad_path.parent.name} views"):
-        mask = np.ones(adata.n_obs, dtype=bool) if view == "joint" else (obs["species"] == view).values
-        suffix = "" if view == "joint" else "_intra"
-        coords = {m: np.asarray(adata.obsm[f"X_{m}_{DIM}d{suffix}"][mask], dtype=np.float64) for m in METHODS}
-        view_obs = obs[mask].reset_index(drop=True)
-        view_obs["species"] = view_obs["species"].map(lambda s: names.get(s, s))
-        intra = view_obs["intra_cluster"].astype("object").map(lambda c: str(c) if pd.notna(c) else None)
-        intra = (view_obs["species"] + " · " + intra).where(intra.notna()) if view == "joint" else intra
-        hdbscan_name = (lambda x: letter(x - 1)) if view == "joint" else (lambda x: str(x - 1))
-        hdbscan_labels = {mcs: fit_hdbscan_auto(coords["umap"], mcs) for mcs in tqdm(args.hdbscan_min_cluster_sizes, desc=f"{view} HDBSCAN", leave=False)}
-        rows.append(pd.DataFrame({"protein_id": view_obs["protein_id"].astype(str), "species": view_obs["species"], "view": view} | {f"mcs_{mcs}": lab for mcs, lab in hdbscan_labels.items()}))
-        keep = np.sort(rng.choice(len(view_obs), args.max_points_per_view, replace=False)) if args.max_points_per_view and len(view_obs) > args.max_points_per_view else np.arange(len(view_obs))
-        series = {"species": view_obs["species"], "cluster": view_obs["cluster"].map(lambda c: letter(int(c))), "intra_cluster": intra}
-        sets = {LABEL_SETS[k]: categories(series[k]) for k in LABEL_SETS} | {f"HDBSCAN mcs={mcs}": categories(pd.Series([hdbscan_name(int(x)) if x > 0 else None for x in lab], dtype="object")) for mcs, lab in hdbscan_labels.items()}
-        counts_by_cluster = pd.crosstab(series["cluster"], view_obs["species"])
-        counts_by_cluster, species_order = counts_by_cluster.loc[sorted(counts_by_cluster.index, key=lambda c: (len(c), c))], [c[0] for c in sets["species"][1][1:] if c[0] in counts_by_cluster.columns]
-        bars = dict(clusters=list(counts_by_cluster.index), stars=[stars.get(c, "") if view == "joint" else "" for c in counts_by_cluster.index], species=species_order, counts=[counts_by_cluster[sp].astype(int).tolist() for sp in species_order])
-        selected_here = [c for c in counts_by_cluster.index if c in selected]
-        if view == "joint" and len(selected_here) < len(selected): print(f"[PYTHON-WARNING][SELECTION] Selected clusters missing from the Leiden labels: {', '.join(sorted(selected - set(selected_here)))}")
-        points = f"{len(keep):,}/{len(view_obs):,} points shown" if len(keep) < len(view_obs) else f"{len(view_obs):,} points"
-        pages.append(dict(title="All species" if view == "joint" else names.get(view, view), subtitle=f"{h5ad_path.parent.name} · {param_tag} · {points}", slug=f"{view}_{param_tag}", methods=[[m, t] for m, t in METHODS.items()], coords={m: encode(c[keep], np.float32) for m, c in coords.items()}, ids="\n".join(view_obs["protein_id"].astype(str).values[keep]), sets={k: dict(codes=encode(codes[keep], np.uint16), cats=cats) for k, (codes, cats) in sets.items()}, bars=bars, selected=selected_here))
+    obs, rng, names = adata.obs.astype({"species": str}), np.random.default_rng(SEED), species_names()
+    stars, selected = load_enrichment(enrichment_csv)
+    built = [build_page(adata, obs, view, names, stars, selected, rng, h5ad_path.parent.name, param_tag) for view in tqdm(views, desc=f"{h5ad_path.parent.name} views")]
+    pages, rows = [p for p, _ in built], [r for _, r in built]
     write_views(pages, f"{h5ad_path.parent.name} · {param_tag} · 3D views", out_paths["html"])
     print(f"[PYTHON-INFO][SAVE] {out_paths['html']} ({len(pages)} pages, {out_paths['html'].stat().st_size / 1e6:.1f} MB)")
     pd.concat(rows, ignore_index=True).to_csv(out_paths["tsv"], sep="\t", index=False)
