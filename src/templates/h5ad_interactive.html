@@ -30,24 +30,27 @@ button:disabled,select:disabled{opacity:.4;cursor:default}
 .lab.on{color:var(--ink);font-weight:700}
 .sz{display:flex;align-items:center;gap:6px;color:var(--muted)}
 .sz input{width:90px;accent-color:var(--accent)}
-main{flex:1;display:flex;flex-direction:column;min-height:0;padding:12px 16px 16px;gap:12px}
-.stage{position:relative;flex:1;min-height:520px;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+main{flex:1;display:grid;grid-template-columns:320px minmax(0,1fr);grid-template-rows:minmax(0,1fr);min-height:0;padding:12px 16px 16px;gap:12px}
+aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;overflow:auto;min-height:0;display:flex;flex-direction:column;gap:14px}
+.stage{position:relative;min-height:520px;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 #plot{position:absolute;inset:0}
 #busy{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:var(--busy);color:var(--muted);font-size:16px;z-index:5}
 .stage.loading #busy{display:flex}
-#legend{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;max-height:30vh;overflow:auto}
-.lhead{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
-.lhead b{font-size:16px}
 .muted{color:var(--muted);font-size:13px}
-.chips{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:2px 10px}
-.chip{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:6px;cursor:pointer;user-select:none;font-size:15px;min-width:0}
+.sec[hidden]{display:none}
+.shead{display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:6px}
+.shead b{font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shead button{padding:3px 8px;font-size:13px}
+.q{width:100%;font:inherit;font-size:14px;border:1px solid var(--line);border-radius:8px;padding:5px 8px;margin-bottom:6px}
+.chip{display:flex;align-items:center;gap:8px;padding:3px 6px;border-radius:6px;cursor:pointer;user-select:none;font-size:15px;min-width:0}
 .chip:hover{background:var(--bg)}
+.chip input{margin:0;flex:none;accent-color:var(--accent);pointer-events:none}
 .chip i{flex:none;width:14px;height:14px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(0,0,0,.15)}
+.chip i.plain{background:transparent!important;box-shadow:inset 0 0 0 1.5px #9aa1ad}
 .chip .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chip .n{margin-left:auto;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
-.chip.off{opacity:.35}
-.chip.off .nm{text-decoration:line-through}
-@media (max-width:900px){.stage{flex:none;height:1000px}#legend{max-height:none}}
+.chip.off{opacity:.4}
+@media (max-width:900px){main{grid-template-columns:1fr;grid-template-rows:auto auto}aside{max-height:45vh}.stage{height:1000px}}
 </style>
 </head>
 <body>
@@ -69,18 +72,19 @@ main{flex:1;display:flex;flex-direction:column;min-height:0;padding:12px 16px 16
   </div>
 </header>
 <main>
+  <aside id="side">
+    <div><div id="linfo" class="muted"></div><div class="muted">click toggles · double-click isolates · ← → pages · C toggles colouring</div></div>
+    <section class="sec" id="secSp"><div class="shead"><b>Species</b><span><button data-all="sp">All</button> <button data-none="sp">None</button></span></div><input class="q" id="qSp" placeholder="Filter species…" aria-label="Filter species"><div id="listSp"></div></section>
+    <section class="sec" id="secCl"><div class="shead"><b id="clTitle"></b><span><button data-all="cl">All</button> <button data-none="cl">None</button></span></div><input class="q" id="qCl" placeholder="Filter clusters…" aria-label="Filter clusters"><div id="listCl"></div></section>
+  </aside>
   <div class="stage" id="stage"><div id="plot"></div><div id="busy">Rendering…</div></div>
-  <section id="legend">
-    <div class="lhead"><div><b id="ltitle"></b> <span id="linfo" class="muted"></span></div><div class="group"><span class="muted">click hides · double-click isolates · ← → pages · C toggles</span><button id="showAll">Show all</button></div></div>
-    <div id="chips" class="chips"></div>
-  </section>
 </main>
 <script>__PLOTLYJS__</script>
 <script id="payload" type="application/json">__DATA__</script>
 <script>
 const D = JSON.parse(document.getElementById("payload").textContent);
 const C = D.config, P = D.pages, $ = id => document.getElementById(id);
-const S = {page: 0, byCluster: false, cluster: D.cluster_keys[0], hidden: new Set(), size: C.marker_size, rev: 0, stacked: innerWidth < 900};
+const S = {page: 0, byCluster: false, cluster: D.cluster_keys[0], hidden: {sp: new Set(), cl: new Set()}, q: {sp: "", cl: ""}, size: C.marker_size, rev: 0, stacked: innerWidth < 900};
 function decode(s, T) { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new T(u.buffer); }
 function page() {
   const p = P[S.page];
@@ -94,8 +98,8 @@ function page() {
 function key() { return S.byCluster ? S.cluster : "species"; }
 function axis(t) { return {title: {text: t, font: {size: C.font_tick + 1}}, backgroundcolor: "#ffffff", showbackground: true, gridcolor: "#e6e8ec", zerolinecolor: "#c9ced6", showline: true, linecolor: "#3a3f4b", tickfont: {size: C.font_tick}, showspikes: false}; }
 function render() {
-  const p = page(), k = key(), set = p.sets[k], codes = p._s[k], cols = set.cats.map(c => c[1]), keep = [];
-  for (let i = 0; i < codes.length; i++) if (!S.hidden.has(codes[i])) keep.push(i);
+  const p = page(), k = key(), set = p.sets[k], codes = p._s[k], cols = set.cats.map(c => c[1]), keep = [], sp = p._s.species, cl = p._s[S.cluster];
+  for (let i = 0; i < codes.length; i++) if (!S.hidden.sp.has(sp[i]) && !S.hidden.cl.has(cl[i])) keep.push(i);
   const extra = D.hover_keys.includes(k) ? null : k, n = p.methods.length;
   const text = keep.map(i => extra ? p._h[i] + `<br>${extra}: ${set.cats[codes[i]][0]}` : p._h[i]), color = keep.map(i => cols[codes[i]]);
   const layout = {uirevision: `${S.page}-${S.rev}`, margin: {l: 0, r: 0, t: 36, b: 0}, paper_bgcolor: "rgba(0,0,0,0)", font: {family: C.font_family, size: C.font_tick, color: "#1f2330"}, hoverlabel: {font: {size: 13, family: C.font_family}, bgcolor: "#ffffff", bordercolor: "#c9ced6"}, annotations: []};
@@ -108,29 +112,40 @@ function render() {
     return {type: "scatter3d", mode: "markers", x, y, z, text, hovertemplate: "%{text}<extra></extra>", showlegend: false, scene: sc, marker: {size: S.size, opacity: C.alpha, color, line: {width: 0}}};
   });
   Plotly.react($("plot"), traces, layout, {responsive: true, displaylogo: false, toImageButtonOptions: {format: "png", scale: 2, filename: `${p.slug}_${k.replace(/\W+/g, "_")}`}});
-  legend(p, k, keep.length);
+  sidebar(p, keep.length);
   $("stage").classList.remove("loading");
 }
 function draw() { $("stage").classList.add("loading"); requestAnimationFrame(() => setTimeout(render, 0)); }
-function legend(p, k, shown) {
-  const cats = p.sets[k].cats, order = cats.map((_, i) => i).filter(i => cats[i][2] > 0).sort((a, b) => (a === 0) - (b === 0) || cats[b][2] - cats[a][2]);
-  $("ltitle").textContent = k;
-  $("linfo").textContent = `${order.length} groups · ${shown.toLocaleString()} / ${p._s[k].length.toLocaleString()} points shown`;
-  $("chips").replaceChildren(...order.map(i => {
-    const [nm, col, cnt] = cats[i], el = document.createElement("div");
-    el.className = "chip" + (S.hidden.has(i) ? " off" : "");
+function order(cats, byName) {
+  return cats.map((_, i) => i).filter(i => cats[i][2] > 0).sort((a, b) => (a === 0) - (b === 0) || (byName ? cats[a][0].localeCompare(cats[b][0], undefined, {numeric: true}) : cats[b][2] - cats[a][2]));
+}
+function shown(s) { const q = S.q[s].trim().toLowerCase(), p = P[S.page], cats = p.sets[s === "sp" ? "species" : S.cluster].cats; return order(cats, s === "cl").filter(i => !q || cats[i][0].toLowerCase().includes(q)); }
+function checklist(s, cats, coloured) {
+  return shown(s).map(i => {
+    const [nm, col, cnt] = cats[i], el = document.createElement("div"), off = S.hidden[s].has(i);
+    el.className = "chip" + (off ? " off" : "");
     el.title = `${nm} (n=${cnt.toLocaleString()})`;
-    el.innerHTML = `<i style="background:${col}"></i><span class="nm"></span><span class="n">${cnt.toLocaleString()}</span>`;
+    el.innerHTML = `<input type="checkbox" tabindex="-1"${off ? "" : " checked"}><i class="${coloured ? "" : "plain"}" style="background:${col}"></i><span class="nm"></span><span class="n">${cnt.toLocaleString()}</span>`;
     el.querySelector(".nm").textContent = nm;
-    el.onclick = () => chip(i, order);
+    el.onclick = () => chip(s, i, order(cats, s === "cl"));
     return el;
-  }));
+  });
+}
+function sidebar(p, n) {
+  const spCats = p.sets.species.cats;
+  S.n = n;
+  $("linfo").textContent = `${n.toLocaleString()} / ${p._s.species.length.toLocaleString()} points shown`;
+  $("secSp").hidden = order(spCats, false).filter(i => i > 0).length < 2;
+  $("clTitle").textContent = S.cluster;
+  $("listSp").replaceChildren(...checklist("sp", spCats, !S.byCluster));
+  $("listCl").replaceChildren(...checklist("cl", p.sets[S.cluster].cats, S.byCluster));
 }
 let timer = null;
-function chip(i, order) {
-  if (timer) { clearTimeout(timer); timer = null; S.hidden = new Set(order.filter(j => j !== i)); draw(); return; }
-  timer = setTimeout(() => { timer = null; S.hidden.has(i) ? S.hidden.delete(i) : S.hidden.add(i); draw(); }, 240);
+function chip(s, i, all) {
+  if (timer) { clearTimeout(timer); timer = null; S.hidden[s] = new Set(all.filter(j => j !== i)); draw(); return; }
+  timer = setTimeout(() => { timer = null; S.hidden[s].has(i) ? S.hidden[s].delete(i) : S.hidden[s].add(i); draw(); }, 240);
 }
+function unfilter(s) { (s ? [s] : ["sp", "cl"]).forEach(k => { S.hidden[k].clear(); S.q[k] = ""; $(k === "sp" ? "qSp" : "qCl").value = ""; }); }
 function sync() {
   const p = P[S.page];
   $("pageSel").value = S.page; $("prev").disabled = S.page === 0; $("next").disabled = S.page === P.length - 1;
@@ -139,8 +154,8 @@ function sync() {
   $("labS").classList.toggle("on", !S.byCluster); $("labC").classList.toggle("on", S.byCluster);
   try { history.replaceState(null, "", "#" + (S.page + 1)); } catch (e) {}
 }
-function go(i) { if (i < 0 || i >= P.length || i === S.page) return; S.page = i; S.hidden.clear(); sync(); draw(); }
-function colourBy(cluster) { S.byCluster = cluster; S.hidden.clear(); sync(); draw(); }
+function go(i) { if (i < 0 || i >= P.length || i === S.page) return; S.page = i; unfilter(); sync(); draw(); }
+function colourBy(cluster) { S.byCluster = cluster; sync(); draw(); }
 document.title = D.title;
 $("pageSel").replaceChildren(...P.map((p, i) => new Option(`${i + 1}. ${p.title}`, i)));
 $("clusterSel").replaceChildren(...D.cluster_keys.map(k => new Option(k, k)));
@@ -149,10 +164,13 @@ $("prev").onclick = () => go(S.page - 1);
 $("next").onclick = () => go(S.page + 1);
 $("pageSel").onchange = e => go(+e.target.value);
 $("toggle").onchange = e => colourBy(e.target.checked);
-$("clusterSel").onchange = e => { S.cluster = e.target.value; S.hidden.clear(); draw(); };
+$("clusterSel").onchange = e => { S.cluster = e.target.value; unfilter("cl"); draw(); };
 $("size").oninput = e => { S.size = +e.target.value; Plotly.restyle($("plot"), {"marker.size": S.size}); };
 $("reset").onclick = () => { S.rev++; draw(); };
-$("showAll").onclick = () => { S.hidden.clear(); draw(); };
+document.querySelectorAll("[data-all]").forEach(b => b.onclick = () => { shown(b.dataset.all).forEach(i => S.hidden[b.dataset.all].delete(i)); draw(); });
+document.querySelectorAll("[data-none]").forEach(b => b.onclick = () => { shown(b.dataset.none).forEach(i => S.hidden[b.dataset.none].add(i)); draw(); });
+$("qSp").oninput = e => { S.q.sp = e.target.value; sidebar(page(), S.n); };
+$("qCl").oninput = e => { S.q.cl = e.target.value; sidebar(page(), S.n); };
 addEventListener("keydown", e => {
   if (e.ctrlKey || e.metaKey || e.altKey || (["INPUT", "SELECT"].includes(e.target.tagName) && e.target.type !== "checkbox")) return;
   if (e.key === "ArrowLeft") go(S.page - 1);
