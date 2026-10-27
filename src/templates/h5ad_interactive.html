@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+:root{--bg:#f3f4f7;--panel:#ffffff;--ink:#1f2330;--muted:#6b7280;--line:#e2e5ea;--accent:#30767A;--busy:rgba(255,255,255,.7)}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:15px/1.4 "DejaVu Sans",system-ui,sans-serif;display:flex;flex-direction:column}
+header{position:sticky;top:0;z-index:10;background:var(--panel);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.brand{display:flex;flex-direction:column;min-width:0;flex:1 1 260px}
+.brand h1{margin:0;font-size:20px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brand .sub{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.group{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+button,select{font:inherit;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer}
+button:hover:not(:disabled),select:hover:not(:disabled){border-color:var(--accent)}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button:disabled,select:disabled{opacity:.4;cursor:default}
+.arrow{width:40px;height:36px;font-size:16px;padding:0}
+#pageSel{max-width:240px}
+.count{color:var(--muted);font-variant-numeric:tabular-nums;min-width:58px;text-align:center}
+.switch{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+.switch input{appearance:none;-webkit-appearance:none;width:44px;height:24px;border-radius:12px;background:#c9ced6;position:relative;cursor:pointer;transition:background .15s;margin:0;flex:none}
+.switch input::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:left .15s}
+.switch input:checked{background:var(--accent)}
+.switch input:checked::after{left:23px}
+.lab{color:var(--muted)}
+.lab.on{color:var(--ink);font-weight:700}
+.sz{display:flex;align-items:center;gap:6px;color:var(--muted)}
+.sz input{width:90px;accent-color:var(--accent)}
+main{flex:1;display:flex;flex-direction:column;min-height:0;padding:12px 16px 16px;gap:12px}
+.stage{position:relative;flex:1;min-height:520px;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+#plot{position:absolute;inset:0}
+#busy{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:var(--busy);color:var(--muted);font-size:16px;z-index:5}
+.stage.loading #busy{display:flex}
+#legend{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;max-height:30vh;overflow:auto}
+.lhead{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.lhead b{font-size:16px}
+.muted{color:var(--muted);font-size:13px}
+.chips{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:2px 10px}
+.chip{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:6px;cursor:pointer;user-select:none;font-size:15px;min-width:0}
+.chip:hover{background:var(--bg)}
+.chip i{flex:none;width:14px;height:14px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(0,0,0,.15)}
+.chip .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip .n{margin-left:auto;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.chip.off{opacity:.35}
+.chip.off .nm{text-decoration:line-through}
+@media (max-width:900px){.stage{flex:none;height:1000px}#legend{max-height:none}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><h1 id="h1"></h1><div class="sub" id="sub"></div></div>
+  <div class="group">
+    <button id="prev" class="arrow" title="Previous page (←)" aria-label="Previous page">&#9664;</button>
+    <select id="pageSel" aria-label="Page"></select>
+    <span id="count" class="count"></span>
+    <button id="next" class="arrow" title="Next page (→)" aria-label="Next page">&#9654;</button>
+  </div>
+  <div class="group">
+    <label class="switch" title="Toggle colouring (C)"><span id="labS" class="lab">Species</span><input type="checkbox" id="toggle" aria-label="Colour by cluster"><span id="labC" class="lab">Cluster</span></label>
+    <select id="clusterSel" aria-label="Cluster labels"></select>
+  </div>
+  <div class="group">
+    <label class="sz">Point size <input type="range" id="size" min="1" max="8" step="0.5"></label>
+    <button id="reset" title="Reset camera">Reset view</button>
+  </div>
+</header>
+<main>
+  <div class="stage" id="stage"><div id="plot"></div><div id="busy">Rendering…</div></div>
+  <section id="legend">
+    <div class="lhead"><div><b id="ltitle"></b> <span id="linfo" class="muted"></span></div><div class="group"><span class="muted">click hides · double-click isolates · ← → pages · C toggles</span><button id="showAll">Show all</button></div></div>
+    <div id="chips" class="chips"></div>
+  </section>
+</main>
+<script>__PLOTLYJS__</script>
+<script id="payload" type="application/json">__DATA__</script>
+<script>
+const D = JSON.parse(document.getElementById("payload").textContent);
+const C = D.config, P = D.pages, $ = id => document.getElementById(id);
+const S = {page: 0, byCluster: false, cluster: D.cluster_keys[0], hidden: new Set(), size: C.marker_size, rev: 0, stacked: innerWidth < 900};
+function decode(s, T) { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new T(u.buffer); }
+function page() {
+  const p = P[S.page];
+  if (!p._c) {
+    p._c = Object.fromEntries(p.methods.map(([m]) => [m, decode(p.coords[m], Float32Array)]));
+    p._s = Object.fromEntries(Object.entries(p.sets).map(([k, v]) => [k, decode(v.codes, Uint16Array)]));
+    p._h = p.ids.split("\n").map((id, i) => `<b>${id}</b>` + D.hover_keys.map(k => `<br>${k}: ${p.sets[k].cats[p._s[k][i]][0]}`).join(""));
+  }
+  return p;
+}
+function key() { return S.byCluster ? S.cluster : "species"; }
+function axis(t) { return {title: {text: t, font: {size: C.font_tick + 1}}, backgroundcolor: "#ffffff", showbackground: true, gridcolor: "#e6e8ec", zerolinecolor: "#c9ced6", showline: true, linecolor: "#3a3f4b", tickfont: {size: C.font_tick}, showspikes: false}; }
+function render() {
+  const p = page(), k = key(), set = p.sets[k], codes = p._s[k], cols = set.cats.map(c => c[1]), keep = [];
+  for (let i = 0; i < codes.length; i++) if (!S.hidden.has(codes[i])) keep.push(i);
+  const extra = D.hover_keys.includes(k) ? null : k, n = p.methods.length;
+  const text = keep.map(i => extra ? p._h[i] + `<br>${extra}: ${set.cats[codes[i]][0]}` : p._h[i]), color = keep.map(i => cols[codes[i]]);
+  const layout = {uirevision: `${S.page}-${S.rev}`, margin: {l: 0, r: 0, t: 36, b: 0}, paper_bgcolor: "rgba(0,0,0,0)", font: {family: C.font_family, size: C.font_tick, color: "#1f2330"}, hoverlabel: {font: {size: 13, family: C.font_family}, bgcolor: "#ffffff", bordercolor: "#c9ced6"}, annotations: []};
+  const traces = p.methods.map(([m, t], j) => {
+    const c = p._c[m], x = new Float32Array(keep.length), y = new Float32Array(keep.length), z = new Float32Array(keep.length), sc = j ? "scene" + (j + 1) : "scene";
+    keep.forEach((i, q) => { x[q] = c[3 * i]; y[q] = c[3 * i + 1]; z[q] = c[3 * i + 2]; });
+    const a = j / n + (j ? 0.005 : 0), b = (j + 1) / n - (j < n - 1 ? 0.005 : 0), dom = S.stacked ? {x: [0, 1], y: [1 - b, 1 - a - (j < n - 1 ? 0.03 : 0)]} : {x: [a, b], y: [0, 1]};
+    layout[sc] = {domain: dom, aspectmode: "cube", xaxis: axis(t + "-1"), yaxis: axis(t + "-2"), zaxis: axis(t + "-3")};
+    layout.annotations.push({text: `<b>${t}</b>`, showarrow: false, xref: "paper", yref: "paper", x: (dom.x[0] + dom.x[1]) / 2, y: dom.y[1], yanchor: "bottom", font: {size: C.font_title}});
+    return {type: "scatter3d", mode: "markers", x, y, z, text, hovertemplate: "%{text}<extra></extra>", showlegend: false, scene: sc, marker: {size: S.size, opacity: C.alpha, color, line: {width: 0}}};
+  });
+  Plotly.react($("plot"), traces, layout, {responsive: true, displaylogo: false, toImageButtonOptions: {format: "png", scale: 2, filename: `${p.slug}_${k.replace(/\W+/g, "_")}`}});
+  legend(p, k, keep.length);
+  $("stage").classList.remove("loading");
+}
+function draw() { $("stage").classList.add("loading"); requestAnimationFrame(() => setTimeout(render, 0)); }
+function legend(p, k, shown) {
+  const cats = p.sets[k].cats, order = cats.map((_, i) => i).filter(i => cats[i][2] > 0).sort((a, b) => (a === 0) - (b === 0) || cats[b][2] - cats[a][2]);
+  $("ltitle").textContent = k;
+  $("linfo").textContent = `${order.length} groups · ${shown.toLocaleString()} / ${p._s[k].length.toLocaleString()} points shown`;
+  $("chips").replaceChildren(...order.map(i => {
+    const [nm, col, cnt] = cats[i], el = document.createElement("div");
+    el.className = "chip" + (S.hidden.has(i) ? " off" : "");
+    el.title = `${nm} (n=${cnt.toLocaleString()})`;
+    el.innerHTML = `<i style="background:${col}"></i><span class="nm"></span><span class="n">${cnt.toLocaleString()}</span>`;
+    el.querySelector(".nm").textContent = nm;
+    el.onclick = () => chip(i, order);
+    return el;
+  }));
+}
+let timer = null;
+function chip(i, order) {
+  if (timer) { clearTimeout(timer); timer = null; S.hidden = new Set(order.filter(j => j !== i)); draw(); return; }
+  timer = setTimeout(() => { timer = null; S.hidden.has(i) ? S.hidden.delete(i) : S.hidden.add(i); draw(); }, 240);
+}
+function sync() {
+  const p = P[S.page];
+  $("pageSel").value = S.page; $("prev").disabled = S.page === 0; $("next").disabled = S.page === P.length - 1;
+  $("count").textContent = `${S.page + 1} / ${P.length}`; $("h1").textContent = p.title; $("sub").textContent = p.subtitle;
+  $("toggle").checked = S.byCluster; $("clusterSel").disabled = !S.byCluster;
+  $("labS").classList.toggle("on", !S.byCluster); $("labC").classList.toggle("on", S.byCluster);
+  try { history.replaceState(null, "", "#" + (S.page + 1)); } catch (e) {}
+}
+function go(i) { if (i < 0 || i >= P.length || i === S.page) return; S.page = i; S.hidden.clear(); sync(); draw(); }
+function colourBy(cluster) { S.byCluster = cluster; S.hidden.clear(); sync(); draw(); }
+document.title = D.title;
+$("pageSel").replaceChildren(...P.map((p, i) => new Option(`${i + 1}. ${p.title}`, i)));
+$("clusterSel").replaceChildren(...D.cluster_keys.map(k => new Option(k, k)));
+$("size").value = S.size;
+$("prev").onclick = () => go(S.page - 1);
+$("next").onclick = () => go(S.page + 1);
+$("pageSel").onchange = e => go(+e.target.value);
+$("toggle").onchange = e => colourBy(e.target.checked);
+$("clusterSel").onchange = e => { S.cluster = e.target.value; S.hidden.clear(); draw(); };
+$("size").oninput = e => { S.size = +e.target.value; Plotly.restyle($("plot"), {"marker.size": S.size}); };
+$("reset").onclick = () => { S.rev++; draw(); };
+$("showAll").onclick = () => { S.hidden.clear(); draw(); };
+addEventListener("keydown", e => {
+  if (e.ctrlKey || e.metaKey || e.altKey || (["INPUT", "SELECT"].includes(e.target.tagName) && e.target.type !== "checkbox")) return;
+  if (e.key === "ArrowLeft") go(S.page - 1);
+  else if (e.key === "ArrowRight") go(S.page + 1);
+  else if (e.key === "c" || e.key === "C") colourBy(!S.byCluster);
+});
+let rt = null;
+addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { const st = innerWidth < 900; if (st !== S.stacked) { S.stacked = st; draw(); } }, 200); });
+const h = parseInt(location.hash.slice(1), 10);
+S.page = h >= 1 && h <= P.length ? h - 1 : 0;
+sync(); draw();
+</script>
+</body>
+</html>
