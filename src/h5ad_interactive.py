@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Writes one paged, self-contained 3D HTML viewer of the UMAP and t-SNE layouts saved by npz_scanpy.py, plus the HDBSCAN labels of the 3D UMAP.
 
-Per .h5ad a single HTML file is saved under ``<run>/interactive/`` with one page for the joint view and one per species (intra view), browsed with arrows, a page menu or the arrow keys. Every page shows side-by-side 3D UMAP and t-SNE panels and a species/cluster switch; the cluster labels are chosen among Leiden, intra-species and HDBSCAN fitted on the 3D UMAP for every min_cluster_size of ``--mcs_grid``. Inter-species clusters (Leiden, joint HDBSCAN) are named by upper-case letters (A, B, ..., AA) and intra-species clusters (intra Leiden, per-species HDBSCAN) by zero-padded numbers (001, 002, ...). The one-way ANOVA q-value of every significant inter-species cluster (ANOVA and fold-change gates of h5ad_scanpy.py), read from its species_cluster_enrichment table, is shown as significance asterisks (* q<0.05, ** q<0.01, *** q<0.001, nothing otherwise) stacked vertically over each stacked bar of the joint view. A left sidebar holds species and cluster checklists, combined to select which points are drawn, and a stacked barplot on top shows the protein count of every inter-species cluster per species. The camera is kept across all changes until reset. The HDBSCAN labels of all views are also written to one TSV per .h5ad. An .h5ad whose outputs all exist and are newer than this script, its template, the .h5ad and the enrichment table is skipped unless ``--overwrite`` is set.
+Per .h5ad a single HTML file is saved under ``<run>/interactive/`` with one page for the joint view and one per species (intra view), browsed with arrows, a page menu or the arrow keys. Every page shows side-by-side 3D UMAP and t-SNE panels and a species/cluster switch; the cluster labels are chosen among Leiden, intra-species and HDBSCAN fitted on the 3D UMAP for every min_cluster_size of ``--mcs_grid``. Inter-species clusters (Leiden, joint HDBSCAN) are named by upper-case letters (A, B, ..., AA) and intra-species clusters (intra Leiden, per-species HDBSCAN) by zero-padded numbers (001, 002, ...). The one-way ANOVA q-value of every significant inter-species cluster (ANOVA and fold-change gates of h5ad_scanpy.py), read from its species_cluster_enrichment table, is shown as significance asterisks (* q<0.05, ** q<0.01, *** q<0.001, nothing otherwise) stacked vertically over each stacked bar of the joint view. A left sidebar holds a protein ID finder that rings the protein in both panels, an export of the IDs of the points shown, and species and cluster checklists, combined to select which points are drawn, with the ANOVA asterisks and per-species counts of every inter-species cluster. A stacked barplot on top, with a linear/log switch, shows the protein count of every inter-species cluster per species, and clicking a bar isolates that cluster. Points are drawn at alpha ALPHA and at the minimum MARKER_SIZE by default. The camera is kept across all changes until reset. The HDBSCAN labels of all views are also written to one TSV per .h5ad. An .h5ad whose outputs all exist and are newer than this script, its template, the .h5ad and the enrichment table is skipped unless ``--overwrite`` is set.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -20,7 +20,7 @@ import resource
 import time
 from tqdm import tqdm
 import yaml
-ALPHA = 0.5
+ALPHA = 0.8
 COLOR_BG = "#BFC5CE"
 DEFAULT_QUERY_TSV = "configs/query_configs.tsv"
 DIM = 3
@@ -29,7 +29,7 @@ FONT_LEGEND = 15
 FONT_TICK = 12
 FONT_TITLE = 20
 LABEL_SETS = {"species": "species", "cluster": "Leiden cluster", "intra_cluster": "intra-species cluster"}
-MARKER_SIZE = 1
+MARKER_SIZE = 0.5
 MAX_CLUSTERS = 15
 MAX_POINTS = None
 MCS_GRID = [50, 100, 200, 400, 800, 1600]

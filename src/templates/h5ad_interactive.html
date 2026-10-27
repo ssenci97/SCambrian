@@ -9,17 +9,18 @@
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
 body{background:var(--bg);color:var(--ink);font:15px/1.4 "DejaVu Sans",system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden}
-header{position:sticky;top:0;z-index:10;background:var(--panel);border-bottom:1px solid var(--line);padding:6px 16px;display:flex;flex-wrap:wrap;gap:6px 22px;align-items:center;box-shadow:0 1px 3px rgba(0,0,0,.04)}
-.brand{display:flex;flex-direction:column;min-width:0;flex:1 1 260px}
+header{position:sticky;top:0;z-index:10;background:var(--panel);border-bottom:1px solid var(--line);padding:6px 14px;display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.brand{display:flex;flex-direction:column;min-width:0;flex:1 1 180px}
 .brand h1{margin:0;font-size:18px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .brand .sub{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.group{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.group{display:flex;align-items:center;gap:6px;flex-wrap:nowrap}
 button,select{font:inherit;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer}
 button:hover:not(:disabled),select:hover:not(:disabled){border-color:var(--accent)}
 button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 button:disabled,select:disabled{opacity:.4;cursor:default}
 .arrow{width:36px;height:32px;font-size:16px;padding:0}
-#pageSel{max-width:240px}
+#pageSel{max-width:200px}
+#clusterSel{max-width:170px}
 .count{color:var(--muted);font-variant-numeric:tabular-nums;min-width:58px;text-align:center}
 .switch{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
 .switch input{appearance:none;-webkit-appearance:none;width:44px;height:24px;border-radius:12px;background:#c9ced6;position:relative;cursor:pointer;transition:background .15s;margin:0;flex:none}
@@ -29,23 +30,24 @@ button:disabled,select:disabled{opacity:.4;cursor:default}
 .lab{color:var(--muted)}
 .lab.on{color:var(--ink);font-weight:700}
 .sz{display:flex;align-items:center;gap:6px;color:var(--muted)}
-.sz input{width:90px;accent-color:var(--accent)}
-main{flex:1;display:grid;grid-template-columns:300px minmax(0,1fr);grid-template-rows:minmax(0,1fr);min-height:0;padding:10px 12px;gap:10px}
-aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;overflow:auto;min-height:0;display:flex;flex-direction:column;gap:14px}
-.right{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
-#barsBox{position:relative;flex:none;height:160px;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
-#bars{position:absolute;inset:4px 8px 2px 4px}
+.sz input{width:70px;accent-color:var(--accent)}
+main{flex:1;display:grid;grid-template-columns:clamp(250px,19vw,320px) minmax(0,1fr);grid-template-rows:minmax(0,1fr);min-height:0;padding:8px 10px;gap:8px}
+aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 10px;overflow:auto;min-height:0;display:flex;flex-direction:column;gap:10px}
+.right{display:flex;flex-direction:column;gap:8px;min-height:0;min-width:0}
+#barsBox{position:relative;flex:none;height:clamp(200px,27vh,300px);background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+#bars{position:absolute;inset:6px 10px 4px 6px}
 .stage{position:relative;flex:1;min-height:0;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 #plot{position:absolute;inset:0}
 #busy{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:var(--busy);color:var(--muted);font-size:16px;z-index:5}
 .stage.loading #busy{display:flex}
-.muted{color:var(--muted);font-size:13px}
+.muted{color:var(--muted);font-size:12px;line-height:1.35}
 .sec[hidden]{display:none}
 .shead{display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:6px}
-.shead b{font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shead b{font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.shead span{flex:none;white-space:nowrap}
 .shead button{padding:3px 8px;font-size:13px}
 .q{width:100%;font:inherit;font-size:14px;border:1px solid var(--line);border-radius:8px;padding:5px 8px;margin-bottom:6px}
-.chip{display:flex;align-items:center;gap:8px;padding:3px 6px;border-radius:6px;cursor:pointer;user-select:none;font-size:15px;min-width:0}
+.chip{display:flex;align-items:center;gap:8px;padding:2px 6px;border-radius:6px;cursor:pointer;user-select:none;font-size:14px;min-width:0}
 .chip:hover{background:var(--bg)}
 .chip input{margin:0;flex:none;accent-color:var(--accent);pointer-events:none}
 .chip i{flex:none;width:14px;height:14px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(0,0,0,.15)}
@@ -53,6 +55,15 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
 .chip .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chip .n{margin-left:auto;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
 .chip.off{opacity:.4}
+.chip .st{color:var(--accent);font-weight:700;font-size:12px;letter-spacing:-1px}
+.find{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.find input{font:inherit;font-size:14px;border:1px solid var(--line);border-radius:8px;padding:6px 10px;flex:1;min-width:0;width:auto}
+.find input.miss{border-color:#c0504d;background:#fdf1f0}
+.corner{position:absolute;top:6px;left:8px;z-index:2;padding:2px 9px;font-size:12px}
+.corner.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+#sizeV{min-width:24px;font-variant-numeric:tabular-nums}
+.found{margin-top:4px;padding:6px 8px;border-radius:8px;background:var(--bg);font-size:13px;word-break:break-all}
+.found[hidden]{display:none}
 @media (max-width:900px){html,body{height:auto}body{overflow:auto}main{grid-template-columns:1fr;grid-template-rows:auto auto}aside{max-height:45vh}.stage{flex:none;height:900px}}
 </style>
 </head>
@@ -70,18 +81,18 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
     <select id="clusterSel" aria-label="Cluster labels"></select>
   </div>
   <div class="group">
-    <label class="sz">Point size <input type="range" id="size" min="0.5" max="8" step="0.5"></label>
-    <button id="reset" title="Reset camera">Reset view</button>
+    <label class="sz" title="Point size">Size <input type="range" id="size" min="0.5" max="8" step="0.5"><span id="sizeV"></span></label>
+    <button id="reset" title="Reset camera">&#10226; View</button>
   </div>
 </header>
 <main>
   <aside id="side">
-    <div><div id="linfo" class="muted"></div><div class="muted">click toggles · double-click isolates · ← → pages · C toggles colouring</div></div>
+    <div><div class="find"><input id="find" type="search" placeholder="Find protein ID…" aria-label="Find protein ID" autocomplete="off"><button id="exportIds" title="Download the IDs of the points shown">&#10515; IDs</button></div><div id="linfo" class="muted"></div><div class="muted">click toggles · double-click isolates · click a bar isolates its cluster<br>← → pages · C colouring · L log bars · / find</div><div id="found" class="found" hidden></div></div>
     <section class="sec" id="secSp"><div class="shead"><b>Species</b><span><button data-all="sp">All</button> <button data-none="sp">None</button></span></div><input class="q" id="qSp" placeholder="Filter species…" aria-label="Filter species"><div id="listSp"></div></section>
     <section class="sec" id="secCl"><div class="shead"><b id="clTitle"></b><span><button data-all="cl">All</button> <button data-none="cl">None</button></span></div><input class="q" id="qCl" placeholder="Filter clusters…" aria-label="Filter clusters"><div id="listCl"></div></section>
   </aside>
   <div class="right">
-    <div id="barsBox"><div id="bars"></div></div>
+    <div id="barsBox"><button id="logBtn" class="corner" title="Toggle log scale (L)">log</button><div id="bars"></div></div>
     <div class="stage" id="stage"><div id="plot"></div><div id="busy">Rendering…</div></div>
   </div>
 </main>
@@ -90,7 +101,7 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
 <script>
 const D = JSON.parse(document.getElementById("payload").textContent);
 const C = D.config, P = D.pages, $ = id => document.getElementById(id);
-const S = {page: 0, byCluster: false, cluster: D.cluster_keys[0], hidden: {sp: new Set(), cl: new Set()}, q: {sp: "", cl: ""}, size: C.marker_size, rev: 0, cam: {}, stacked: innerWidth < 900};
+const S = {page: 0, byCluster: false, cluster: D.cluster_keys[0], hidden: {sp: new Set(), cl: new Set()}, q: {sp: "", cl: ""}, size: C.marker_size, rev: 0, cam: {}, stacked: innerWidth < 900, log: false, find: null, keep: []};
 function decode(s, T) { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new T(u.buffer); }
 function page() {
   const p = P[S.page];
@@ -98,7 +109,9 @@ function page() {
     p._c = Object.fromEntries(p.methods.map(([m]) => [m, decode(p.coords[m], Float32Array)]));
     p._s = Object.fromEntries(Object.entries(p.sets).map(([k, v]) => [k, decode(v.codes, Uint16Array)]));
     p._r = Object.fromEntries(p.methods.map(([m]) => [m, ranges(p._c[m])]));
-    p._h = p.ids.split("\n").map((id, i) => `<b>${id}</b>` + D.hover_keys.map(k => `<br>${k}: ${p.sets[k].cats[p._s[k][i]][0]}`).join(""));
+    p._ids = p.ids.split("\n");
+    p._b = Object.fromEntries(p.bars.clusters.map((c, i) => [c, i]));
+    p._h = p._ids.map((id, i) => `<b>${id}</b>` + D.hover_keys.map(k => `<br>${k}: ${p.sets[k].cats[p._s[k][i]][0]}`).join(""));
   }
   return p;
 }
@@ -124,6 +137,8 @@ function render() {
     layout.annotations.push({text: `<b>${t}</b>`, showarrow: false, xref: "paper", yref: "paper", x: (dom.x[0] + dom.x[1]) / 2, y: dom.y[1], yanchor: "bottom", font: {size: C.font_title}});
     return {type: "scatter3d", mode: "markers", x, y, z, text, hovertemplate: "%{text}<extra></extra>", showlegend: false, scene: sc, marker: {size: S.size, opacity: C.alpha, color, line: {width: 0}}};
   });
+  if (S.find !== null) p.methods.forEach(([m], j) => { const c = p._c[m], f = S.find; traces.push({type: "scatter3d", mode: "markers", x: [c[3 * f]], y: [c[3 * f + 1]], z: [c[3 * f + 2]], text: [p._h[f]], hovertemplate: "%{text}<extra></extra>", showlegend: false, scene: j ? "scene" + (j + 1) : "scene", marker: {size: 14, symbol: "circle-open", color: "#000000", line: {width: 3}}}); });
+  S.keep = keep;
   Plotly.react($("plot"), traces, layout, {responsive: true, displaylogo: false, toImageButtonOptions: {format: "png", scale: 2, filename: `${p.slug}_${k.replace(/\W+/g, "_")}`}});
   if (!$("plot")._camHook) { $("plot")._camHook = true; $("plot").on("plotly_relayout", e => Object.keys(e).forEach(k => { const m = k.match(/^(scene\d*)\.camera$/); if (m) S.cam[m[1]] = e[k]; })); }
   bars(p);
@@ -134,23 +149,27 @@ function bars(p) {
   const b = p.bars, cats = p.sets.species.cats, col = Object.fromEntries(cats.map(c => [c[0], c[1]])), clCats = p.sets[S.cluster].cats;
   const hidSp = new Set([...S.hidden.sp].map(i => cats[i][0])), hidCl = new Set(S.cluster === D.leiden_key ? [...S.hidden.cl].map(i => clCats[i][0]) : []);
   const idx = b.clusters.map((_, i) => i).filter(i => !hidCl.has(b.clusters[i])), x = idx.map(i => b.clusters[i]);
-  const traces = b.species.map((sp, j) => ({type: "bar", name: sp, x, y: idx.map(i => b.counts[j][i]), marker: {color: col[sp], line: {width: 0}}, hovertemplate: `%{x} · ${sp.replace(/%/g, "%%")}: %{y:,}<extra></extra>`})).filter(t => !hidSp.has(t.name));
+  const traces = b.species.map((sp, j) => ({type: "bar", name: sp, x, y: idx.map(i => b.counts[j][i]), marker: {color: col[sp], line: {width: 0}}, hovertemplate: `<b>%{x}</b> · ${sp.replace(/%/g, "%%")}: %{y:,}<br>click to isolate<extra></extra>`})).filter(t => !hidSp.has(t.name));
   const visSp = b.species.map((sp, j) => j).filter(j => !hidSp.has(b.species[j])), tot = i => visSp.reduce((s, j) => s + b.counts[j][i], 0), top = Math.max(1, ...idx.map(tot));
-  const annotations = idx.filter(i => b.stars && b.stars[i]).map(i => ({x: b.clusters[i], y: tot(i), text: `<b>${[...b.stars[i]].join("<br>")}</b>`, yanchor: "bottom", showarrow: false, font: {size: C.font_tick + 2}}));
-  const layout = {annotations, barmode: "stack", bargap: 0.15, margin: {l: 56, r: 4, t: 26, b: 22}, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)", font: {family: C.font_family, size: C.font_tick, color: "#1f2330"}, showlegend: true, legend: {orientation: "h", x: 0, y: 1, yanchor: "bottom", itemclick: false, itemdoubleclick: false, font: {size: C.font_tick}}, xaxis: {type: "category", tickfont: {size: 11}, fixedrange: true}, yaxis: {title: {text: "proteins", font: {size: C.font_tick}}, range: [0, top * 1.35], gridcolor: "#e6e8ec", fixedrange: true}, hoverlabel: {font: {size: 13, family: C.font_family}, bgcolor: "#ffffff", bordercolor: "#c9ced6"}};
+  const starred = idx.filter(i => b.stars && b.stars[i]), lines = Math.max(0, ...starred.map(i => b.stars[i].length)), mt = 30, mb = 24, ph = Math.max(60, $("bars").clientHeight - mt - mb), room = lines ? lines * C.font_tick * 1.15 + 6 : 4;
+  const annotations = starred.map(i => ({x: b.clusters[i], y: tot(i), text: `<b>${[...b.stars[i]].join("<br>")}</b>`, y: S.log ? Math.log10(Math.max(1, tot(i))) : tot(i), yanchor: "bottom", yshift: 1, showarrow: false, font: {size: C.font_tick}}));
+  const layout = {annotations, barmode: "stack", bargap: 0.15, margin: {l: 56, r: 6, t: mt, b: mb}, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)", font: {family: C.font_family, size: C.font_tick, color: "#1f2330"}, showlegend: true, legend: {orientation: "h", x: 1, xanchor: "right", y: 1, yanchor: "bottom", itemclick: false, itemdoubleclick: false, font: {size: C.font_tick}}, xaxis: {type: "category", tickfont: {size: 11}, fixedrange: true}, yaxis: {title: {text: "proteins", font: {size: C.font_tick}}, type: S.log ? "log" : "linear", range: S.log ? [Math.log10(0.8), Math.log10(top) + (Math.log10(top) - Math.log10(0.8)) * room / Math.max(ph - room, ph * 0.4)] : [0, top * ph / Math.max(ph - room, ph * 0.4)], gridcolor: "#e6e8ec", fixedrange: true}, hoverlabel: {font: {size: 13, family: C.font_family}, bgcolor: "#ffffff", bordercolor: "#c9ced6"}};
   Plotly.react($("bars"), traces, layout, {responsive: true, displayModeBar: false});
+  if (!$("bars")._clickHook) { $("bars")._clickHook = true; $("bars").on("plotly_click", e => isolate(e.points[0].x)); }
+  $("logBtn").classList.toggle("on", S.log);
 }
 function draw() { $("stage").classList.add("loading"); requestAnimationFrame(() => setTimeout(render, 0)); }
 function order(cats, byName) {
-  return cats.map((_, i) => i).filter(i => cats[i][2] > 0).sort((a, b) => (a === 0) - (b === 0) || (byName ? cats[a][0].localeCompare(cats[b][0], undefined, {numeric: true}) : cats[b][2] - cats[a][2]));
+  return cats.map((_, i) => i).filter(i => cats[i][2] > 0).sort((a, b) => (a === 0) - (b === 0) || (byName ? cats[a][0].length - cats[b][0].length || cats[a][0].localeCompare(cats[b][0], undefined, {numeric: true}) : cats[b][2] - cats[a][2]));
 }
 function shown(s) { const q = S.q[s].trim().toLowerCase(), p = P[S.page], cats = p.sets[s === "sp" ? "species" : S.cluster].cats; return order(cats, s === "cl").filter(i => !q || cats[i][0].toLowerCase().includes(q)); }
 function checklist(s, cats, coloured) {
+  const p = P[S.page], b = p.bars, leiden = s === "cl" && S.cluster === D.leiden_key;
   return shown(s).map(i => {
-    const [nm, col, cnt] = cats[i], el = document.createElement("div"), off = S.hidden[s].has(i);
+    const [nm, col, cnt] = cats[i], el = document.createElement("div"), off = S.hidden[s].has(i), bi = leiden ? p._b[nm] : undefined, st = bi !== undefined && b.stars ? b.stars[bi] : "";
     el.className = "chip" + (off ? " off" : "");
-    el.title = `${nm} (n=${cnt.toLocaleString()})`;
-    el.innerHTML = `<input type="checkbox" tabindex="-1"${off ? "" : " checked"}><i class="${coloured ? "" : "plain"}" style="background:${col}"></i><span class="nm"></span><span class="n">${cnt.toLocaleString()}</span>`;
+    el.title = `${nm} (n=${cnt.toLocaleString()})` + (bi !== undefined ? b.species.map((sp, j) => `\n${sp}: ${b.counts[j][bi].toLocaleString()}`).join("") : "") + (st ? `\nANOVA ${st}` : "");
+    el.innerHTML = `<input type="checkbox" tabindex="-1"${off ? "" : " checked"}><i class="${coloured ? "" : "plain"}" style="background:${col}"></i><span class="nm"></span><span class="st">${st}</span><span class="n">${cnt.toLocaleString()}</span>`;
     el.querySelector(".nm").textContent = nm;
     el.onclick = () => chip(s, i, order(cats, s === "cl"));
     return el;
@@ -170,6 +189,32 @@ function chip(s, i, all) {
   if (timer) { clearTimeout(timer); timer = null; S.hidden[s] = new Set(all.filter(j => j !== i)); draw(); return; }
   timer = setTimeout(() => { timer = null; S.hidden[s].has(i) ? S.hidden[s].delete(i) : S.hidden[s].add(i); draw(); }, 240);
 }
+function isolate(name) {
+  const p = page(), cats = p.sets[D.leiden_key].cats, i = cats.findIndex(c => c[0] === name);
+  if (i < 0) return;
+  const all = order(cats, true), only = S.cluster === D.leiden_key && S.hidden.cl.size === all.length - 1 && !S.hidden.cl.has(i);
+  S.cluster = D.leiden_key; $("clusterSel").value = S.cluster; S.byCluster = true; S.q.cl = ""; $("qCl").value = "";
+  S.hidden.cl = only ? new Set() : new Set(all.filter(j => j !== i));
+  sync(); draw();
+}
+function find(q) {
+  const p = page(); q = q.trim().toLowerCase(); S.find = null;
+  if (q) {
+    let i = p._ids.findIndex(id => id.toLowerCase() === q);
+    if (i < 0) i = p._ids.findIndex(id => id.toLowerCase().includes(q));
+    if (i >= 0) { S.find = i; S.hidden.sp.delete(p._s.species[i]); S.hidden.cl.delete(p._s[S.cluster][i]); }
+  }
+  $("find").classList.toggle("miss", !!q && S.find === null);
+  $("found").hidden = S.find === null;
+  if (S.find !== null) $("found").innerHTML = p._h[S.find];
+  draw();
+}
+function exportIds() {
+  const p = page(), a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([S.keep.map(i => p._ids[i]).join("\n") + "\n"], {type: "text/plain"}));
+  a.download = `${p.slug}_${key().replace(/\W+/g, "_")}_${S.keep.length}_ids.txt`;
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
 function unfilter(s) { (s ? [s] : ["sp", "cl"]).forEach(k => { S.hidden[k].clear(); S.q[k] = ""; $(k === "sp" ? "qSp" : "qCl").value = ""; }); }
 function sync() {
   const p = P[S.page];
@@ -179,18 +224,22 @@ function sync() {
   $("labS").classList.toggle("on", !S.byCluster); $("labC").classList.toggle("on", S.byCluster);
   try { history.replaceState(null, "", "#" + (S.page + 1)); } catch (e) {}
 }
-function go(i) { if (i < 0 || i >= P.length || i === S.page) return; S.page = i; unfilter(); sync(); draw(); }
+function go(i) { if (i < 0 || i >= P.length || i === S.page) return; S.page = i; S.find = null; $("find").value = ""; $("find").classList.remove("miss"); $("found").hidden = true; unfilter(); sync(); draw(); }
 function colourBy(cluster) { S.byCluster = cluster; sync(); draw(); }
 document.title = D.title;
 $("pageSel").replaceChildren(...P.map((p, i) => new Option(`${i + 1}. ${p.title}`, i)));
 $("clusterSel").replaceChildren(...D.cluster_keys.map(k => new Option(k, k)));
-$("size").value = S.size;
+$("size").value = S.size; $("sizeV").textContent = S.size;
 $("prev").onclick = () => go(S.page - 1);
 $("next").onclick = () => go(S.page + 1);
 $("pageSel").onchange = e => go(+e.target.value);
 $("toggle").onchange = e => colourBy(e.target.checked);
 $("clusterSel").onchange = e => { S.cluster = e.target.value; unfilter("cl"); draw(); };
-$("size").oninput = e => { S.size = +e.target.value; Plotly.restyle($("plot"), {"marker.size": S.size}); };
+$("size").oninput = e => { S.size = +e.target.value; $("sizeV").textContent = S.size; Plotly.restyle($("plot"), {"marker.size": S.size}, P[S.page].methods.map((_, j) => j)); };
+$("logBtn").onclick = () => { S.log = !S.log; bars(page()); };
+$("find").onkeydown = e => { if (e.key === "Enter") find(e.target.value); else if (e.key === "Escape") { e.target.value = ""; find(""); e.target.blur(); } };
+$("find").onsearch = e => { if (!e.target.value) find(""); };
+$("exportIds").onclick = exportIds;
 $("reset").onclick = () => { S.rev++; S.cam = {}; draw(); };
 document.querySelectorAll("[data-all]").forEach(b => b.onclick = () => { shown(b.dataset.all).forEach(i => S.hidden[b.dataset.all].delete(i)); draw(); });
 document.querySelectorAll("[data-none]").forEach(b => b.onclick = () => { shown(b.dataset.none).forEach(i => S.hidden[b.dataset.none].add(i)); draw(); });
@@ -201,9 +250,11 @@ addEventListener("keydown", e => {
   if (e.key === "ArrowLeft") go(S.page - 1);
   else if (e.key === "ArrowRight") go(S.page + 1);
   else if (e.key === "c" || e.key === "C") colourBy(!S.byCluster);
+  else if (e.key === "l" || e.key === "L") { S.log = !S.log; bars(page()); }
+  else if (e.key === "/") { e.preventDefault(); $("find").focus(); }
 });
 let rt = null;
-addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { const st = innerWidth < 900; if (st !== S.stacked) { S.stacked = st; draw(); } }, 200); });
+addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { const st = innerWidth < 900; if (st !== S.stacked) { S.stacked = st; draw(); } else bars(page()); }, 200); });
 const h = parseInt(location.hash.slice(1), 10);
 S.page = h >= 1 && h <= P.length ? h - 1 : 0;
 sync(); draw();
