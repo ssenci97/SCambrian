@@ -7,7 +7,7 @@
 #SBATCH --mem=20G
 #SBATCH --time=04:00:00
 #SBATCH --output=logs/mmseqs/mmseqs_%A_%a.log
-#SBATCH --array=1-5%3
+#SBATCH --array=1-4%3
 #SBATCH --open-mode=append
 ###################################### conda
 source ~/scratch/miniconda/etc/profile.d/conda.sh

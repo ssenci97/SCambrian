@@ -39,7 +39,9 @@ models = [models] if isinstance(models, str) else models
 print("MODELS=(" + " ".join(models) + ")")
 print(f"FASTA_DIR={dedup}")
 print(f"REPS_DIR={reps_dir}")
+print("TSV_PATH=" + d.get("dw_uniprot_seqs", {}).get("query_table", "configs/query_configs.tsv"))
 ')"
+[ ! -f "${TSV_PATH}" ] && echo "[SLURM-INFO] Missing TSV file" && exit 1
 mkdir -p "$REPS_DIR"
 echo "[SLURM-INFO] Job started on $(date)"
 ###################################### parse args
@@ -50,9 +52,13 @@ for arg in "$@"; do
   fi
 done
 ###################################### files
-mapfile -t files < <(find "$FASTA_DIR" -maxdepth 1 -name "*_dedup.fasta" 2>/dev/null | sort)
-echo "[SLURM-INFO] ${#files[@]} fasta files in $FASTA_DIR"
-if [ "${#files[@]}" -eq 0 ]; then
+mapfile -t LABELS < <(awk -F'\t' '{sub(/\r$/,"")} NR==1{for(i=1;i<=NF;i++)if($i=="label"){col=i;break};next} col&&$col!=""{print $col}' "${TSV_PATH}")
+files=("${LABELS[@]/#/${FASTA_DIR}/}")
+files=("${files[@]/%/_dedup.fasta}")
+N_FOUND=0
+for f in "${files[@]}"; do [ -f "$f" ] && N_FOUND=$((N_FOUND + 1)); done
+echo "[SLURM-INFO] ${N_FOUND}/${#LABELS[@]} TSV labels with fasta files in $FASTA_DIR"
+if [ "${N_FOUND}" -eq 0 ]; then
   echo "[SLURM-INFO] Warning: No matching fasta files found."
   if [ "$YAML_ONLY" = true ]; then
     echo "[SLURM-INFO] Running standalone --yaml-out updates..."
@@ -71,6 +77,7 @@ if [ "$FILE_IDX" -ge "${#files[@]}" ]; then
   exit 0
 fi
 input_file="${files[$FILE_IDX]}"
+[ -f "$input_file" ] || { echo "[SLURM-INFO] Error: missing $input_file"; exit 1; }
 filename=$(basename "$input_file")
 base_name="${filename%_dedup.fasta}"
 base_name="${base_name%_seqs}"
