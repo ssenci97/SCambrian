@@ -59,12 +59,12 @@ fi
 ###################################### analysis (uniprot / dimred / scanpy) — also runs on an existing .env
 # numpy pinned: numba (scanpy) and torch 2.4.1 break on newer numpy
 echo "[SLURM-INFO] Installing analysis deps..."
-pip install "numpy<2.3" pyyaml tqdm seaborn scikit-learn umap-learn pynndescent "scanpy>=1.10" anndata plotly ipywidgets anywidget hdbscan pyprojroot matplotlib-venn numba safetensors igraph pymupdf
+pip install "numpy<2.3" pyyaml tqdm seaborn scikit-learn umap-learn pynndescent "scanpy>=1.10" anndata plotly ipywidgets anywidget hdbscan pyprojroot matplotlib-venn numba safetensors igraph pymupdf kaleido
 
 ###################################### verify
 echo "[SLURM-INFO] Comprehensive verification..."
 python -c "
-import torch, esm, httpx, accelerate, flash_attn, numpy, numba, scanpy, umap, sklearn, igraph, matplotlib_venn, pymupdf, pynndescent
+import torch, esm, httpx, accelerate, flash_attn, numpy, numba, scanpy, umap, sklearn, igraph, matplotlib_venn, pymupdf, pynndescent, kaleido
 print(f'PyTorch Version : {torch.__version__}')
 print(f'CUDA Available  : {torch.cuda.is_available()} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"})')
 print(f'HTTPX Version   : {httpx.__version__}')
