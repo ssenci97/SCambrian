@@ -8,17 +8,17 @@
 :root{--bg:#f3f4f7;--panel:#ffffff;--ink:#1f2330;--muted:#6b7280;--line:#e2e5ea;--accent:#30767A;--busy:rgba(255,255,255,.7)}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
-body{background:var(--bg);color:var(--ink);font:15px/1.4 "DejaVu Sans",system-ui,sans-serif;display:flex;flex-direction:column}
-header{position:sticky;top:0;z-index:10;background:var(--panel);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+body{background:var(--bg);color:var(--ink);font:15px/1.4 "DejaVu Sans",system-ui,sans-serif;display:flex;flex-direction:column;overflow:hidden}
+header{position:sticky;top:0;z-index:10;background:var(--panel);border-bottom:1px solid var(--line);padding:6px 16px;display:flex;flex-wrap:wrap;gap:6px 22px;align-items:center;box-shadow:0 1px 3px rgba(0,0,0,.04)}
 .brand{display:flex;flex-direction:column;min-width:0;flex:1 1 260px}
-.brand h1{margin:0;font-size:20px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brand h1{margin:0;font-size:18px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .brand .sub{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .group{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 button,select{font:inherit;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer}
 button:hover:not(:disabled),select:hover:not(:disabled){border-color:var(--accent)}
 button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 button:disabled,select:disabled{opacity:.4;cursor:default}
-.arrow{width:40px;height:36px;font-size:16px;padding:0}
+.arrow{width:36px;height:32px;font-size:16px;padding:0}
 #pageSel{max-width:240px}
 .count{color:var(--muted);font-variant-numeric:tabular-nums;min-width:58px;text-align:center}
 .switch{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
@@ -30,9 +30,12 @@ button:disabled,select:disabled{opacity:.4;cursor:default}
 .lab.on{color:var(--ink);font-weight:700}
 .sz{display:flex;align-items:center;gap:6px;color:var(--muted)}
 .sz input{width:90px;accent-color:var(--accent)}
-main{flex:1;display:grid;grid-template-columns:320px minmax(0,1fr);grid-template-rows:minmax(0,1fr);min-height:0;padding:12px 16px 16px;gap:12px}
+main{flex:1;display:grid;grid-template-columns:300px minmax(0,1fr);grid-template-rows:minmax(0,1fr);min-height:0;padding:10px 12px;gap:10px}
 aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;overflow:auto;min-height:0;display:flex;flex-direction:column;gap:14px}
-.stage{position:relative;min-height:520px;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.right{display:flex;flex-direction:column;gap:10px;min-height:0;min-width:0}
+#barsBox{position:relative;flex:none;height:160px;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+#bars{position:absolute;inset:4px 8px 2px 4px}
+.stage{position:relative;flex:1;min-height:0;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 #plot{position:absolute;inset:0}
 #busy{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:var(--busy);color:var(--muted);font-size:16px;z-index:5}
 .stage.loading #busy{display:flex}
@@ -50,7 +53,7 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
 .chip .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chip .n{margin-left:auto;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
 .chip.off{opacity:.4}
-@media (max-width:900px){main{grid-template-columns:1fr;grid-template-rows:auto auto}aside{max-height:45vh}.stage{height:1000px}}
+@media (max-width:900px){html,body{height:auto}body{overflow:auto}main{grid-template-columns:1fr;grid-template-rows:auto auto}aside{max-height:45vh}.stage{flex:none;height:900px}}
 </style>
 </head>
 <body>
@@ -67,7 +70,7 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
     <select id="clusterSel" aria-label="Cluster labels"></select>
   </div>
   <div class="group">
-    <label class="sz">Point size <input type="range" id="size" min="1" max="8" step="0.5"></label>
+    <label class="sz">Point size <input type="range" id="size" min="0.5" max="8" step="0.5"></label>
     <button id="reset" title="Reset camera">Reset view</button>
   </div>
 </header>
@@ -77,43 +80,63 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
     <section class="sec" id="secSp"><div class="shead"><b>Species</b><span><button data-all="sp">All</button> <button data-none="sp">None</button></span></div><input class="q" id="qSp" placeholder="Filter species…" aria-label="Filter species"><div id="listSp"></div></section>
     <section class="sec" id="secCl"><div class="shead"><b id="clTitle"></b><span><button data-all="cl">All</button> <button data-none="cl">None</button></span></div><input class="q" id="qCl" placeholder="Filter clusters…" aria-label="Filter clusters"><div id="listCl"></div></section>
   </aside>
-  <div class="stage" id="stage"><div id="plot"></div><div id="busy">Rendering…</div></div>
+  <div class="right">
+    <div id="barsBox"><div id="bars"></div></div>
+    <div class="stage" id="stage"><div id="plot"></div><div id="busy">Rendering…</div></div>
+  </div>
 </main>
 <script>__PLOTLYJS__</script>
 <script id="payload" type="application/json">__DATA__</script>
 <script>
 const D = JSON.parse(document.getElementById("payload").textContent);
 const C = D.config, P = D.pages, $ = id => document.getElementById(id);
-const S = {page: 0, byCluster: false, cluster: D.cluster_keys[0], hidden: {sp: new Set(), cl: new Set()}, q: {sp: "", cl: ""}, size: C.marker_size, rev: 0, stacked: innerWidth < 900};
+const S = {page: 0, byCluster: false, cluster: D.cluster_keys[0], hidden: {sp: new Set(), cl: new Set()}, q: {sp: "", cl: ""}, size: C.marker_size, rev: 0, cam: {}, stacked: innerWidth < 900};
 function decode(s, T) { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new T(u.buffer); }
 function page() {
   const p = P[S.page];
   if (!p._c) {
     p._c = Object.fromEntries(p.methods.map(([m]) => [m, decode(p.coords[m], Float32Array)]));
     p._s = Object.fromEntries(Object.entries(p.sets).map(([k, v]) => [k, decode(v.codes, Uint16Array)]));
+    p._r = Object.fromEntries(p.methods.map(([m]) => [m, ranges(p._c[m])]));
     p._h = p.ids.split("\n").map((id, i) => `<b>${id}</b>` + D.hover_keys.map(k => `<br>${k}: ${p.sets[k].cats[p._s[k][i]][0]}`).join(""));
   }
   return p;
 }
+function ranges(c) {
+  const r = [0, 1, 2].map(() => [Infinity, -Infinity]);
+  for (let i = 0; i < c.length; i++) { const a = r[i % 3], v = c[i]; if (v < a[0]) a[0] = v; if (v > a[1]) a[1] = v; }
+  return r.map(([a, b]) => { const d = (b - a || 1) * 0.02; return [a - d, b + d]; });
+}
 function key() { return S.byCluster ? S.cluster : "species"; }
-function axis(t) { return {title: {text: t, font: {size: C.font_tick + 1}}, backgroundcolor: "#ffffff", showbackground: true, gridcolor: "#e6e8ec", zerolinecolor: "#c9ced6", showline: true, linecolor: "#3a3f4b", tickfont: {size: C.font_tick}, showspikes: false}; }
+function axis(t, r) { return {range: r, autorange: false, title: {text: t, font: {size: C.font_tick + 1}}, backgroundcolor: "#ffffff", showbackground: true, gridcolor: "#e6e8ec", zerolinecolor: "#c9ced6", showline: true, linecolor: "#3a3f4b", tickfont: {size: C.font_tick}, showspikes: false}; }
 function render() {
   const p = page(), k = key(), set = p.sets[k], codes = p._s[k], cols = set.cats.map(c => c[1]), keep = [], sp = p._s.species, cl = p._s[S.cluster];
   for (let i = 0; i < codes.length; i++) if (!S.hidden.sp.has(sp[i]) && !S.hidden.cl.has(cl[i])) keep.push(i);
   const extra = D.hover_keys.includes(k) ? null : k, n = p.methods.length;
   const text = keep.map(i => extra ? p._h[i] + `<br>${extra}: ${set.cats[codes[i]][0]}` : p._h[i]), color = keep.map(i => cols[codes[i]]);
-  const layout = {uirevision: `${S.page}-${S.rev}`, margin: {l: 0, r: 0, t: 36, b: 0}, paper_bgcolor: "rgba(0,0,0,0)", font: {family: C.font_family, size: C.font_tick, color: "#1f2330"}, hoverlabel: {font: {size: 13, family: C.font_family}, bgcolor: "#ffffff", bordercolor: "#c9ced6"}, annotations: []};
+  const layout = {uirevision: `${S.rev}`, margin: {l: 0, r: 0, t: 36, b: 0}, paper_bgcolor: "rgba(0,0,0,0)", font: {family: C.font_family, size: C.font_tick, color: "#1f2330"}, hoverlabel: {font: {size: 13, family: C.font_family}, bgcolor: "#ffffff", bordercolor: "#c9ced6"}, annotations: []};
   const traces = p.methods.map(([m, t], j) => {
     const c = p._c[m], x = new Float32Array(keep.length), y = new Float32Array(keep.length), z = new Float32Array(keep.length), sc = j ? "scene" + (j + 1) : "scene";
     keep.forEach((i, q) => { x[q] = c[3 * i]; y[q] = c[3 * i + 1]; z[q] = c[3 * i + 2]; });
     const a = j / n + (j ? 0.005 : 0), b = (j + 1) / n - (j < n - 1 ? 0.005 : 0), dom = S.stacked ? {x: [0, 1], y: [1 - b, 1 - a - (j < n - 1 ? 0.03 : 0)]} : {x: [a, b], y: [0, 1]};
-    layout[sc] = {domain: dom, aspectmode: "cube", xaxis: axis(t + "-1"), yaxis: axis(t + "-2"), zaxis: axis(t + "-3")};
+    layout[sc] = {domain: dom, aspectmode: "cube", xaxis: axis(t + "-1", p._r[m][0]), yaxis: axis(t + "-2", p._r[m][1]), zaxis: axis(t + "-3", p._r[m][2])};
+    if (S.cam[sc]) layout[sc].camera = S.cam[sc];
     layout.annotations.push({text: `<b>${t}</b>`, showarrow: false, xref: "paper", yref: "paper", x: (dom.x[0] + dom.x[1]) / 2, y: dom.y[1], yanchor: "bottom", font: {size: C.font_title}});
     return {type: "scatter3d", mode: "markers", x, y, z, text, hovertemplate: "%{text}<extra></extra>", showlegend: false, scene: sc, marker: {size: S.size, opacity: C.alpha, color, line: {width: 0}}};
   });
   Plotly.react($("plot"), traces, layout, {responsive: true, displaylogo: false, toImageButtonOptions: {format: "png", scale: 2, filename: `${p.slug}_${k.replace(/\W+/g, "_")}`}});
+  if (!$("plot")._camHook) { $("plot")._camHook = true; $("plot").on("plotly_relayout", e => Object.keys(e).forEach(k => { const m = k.match(/^(scene\d*)\.camera$/); if (m) S.cam[m[1]] = e[k]; })); }
+  bars(p);
   sidebar(p, keep.length);
   $("stage").classList.remove("loading");
+}
+function bars(p) {
+  const b = p.bars, cats = p.sets.species.cats, col = Object.fromEntries(cats.map(c => [c[0], c[1]])), lk = D.cluster_keys[0], clCats = p.sets[lk].cats;
+  const hidSp = new Set([...S.hidden.sp].map(i => cats[i][0])), hidCl = new Set(S.cluster === lk ? [...S.hidden.cl].map(i => clCats[i][0]) : []);
+  const idx = b.clusters.map((_, i) => i).filter(i => !hidCl.has(b.clusters[i])), x = idx.map(i => b.clusters[i]);
+  const traces = b.species.map((sp, j) => ({type: "bar", name: sp, x, y: idx.map(i => b.counts[j][i]), marker: {color: col[sp], line: {width: 0}}, hovertemplate: `%{x} · ${sp.replace(/%/g, "%%")}: %{y:,}<extra></extra>`})).filter(t => !hidSp.has(t.name));
+  const layout = {barmode: "stack", bargap: 0.15, margin: {l: 56, r: 4, t: 26, b: 22}, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)", font: {family: C.font_family, size: C.font_tick, color: "#1f2330"}, showlegend: true, legend: {orientation: "h", x: 0, y: 1, yanchor: "bottom", itemclick: false, itemdoubleclick: false, font: {size: C.font_tick}}, xaxis: {type: "category", tickfont: {size: 11}, fixedrange: true}, yaxis: {title: {text: "proteins", font: {size: C.font_tick}}, gridcolor: "#e6e8ec", fixedrange: true}, hoverlabel: {font: {size: 13, family: C.font_family}, bgcolor: "#ffffff", bordercolor: "#c9ced6"}};
+  Plotly.react($("bars"), traces, layout, {responsive: true, displayModeBar: false});
 }
 function draw() { $("stage").classList.add("loading"); requestAnimationFrame(() => setTimeout(render, 0)); }
 function order(cats, byName) {
@@ -166,7 +189,7 @@ $("pageSel").onchange = e => go(+e.target.value);
 $("toggle").onchange = e => colourBy(e.target.checked);
 $("clusterSel").onchange = e => { S.cluster = e.target.value; unfilter("cl"); draw(); };
 $("size").oninput = e => { S.size = +e.target.value; Plotly.restyle($("plot"), {"marker.size": S.size}); };
-$("reset").onclick = () => { S.rev++; draw(); };
+$("reset").onclick = () => { S.rev++; S.cam = {}; draw(); };
 document.querySelectorAll("[data-all]").forEach(b => b.onclick = () => { shown(b.dataset.all).forEach(i => S.hidden[b.dataset.all].delete(i)); draw(); });
 document.querySelectorAll("[data-none]").forEach(b => b.onclick = () => { shown(b.dataset.none).forEach(i => S.hidden[b.dataset.none].add(i)); draw(); });
 $("qSp").oninput = e => { S.q.sp = e.target.value; sidebar(page(), S.n); };
