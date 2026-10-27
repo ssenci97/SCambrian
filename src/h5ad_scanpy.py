@@ -18,6 +18,7 @@ import pandas as pd
 from pathlib import Path
 import pymupdf
 import resource
+from scipy.stats import chisquare, false_discovery_control
 from string import ascii_lowercase
 import time
 from tqdm import tqdm
@@ -52,6 +53,7 @@ MAX_JOINT_LABELS = 6
 METHOD_NAMES = {"umap": "UMAP", "tsne": "t-SNE"}
 METHODS = ["umap", "tsne"]
 MIN_INTRA_SIZE = 150
+MIN_BALANCE = 0.6
 MIN_JOINT_SIZE = 100
 MIN_MODULE_SIZE = 100
 MIN_PERCENT_ENRICHMENT = 80
@@ -72,6 +74,7 @@ parser.add_argument("--methods", type=str, nargs="+", default=METHODS, help="Lay
 parser.add_argument("--max_joint_labels", type=int, default=MAX_JOINT_LABELS, help="Top joint clusters labelled per species")
 parser.add_argument("--min_joint_size", type=int, default=MIN_JOINT_SIZE, help="Minimum species proteins of a labelled joint cluster")
 parser.add_argument("--min_intra_size", type=int, default=MIN_INTRA_SIZE, help="Minimum proteins of a highlighted intra cluster")
+parser.add_argument("--min_balance", type=float, default=MIN_BALANCE, help="Minimum ratio of the smallest to the largest normalised species share of a balanced joint cluster")
 parser.add_argument("--min_module_size", type=int, default=MIN_MODULE_SIZE, help="Minimum proteins of a saved module")
 parser.add_argument("--min_percent_enrichment", type=float, default=MIN_PERCENT_ENRICHMENT, help="Species percentage of a joint module")
 parser.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=OVERWRITE, help="Redraw a report whose outputs already exist")
@@ -79,7 +82,7 @@ parser.add_argument("--yaml-in", nargs="?", const=YAML_PATH, default=YAML_PATH)
 parser.add_argument("--yaml-out", nargs="?", const=YAML_PATH, default=None)
 yargs, _ = parser.parse_known_args()
 script_key = "h5ad_scanpy"
-params = dict(methods=METHODS, max_joint_labels=MAX_JOINT_LABELS, min_joint_size=MIN_JOINT_SIZE, min_intra_size=MIN_INTRA_SIZE, min_module_size=MIN_MODULE_SIZE, min_percent_enrichment=MIN_PERCENT_ENRICHMENT, overwrite=OVERWRITE)
+params = dict(methods=METHODS, max_joint_labels=MAX_JOINT_LABELS, min_joint_size=MIN_JOINT_SIZE, min_intra_size=MIN_INTRA_SIZE, min_balance=MIN_BALANCE, min_module_size=MIN_MODULE_SIZE, min_percent_enrichment=MIN_PERCENT_ENRICHMENT, overwrite=OVERWRITE)
 if yargs.yaml_in and Path(yargs.yaml_in).exists():
     ydata = yaml.safe_load(Path(yargs.yaml_in).read_text()) or {}
     if script_key in ydata: params.update(ydata[script_key])
@@ -359,9 +362,13 @@ def report(h5ad_path: Path) -> None:
     n_sp = len(species_list)
     print(f"[PYTHON-INFO][DATA-SHAPE] {h5ad_path.name}: {adata.n_obs:,} proteins, {n_sp} species, obsm: {', '.join(adata.obsm.keys())}")
     ###################################### JOINT_SELECTION
-    cluster_sp_frac = pd.crosstab(obs["cluster"], obs["species"], normalize="index")
     counts_df = pd.crosstab(obs["cluster"], obs["species"])
-    cluster_sp_frac.index, counts_df.index = cluster_sp_frac.index.astype(str), counts_df.index.astype(str)
+    counts_df.index = counts_df.index.astype(str)
+    norm_df = counts_df / counts_df.sum()
+    cluster_sp_frac = norm_df.div(norm_df.sum(axis=1), axis=0)
+    chi2_q = pd.Series(false_discovery_control(chisquare(counts_df, np.outer(counts_df.sum(axis=1), counts_df.sum() / counts_df.values.sum()), axis=1).pvalue), index=counts_df.index)
+    balanced = (cluster_sp_frac.min(axis=1) >= args.min_balance * cluster_sp_frac.max(axis=1)) & (counts_df.min(axis=1) >= args.min_joint_size)
+    print(f"[PYTHON-INFO][BALANCED] {balanced.sum()} balanced joint clusters: {', '.join(balanced.index[balanced])}")
     ranked = {sp: top_joint_clusters(counts_df, cluster_sp_frac, sp) for sp in species_list}
     letters = cluster_letters(ranked)
     facets = {sp: {cl: letters[cl] for cl in cls} for sp, cls in ranked.items()}
@@ -377,7 +384,7 @@ def report(h5ad_path: Path) -> None:
     enrichment_table.columns = ["cluster", "species", "protein_count"]
     frac_table = enrichment.stack().rename("species_fraction_percent").reset_index()
     frac_table.columns = ["cluster", "species", "species_fraction_percent"]
-    enrichment_table.merge(frac_table, on=["cluster", "species"], how="left").to_csv(target_dir / f"species_cluster_enrichment__{param_tag}.csv", index=False)
+    enrichment_table.merge(frac_table, on=["cluster", "species"], how="left").assign(chi2_q=lambda d: d["cluster"].map(chi2_q), balanced=lambda d: d["cluster"].map(balanced)).to_csv(target_dir / f"species_cluster_enrichment__{param_tag}.csv", index=False)
     adata.uns["markers"].to_csv(target_dir / f"channel_importance_rankings__{param_tag}.csv", index=False)
     cl_str, intra_str = obs["cluster"].astype(str), obs["intra_cluster"].astype(str)
     for sp in species_list:
