@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Reports the joint and intra-species clusters saved by npz_scanpy.py: tables, protein modules, cluster panels, intra-to-inter cluster flux diagrams and a merged PDF.
 
-Only the .h5ad is read, so no clustering or embedding is recomputed except the re-projection of the top joint clusters. The report panels, each A4/4 wide, are drawn for every method in ``--methods`` (UMAP and t-SNE, 2D layouts): (a) intra-species layouts with all clusters with more than MIN_INTRA_SIZE proteins coloured by protein count, (b) joint layouts coloured by cluster specificity index, labelling per species the MAX_JOINT_LABELS most specific joint clusters with more than MIN_JOINT_SIZE proteins of that species, drawn on top of the others and named by lowercase letters assigned once and shared by all panels, where only joint clusters whose per-protein cluster membership differs across species by one-way ANOVA (BH q < ANOVA_ALPHA) can be labelled, then once: (c) a re-projected UMAP of all proteins of those top joint clusters, optimised on the stored joint kNN graph restricted to them and coloured by cluster, (d) intra-to-top-joint cluster fluxes on a square-root (semi-quantitative) scale, with joint cluster nodes and flows coloured by specificity index and outlined in black above MIN_PERCENT_ENRICHMENT, where intra clusters inherit a cluster colour only when a strict majority of their proteins flows into it, and (e) a per-species protein-count barplot of the top joint clusters with ANOVA significance asterisks stacked vertically over the bars of the significant clusters. A report whose outputs all exist and are newer than both this script and the .h5ad is skipped unless ``--overwrite`` is set. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
+Only the .h5ad is read, so no clustering or embedding is recomputed except the re-projection of the top joint clusters. The report panels, each A4/4 wide, are drawn for every method in ``--methods`` (UMAP and t-SNE, 2D layouts): (a) intra-species layouts with all clusters with more than MIN_INTRA_SIZE proteins coloured by protein count, (b) joint layouts coloured by cluster specificity index, labelling per species the MAX_JOINT_LABELS most specific joint clusters with more than MIN_JOINT_SIZE proteins of that species, drawn on top of the others and named by lowercase letters assigned once and shared by all panels, where only significant joint clusters can be labelled: their per-protein membership differs across species by one-way ANOVA (BH q < ANOVA_ALPHA) and their largest species-normalised share is at least MIN_FOLD_CHANGE times their smallest, an effect-size gate that discards the near-uniform clusters ANOVA flags only because of the large number of proteins, and a cluster is labelled for a species only when it is enriched in it (specificity above 1/n_species), then once: (c) a re-projected UMAP of all proteins of those top joint clusters, optimised on the stored joint kNN graph restricted to them and coloured by cluster, (d) intra-to-top-joint cluster fluxes on a square-root (semi-quantitative) scale, with joint cluster nodes and flows coloured by specificity index and outlined in black above MIN_PERCENT_ENRICHMENT, where intra clusters inherit a cluster colour only when a strict majority of their proteins flows into it, and (e) a per-species protein-count barplot of the top joint clusters with ANOVA significance asterisks stacked vertically over the bars of the significant clusters. A report whose outputs all exist and are newer than both this script and the .h5ad is skipped unless ``--overwrite`` is set. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -56,6 +56,7 @@ METHOD_NAMES = {"umap": "UMAP", "tsne": "t-SNE"}
 METHODS = ["umap", "tsne"]
 MIN_INTRA_SIZE = 150
 MIN_BALANCE = 0.6
+MIN_FOLD_CHANGE = 2.0
 MIN_JOINT_SIZE = 100
 MIN_MODULE_SIZE = 100
 MIN_PERCENT_ENRICHMENT = 80
@@ -82,13 +83,14 @@ parser.add_argument("--min_intra_size", type=int, default=MIN_INTRA_SIZE, help="
 parser.add_argument("--min_balance", type=float, default=MIN_BALANCE, help="Minimum ratio of the smallest to the largest normalised species share of a balanced joint cluster")
 parser.add_argument("--min_module_size", type=int, default=MIN_MODULE_SIZE, help="Minimum proteins of a saved module")
 parser.add_argument("--min_percent_enrichment", type=float, default=MIN_PERCENT_ENRICHMENT, help="Species percentage of a joint module")
+parser.add_argument("--min_fold_change", type=float, default=MIN_FOLD_CHANGE, help="Minimum ratio of the largest to the smallest species-normalised share of a significant joint cluster")
 parser.add_argument("--anova_alpha", type=float, default=ANOVA_ALPHA, help="BH-corrected ANOVA q-value below which a joint cluster can be highlighted and re-projected")
 parser.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=OVERWRITE, help="Redraw a report whose outputs already exist")
 parser.add_argument("--yaml-in", nargs="?", const=YAML_PATH, default=YAML_PATH)
 parser.add_argument("--yaml-out", nargs="?", const=YAML_PATH, default=None)
 yargs, _ = parser.parse_known_args()
 script_key = "h5ad_scanpy"
-params = dict(methods=METHODS, max_joint_labels=MAX_JOINT_LABELS, min_joint_size=MIN_JOINT_SIZE, min_intra_size=MIN_INTRA_SIZE, min_balance=MIN_BALANCE, min_module_size=MIN_MODULE_SIZE, min_percent_enrichment=MIN_PERCENT_ENRICHMENT, anova_alpha=ANOVA_ALPHA, overwrite=OVERWRITE)
+params = dict(methods=METHODS, max_joint_labels=MAX_JOINT_LABELS, min_joint_size=MIN_JOINT_SIZE, min_intra_size=MIN_INTRA_SIZE, min_balance=MIN_BALANCE, min_module_size=MIN_MODULE_SIZE, min_percent_enrichment=MIN_PERCENT_ENRICHMENT, anova_alpha=ANOVA_ALPHA, min_fold_change=MIN_FOLD_CHANGE, overwrite=OVERWRITE)
 if yargs.yaml_in and Path(yargs.yaml_in).exists():
     ydata = yaml.safe_load(Path(yargs.yaml_in).read_text()) or {}
     if script_key in ydata: params.update(ydata[script_key])
@@ -146,19 +148,19 @@ def sig_stars(q: float) -> str:
         str: ``***``, ``**``, ``*`` or an empty string when not significant.
     """
     return next((stars for cut, stars in SIG_LEVELS if q < cut), "")
-def top_joint_clusters(counts_df: pd.DataFrame, spec_df: pd.DataFrame, anova_q: pd.Series, sp: str) -> list[str]:
-    """Rank the max_joint_labels most specific joint clusters of a species among those with more than min_joint_size of its proteins and ANOVA q below anova_alpha.
+def top_joint_clusters(counts_df: pd.DataFrame, spec_df: pd.DataFrame, significant: pd.Series, sp: str) -> list[str]:
+    """Rank the max_joint_labels most specific joint clusters of a species among the significant ones enriched in it (specificity above the uniform 1/n_species) with more than min_joint_size of its proteins.
 
     Args:
         counts_df (pd.DataFrame): Protein counts per cluster (rows) and species (columns).
         spec_df (pd.DataFrame): Specificity index per cluster (rows) and species (columns).
-        anova_q (pd.Series): BH-corrected ANOVA q-value per cluster.
+        significant (pd.Series): Whether each cluster passes the ANOVA and fold-change gates.
         sp (str): Species of the facet.
 
     Returns:
         list[str]: Clusters in decreasing specificity order.
     """
-    return spec_df.loc[(counts_df[sp] > args.min_joint_size) & (anova_q < args.anova_alpha), sp].sort_values(ascending=False, kind="stable").head(args.max_joint_labels).index.tolist()
+    return spec_df.loc[(counts_df[sp] > args.min_joint_size) & significant & (spec_df[sp] > 1 / spec_df.shape[1]), sp].sort_values(ascending=False, kind="stable").head(args.max_joint_labels).index.tolist()
 def cluster_letters(ranked: dict[str, list[str]]) -> dict[str, str]:
     """Assign once a lowercase letter to each ranked joint cluster, in order of first appearance across species.
 
@@ -391,28 +393,30 @@ def report(h5ad_path: Path) -> None:
     cluster_sp_frac = norm_df.div(norm_df.sum(axis=1), axis=0)
     cl_str, intra_str = obs["cluster"].astype(str), obs["intra_cluster"].astype(str)
     sp_str = obs["species"].astype(str)
-    anova_p = f_oneway(*[pd.get_dummies(cl_str[sp_str == sp]).reindex(columns=counts_df.index, fill_value=0).to_numpy(np.float32) for sp in species_list], axis=0).pvalue
+    anova_p = f_oneway(*[pd.get_dummies(cl_str[sp_str == sp]).reindex(columns=counts_df.index, fill_value=0).to_numpy(np.float64) for sp in species_list], axis=0).pvalue
     anova_q = pd.Series(false_discovery_control(np.nan_to_num(anova_p, nan=1.0)), index=counts_df.index)
-    print(f"[PYTHON-INFO][ANOVA] {(anova_q < args.anova_alpha).sum()}/{len(anova_q)} joint clusters with species-dependent membership (q < {args.anova_alpha})")
+    fold_change = norm_df.max(axis=1) / norm_df.min(axis=1)
+    significant = (anova_q < args.anova_alpha) & (fold_change >= args.min_fold_change)
+    print(f"[PYTHON-INFO][ANOVA] {(anova_q < args.anova_alpha).sum()}/{len(anova_q)} joint clusters with q < {args.anova_alpha}, {significant.sum()} also with fold change >= {args.min_fold_change}")
     chi2_q = pd.Series(false_discovery_control(chisquare(counts_df, np.outer(counts_df.sum(axis=1), counts_df.sum() / counts_df.values.sum()), axis=1).pvalue), index=counts_df.index)
     balanced = (cluster_sp_frac.min(axis=1) >= args.min_balance * cluster_sp_frac.max(axis=1)) & (counts_df.min(axis=1) >= args.min_joint_size)
     print(f"[PYTHON-INFO][BALANCED] {balanced.sum()} balanced joint clusters: {', '.join(balanced.index[balanced])}")
-    ranked = {sp: top_joint_clusters(counts_df, cluster_sp_frac, anova_q, sp) for sp in species_list}
+    ranked = {sp: top_joint_clusters(counts_df, cluster_sp_frac, significant, sp) for sp in species_list}
     letters = cluster_letters(ranked)
     facets = {sp: {cl: letters[cl] for cl in cls} for sp, cls in ranked.items()}
     colors = {cl: PALETTE[i % len(PALETTE)] for i, cl in enumerate(letters)}
     ###################################### TABLES_AND_MODULES
     with open(target_dir / f"clustering_metrics__{param_tag}.txt", "w") as f:
         f.writelines(f"{k}: {v}\n" for k, v in adata.uns["metrics"].items())
-    rank_rows = [(sp, cl, rk, counts_df.loc[cl, sp], cluster_sp_frac.loc[cl, sp], anova_q[cl]) for sp, sp_ranks in facets.items() for cl, rk in sp_ranks.items()]
-    pd.DataFrame(rank_rows, columns=["species", "cluster", "letter", "protein_count", "species_fraction", "anova_q"]).to_csv(target_dir / f"species_top_clusters__{param_tag}.csv", index=False)
+    rank_rows = [(sp, cl, rk, counts_df.loc[cl, sp], cluster_sp_frac.loc[cl, sp], anova_q[cl], fold_change[cl]) for sp, sp_ranks in facets.items() for cl, rk in sp_ranks.items()]
+    pd.DataFrame(rank_rows, columns=["species", "cluster", "letter", "protein_count", "species_fraction", "anova_q", "fold_change"]).to_csv(target_dir / f"species_top_clusters__{param_tag}.csv", index=False)
     obs[["protein_id", "species", "cluster", "intra_cluster"]].to_csv(target_dir / f"protein_clusters_metadata__{param_tag}.csv", index=False)
     enrichment = cluster_sp_frac * 100
     enrichment_table = counts_df.stack().rename("protein_count").reset_index()
     enrichment_table.columns = ["cluster", "species", "protein_count"]
     frac_table = enrichment.stack().rename("species_fraction_percent").reset_index()
     frac_table.columns = ["cluster", "species", "species_fraction_percent"]
-    enrichment_table.merge(frac_table, on=["cluster", "species"], how="left").assign(chi2_q=lambda d: d["cluster"].map(chi2_q), anova_q=lambda d: d["cluster"].map(anova_q), balanced=lambda d: d["cluster"].map(balanced)).to_csv(target_dir / f"species_cluster_enrichment__{param_tag}.csv", index=False)
+    enrichment_table.merge(frac_table, on=["cluster", "species"], how="left").assign(chi2_q=lambda d: d["cluster"].map(chi2_q), anova_q=lambda d: d["cluster"].map(anova_q), fold_change=lambda d: d["cluster"].map(fold_change), significant=lambda d: d["cluster"].map(significant), balanced=lambda d: d["cluster"].map(balanced)).to_csv(target_dir / f"species_cluster_enrichment__{param_tag}.csv", index=False)
     adata.uns["markers"].to_csv(target_dir / f"channel_importance_rankings__{param_tag}.csv", index=False)
     for sp in species_list:
         for cl in counts_df.index:
