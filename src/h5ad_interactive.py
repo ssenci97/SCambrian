@@ -1,36 +1,34 @@
 #!/usr/bin/env python3
-"""Writes interactive 3D HTML views of the UMAP and t-SNE layouts saved by npz_scanpy.py, plus an HDBSCAN explorer of the 3D UMAP.
+"""Writes one paged, self-contained 3D HTML viewer of the UMAP and t-SNE layouts saved by npz_scanpy.py, plus the HDBSCAN labels of the 3D UMAP.
 
-For the joint view and for every species (intra view) two standalone HTML files are saved under ``<run>/interactive/``: side-by-side 3D UMAP and t-SNE panels recoloured by buttons (species, Leiden cluster, intra-species cluster), and the same panels coloured by HDBSCAN fitted on the 3D UMAP for every min_cluster_size of ``--mcs_grid``, switched with a slider. The HDBSCAN labels of all views are also written to one TSV per .h5ad. An .h5ad whose outputs all exist is skipped unless ``--overwrite`` is set.
+Per .h5ad a single HTML file is saved under ``<run>/interactive/`` with one page for the joint view and one per species (intra view), browsed with arrows, a page menu or the arrow keys. Every page shows side-by-side 3D UMAP and t-SNE panels and a species/cluster switch; the cluster labels are chosen among Leiden, intra-species and HDBSCAN fitted on the 3D UMAP for every min_cluster_size of ``--mcs_grid``. The legend hides or isolates groups. The HDBSCAN labels of all views are also written to one TSV per .h5ad. An .h5ad whose outputs all exist is skipped unless ``--overwrite`` is set.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
 import argparse
+import base64
 import datetime
 import hdbscan
+from html import escape
+import json
 import numpy as np
 import os
 import pandas as pd
 from pathlib import Path
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+from plotly.offline import get_plotlyjs
 import resource
 import time
 from tqdm import tqdm
 import yaml
 ALPHA = 0.8
 COLOR_BG = "#BFC5CE"
-COLOR_BY = ["species", "cluster", "intra_cluster"]
 DEFAULT_QUERY_TSV = "configs/query_configs.tsv"
 DIM = 3
-FIGURE_HEIGHT = 900
-FIGURE_WIDTH = 1700
 FONT_FAMILY = "DejaVu Sans"
 FONT_LEGEND = 15
 FONT_TICK = 12
 FONT_TITLE = 20
-LEGEND_MAX = 40
-LINE_COLOR = "black"
+LABEL_SETS = {"species": "species", "cluster": "Leiden cluster", "intra_cluster": "intra-species cluster"}
 MARKER_SIZE = 2
 MAX_CLUSTERS = 15
 MAX_POINTS = None
@@ -39,9 +37,10 @@ METHODS = {"umap": "UMAP", "tsne": "t-SNE"}
 MIN_SAMPLES = 10
 N_JOBS = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count() or 1))
 OVERWRITE = False
-PALETTE = ["#ECDE90", "#93DEB6", "#F1B584", "#76BBE2", "#DA919B", "#899E64", "#8E81B9", "#A66C58", "#30767A", "#7A5271"]
+PALETTE = ["#7A5271", "#30767A", "#A66C58", "#8E81B9", "#899E64", "#DA919B", "#76BBE2", "#F1B584", "#93DEB6", "#ECDE90"]
 SEED = 42
 SUBDIR = "interactive"
+TEMPLATE = Path(__file__).resolve().parent / "templates" / "h5ad_interactive.html"
 YAML_PATH = "configs/param_configs.yaml"
 ###################################### CONFIG_AND_PARSER
 parser = argparse.ArgumentParser(description="Interactive 3D UMAP/t-SNE and HDBSCAN HTML views")
@@ -94,22 +93,17 @@ def list_views(obs: pd.DataFrame, keys: set[str]) -> list[str]:
     if all(f"X_{m}_{DIM}d_intra" in keys for m in METHODS):
         views += [sp for sp in obs["species"].astype(str).unique() if obs.loc[obs["species"].astype(str) == sp, "intra_cluster"].notna().any()]
     return views
-def targets(target_dir: Path, views: list[str], param_tag: str) -> dict[str, Path]:
+def targets(target_dir: Path, param_tag: str) -> dict[str, Path]:
     """Return every output path of one .h5ad.
 
     Args:
         target_dir (Path): Output folder of the run.
-        views (list[str]): Views of the .h5ad.
         param_tag (str): Parameter tag of the .h5ad.
 
     Returns:
         dict[str, Path]: Output key -> path.
     """
-    out = {"tsv": target_dir / f"hdbscan_umap{DIM}d__{param_tag}.tsv"}
-    for v in views:
-        out[f"{v}|layouts"] = target_dir / f"{v}_{DIM}d_umap_tsne__{param_tag}.html"
-        out[f"{v}|hdbscan"] = target_dir / f"{v}_hdbscan_umap{DIM}d__{param_tag}.html"
-    return out
+    return {"tsv": target_dir / f"hdbscan_umap{DIM}d__{param_tag}.tsv", "html": target_dir / f"views_{DIM}d__{param_tag}.html"}
 def fit_hdbscan_auto(coords: np.ndarray, min_cluster_size: int) -> np.ndarray:
     """Fit HDBSCAN and relabel the ``max_clusters`` largest clusters 1..n by decreasing size, the rest 0.
 
@@ -143,58 +137,32 @@ def categories(values: pd.Series, unassigned: str | None = None) -> tuple[np.nda
     cats = [(unassigned or "unassigned", COLOR_BG, int(values.isna().sum()))] + [(n, PALETTE[i % len(PALETTE)], int(c)) for i, (n, c) in enumerate(zip(names, counts.values))]
     lookup = {n: i + 1 for i, n in enumerate(counts.index)}
     return np.asarray([lookup.get(v, 0) for v in values], dtype=np.int32), cats
-def colorscale(cats: list[tuple[str, str, int]]) -> list[list]:
-    """Build a discrete colorscale mapping integer code i to the colour of category i.
+def encode(values: np.ndarray, dtype: type) -> str:
+    """Encode an array as base64 of its raw bytes in the given dtype.
 
     Args:
-        cats (list[tuple[str, str, int]]): (name, colour, count) per code.
+        values (np.ndarray): Values to encode.
+        dtype (type): Numpy dtype of the bytes.
 
     Returns:
-        list[list]: Plotly colorscale.
+        str: Base64 string.
     """
-    k = len(cats)
-    return [s for i, (_, c, _) in enumerate(cats) for s in ([i / k, c], [(i + 1) / k, c])]
-def build_figure(coords: dict[str, np.ndarray], hover: np.ndarray, sets: dict[str, tuple[np.ndarray, list[tuple[str, str, int]]]], title: str, control: str) -> go.Figure:
-    """Build side-by-side 3D panels whose colouring switches between label sets with buttons or a slider.
+    return base64.b64encode(np.ascontiguousarray(values, dtype=dtype).tobytes()).decode()
+def write_views(pages: list[dict], title: str, out_fp: Path) -> None:
+    """Write all pages into one self-contained paged HTML viewer.
 
     Args:
-        coords (dict[str, np.ndarray]): 3D layout per method.
-        hover (np.ndarray): Columns protein_id, species, cluster, intra_cluster per point.
-        sets (dict[str, tuple[np.ndarray, list[tuple[str, str, int]]]]): Set name -> (codes per point, categories).
-        title (str): Figure title.
-        control (str): ``buttons`` or ``slider``.
-
-    Returns:
-        go.Figure: Figure with 2 data traces followed by the legend traces of every set.
+        pages (list[dict]): Page payloads (title, subtitle, slug, methods, coords, ids, sets).
+        title (str): Document title.
+        out_fp (Path): Output HTML path.
     """
-    fig = make_subplots(rows=1, cols=len(coords), specs=[[{"type": "scatter3d"}] * len(coords)], subplot_titles=[METHODS[m] for m in coords], horizontal_spacing=0.01)
-    template = "<b>%{customdata[0]}</b><br>species: %{customdata[1]}<br>cluster: %{customdata[2]}<br>intra_cluster: %{customdata[3]}<extra></extra>"
-    first_codes, first_cats = next(iter(sets.values()))
-    for col, (m, c) in enumerate(coords.items(), 1):
-        fig.add_trace(go.Scatter3d(x=c[:, 0], y=c[:, 1], z=c[:, 2], mode="markers", customdata=hover, hovertemplate=template, showlegend=False, marker=dict(size=MARKER_SIZE, opacity=ALPHA, color=first_codes, colorscale=colorscale(first_cats), cmin=-0.5, cmax=len(first_cats) - 0.5, showscale=False)), row=1, col=col)
-    n_data, legend_idx = len(coords), {}
-    for name, (_, cats) in sets.items():
-        shown = sorted((i for i in range(len(cats)) if cats[i][2] > 0), key=lambda i: (i == 0, -cats[i][2]))[:LEGEND_MAX]
-        legend_idx[name] = list(range(len(fig.data), len(fig.data) + len(shown)))
-        for i in shown:
-            fig.add_trace(go.Scatter3d(x=[None], y=[None], z=[None], mode="markers", marker=dict(size=10, color=cats[i][1]), name=f"{cats[i][0]} (n={cats[i][2]:,})", visible=name == next(iter(sets))), row=1, col=1)
-    steps, legend_colors = [], [t.marker.color for t in fig.data[n_data:]]
-    for name, (codes, cats) in sets.items():
-        visible = [True] * n_data + [i in legend_idx[name] for i in range(n_data, len(fig.data))]
-        steps.append(dict(label=name, method="update", args=[{"visible": visible, "marker.color": [codes] * n_data + legend_colors, "marker.colorscale": [colorscale(cats)] * len(fig.data), "marker.cmax": [len(cats) - 0.5] * len(fig.data)}, {}]))
-    if control == "buttons":
-        fig.update_layout(updatemenus=[dict(type="buttons", direction="right", buttons=steps, x=0.5, xanchor="center", y=1.08, yanchor="bottom", font=dict(size=FONT_LEGEND), showactive=True)])
-    else:
-        fig.update_layout(sliders=[dict(active=0, steps=steps, currentvalue=dict(prefix="HDBSCAN min_cluster_size: ", font=dict(size=FONT_LEGEND)), pad=dict(t=10), x=0.15, len=0.7, y=1.02, yanchor="bottom", font=dict(size=FONT_TICK))])
-    axis = dict(backgroundcolor="white", showbackground=True, showline=True, linecolor=LINE_COLOR, gridcolor="#DDDDDD", zerolinecolor="#BBBBBB", tickfont=dict(size=FONT_TICK, family=FONT_FAMILY))
-    for col, m in enumerate(coords, 1):
-        fig.update_layout({f"scene{'' if col == 1 else col}": {f"{ax}axis": dict(title=f"{METHODS[m]}-{i + 1}", **axis) for i, ax in enumerate("xyz")} | {"aspectmode": "cube"}})
-    fig.update_layout(title=dict(text=title, x=0.5, font=dict(size=FONT_TITLE)), width=FIGURE_WIDTH, height=FIGURE_HEIGHT, paper_bgcolor="white", hovermode="closest", font=dict(size=FONT_TICK, family=FONT_FAMILY, color="#222222"), margin=dict(l=10, r=10, t=140, b=10), legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.02, yanchor="top", font=dict(size=FONT_LEGEND), itemsizing="constant"))
-    fig.update_annotations(font=dict(size=FONT_TITLE, family=FONT_FAMILY))
-    return fig
+    config = dict(alpha=ALPHA, font_family=FONT_FAMILY, font_legend=FONT_LEGEND, font_tick=FONT_TICK, font_title=FONT_TITLE, marker_size=MARKER_SIZE)
+    cluster_keys = list(LABEL_SETS.values())[1:] + [f"HDBSCAN mcs={mcs}" for mcs in args.mcs_grid]
+    payload = json.dumps(dict(title=title, config=config, hover_keys=list(LABEL_SETS.values()), cluster_keys=cluster_keys, pages=pages), separators=(",", ":")).replace("</", "<\\/")
+    out_fp.write_text(TEMPLATE.read_text().replace("__TITLE__", escape(title), 1).replace("__PLOTLYJS__", get_plotlyjs(), 1).replace("__DATA__", payload, 1), encoding="utf-8")
 ###################################### REPORT
 def interactive(h5ad_path: Path) -> None:
-    """Write the layout and HDBSCAN HTML views of every view of one .h5ad, and the HDBSCAN TSV.
+    """Write the paged HTML viewer of every view of one .h5ad, and the HDBSCAN TSV.
 
     Args:
         h5ad_path (Path): .h5ad written by npz_scanpy.py.
@@ -203,7 +171,7 @@ def interactive(h5ad_path: Path) -> None:
     param_tag, views = head.uns["param_tag"], list_views(head.obs, set(head.obsm.keys()))
     head.file.close()
     target_dir = (Path(args.outdir) / h5ad_path.parent.name if args.outdir else h5ad_path.parent) / SUBDIR
-    outs = targets(target_dir, views, param_tag)
+    outs = targets(target_dir, param_tag)
     if not views:
         print(f"[PYTHON-INFO] {h5ad_path.name}: no {DIM}D UMAP/t-SNE layouts. Skipping.")
         return
@@ -212,7 +180,7 @@ def interactive(h5ad_path: Path) -> None:
         return
     target_dir.mkdir(parents=True, exist_ok=True)
     adata = ad.read_h5ad(h5ad_path)
-    obs, rng, rows, names = adata.obs.astype({"species": str}), np.random.default_rng(SEED), [], species_names()
+    obs, rng, rows, pages, names = adata.obs.astype({"species": str}), np.random.default_rng(SEED), [], [], species_names()
     for view in tqdm(views, desc=f"{h5ad_path.parent.name} views"):
         mask = np.ones(adata.n_obs, dtype=bool) if view == "joint" else (obs["species"] == view).values
         suffix = "" if view == "joint" else "_intra"
@@ -221,22 +189,15 @@ def interactive(h5ad_path: Path) -> None:
         vobs["species"] = vobs["species"].map(lambda s: names.get(s, s))
         intra = vobs["species"] + ":" + vobs["intra_cluster"].astype(str) if view == "joint" else vobs["intra_cluster"]
         intra = intra.where(vobs["intra_cluster"].notna())
-        hover = np.column_stack([vobs["protein_id"].astype(str), vobs["species"], vobs["cluster"].astype(str), intra.astype(str)])
         hd = {mcs: fit_hdbscan_auto(coords["umap"], mcs) for mcs in tqdm(args.mcs_grid, desc=f"{view} HDBSCAN", leave=False)}
         rows.append(pd.DataFrame({"protein_id": vobs["protein_id"].astype(str), "species": vobs["species"], "view": view} | {f"mcs_{mcs}": lab for mcs, lab in hd.items()}))
         keep = np.sort(rng.choice(len(vobs), args.max_points, replace=False)) if args.max_points and len(vobs) > args.max_points else np.arange(len(vobs))
-        sub = {m: c[keep] for m, c in coords.items()}
         series = {"species": vobs["species"], "cluster": vobs["cluster"], "intra_cluster": intra}
-        layout_sets = {k: categories(series[k]) for k in COLOR_BY if not (view != "joint" and k == "species")}
-        layout_sets = {k: (codes[keep], cats) for k, (codes, cats) in layout_sets.items()}
-        hd_sets = {}
-        for mcs, lab in hd.items():
-            codes, cats = categories(pd.Series(np.where(lab > 0, [f"U-{x:02d}" for x in lab], None)))
-            hd_sets[str(mcs)] = (codes[keep], cats)
-        title = f"{h5ad_path.parent.name} | {names.get(view, view) if view != 'joint' else 'all species'} | {param_tag}" + (f" | {len(keep):,}/{len(vobs):,} points shown" if len(keep) < len(vobs) else f" | {len(vobs):,} points")
-        build_figure(sub, hover[keep], layout_sets, title, "buttons").write_html(outs[f"{view}|layouts"], include_plotlyjs="cdn")
-        build_figure(sub, hover[keep], hd_sets, f"HDBSCAN on {DIM}D UMAP | {title}", "slider").write_html(outs[f"{view}|hdbscan"], include_plotlyjs="cdn")
-        print(f"[PYTHON-INFO][SAVE] {outs[f'{view}|layouts']} and {outs[f'{view}|hdbscan'].name}")
+        sets = {LABEL_SETS[k]: categories(series[k]) for k in LABEL_SETS} | {f"HDBSCAN mcs={mcs}": categories(pd.Series(np.where(lab > 0, [f"U-{x:02d}" for x in lab], None))) for mcs, lab in hd.items()}
+        points = f"{len(keep):,}/{len(vobs):,} points shown" if len(keep) < len(vobs) else f"{len(vobs):,} points"
+        pages.append(dict(title="All species" if view == "joint" else names.get(view, view), subtitle=f"{h5ad_path.parent.name} · {param_tag} · {points}", slug=f"{view}_{param_tag}", methods=[[m, t] for m, t in METHODS.items()], coords={m: encode(c[keep], np.float32) for m, c in coords.items()}, ids="\n".join(vobs["protein_id"].astype(str).values[keep]), sets={k: dict(codes=encode(codes[keep], np.uint16), cats=cats) for k, (codes, cats) in sets.items()}))
+    write_views(pages, f"{h5ad_path.parent.name} · {param_tag} · 3D views", outs["html"])
+    print(f"[PYTHON-INFO][SAVE] {outs['html']} ({len(pages)} pages, {outs['html'].stat().st_size / 1e6:.1f} MB)")
     pd.concat(rows, ignore_index=True).to_csv(outs["tsv"], sep="\t", index=False)
     print(f"[PYTHON-INFO][SAVE] {outs['tsv']}")
 ###################################### MAIN
