@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Writes one paged, self-contained 3D HTML viewer of the UMAP and t-SNE layouts saved by npz_scanpy.py, plus the HDBSCAN labels of the 3D UMAP.
 
-Per .h5ad a single HTML file is saved under ``<run>/interactive/`` with one page for the joint view and one per species (intra view), browsed with arrows, a page menu or the arrow keys. Every page shows side-by-side 3D UMAP and t-SNE panels and a species/cluster switch; the cluster labels are chosen among Leiden, intra-species and HDBSCAN fitted on the 3D UMAP for every min_cluster_size of ``--mcs_grid``. The legend hides or isolates groups. The HDBSCAN labels of all views are also written to one TSV per .h5ad. An .h5ad whose outputs all exist is skipped unless ``--overwrite`` is set.
+Per .h5ad a single HTML file is saved under ``<run>/interactive/`` with one page for the joint view and one per species (intra view), browsed with arrows, a page menu or the arrow keys. Every page shows side-by-side 3D UMAP and t-SNE panels and a species/cluster switch; the cluster labels are chosen among Leiden, intra-species and HDBSCAN fitted on the 3D UMAP for every min_cluster_size of ``--mcs_grid``. Inter-species clusters (Leiden, joint HDBSCAN) are named by upper-case letters (A, B, ..., AA) and intra-species clusters (intra Leiden, per-species HDBSCAN) by zero-padded numbers (001, 002, ...). A left sidebar holds species and cluster checklists, combined to select which points are drawn. The HDBSCAN labels of all views are also written to one TSV per .h5ad. An .h5ad whose outputs all exist is skipped unless ``--overwrite`` is set.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -79,6 +79,16 @@ def species_names() -> dict[str, str]:
     df = pd.read_csv(tsv, sep="\t", dtype=str) if tsv.exists() else pd.DataFrame(columns=["label"])
     names = df["exact_species"] if "exact_species" in df else df["label"]
     return {lbl: (nm if pd.notna(nm) and str(nm).strip() else lbl) for lbl, nm in zip(df["label"], names) if pd.notna(lbl)}
+def letter(i: int) -> str:
+    """Name a 0-based inter-species cluster index by upper-case letters, spreadsheet-style (0 -> A, 26 -> AA).
+
+    Args:
+        i (int): 0-based cluster index.
+
+    Returns:
+        str: Letter name.
+    """
+    return (letter(i // 26 - 1) if i >= 26 else "") + chr(65 + i % 26)
 def list_views(obs: pd.DataFrame, keys: set[str]) -> list[str]:
     """List the joint view and every species with 3D intra layouts of all methods.
 
@@ -187,13 +197,14 @@ def interactive(h5ad_path: Path) -> None:
         coords = {m: np.asarray(adata.obsm[f"X_{m}_{DIM}d{suffix}"][mask], dtype=np.float64) for m in METHODS}
         vobs = obs[mask].reset_index(drop=True)
         vobs["species"] = vobs["species"].map(lambda s: names.get(s, s))
-        intra = vobs["species"] + ":" + vobs["intra_cluster"].astype(str) if view == "joint" else vobs["intra_cluster"]
-        intra = intra.where(vobs["intra_cluster"].notna())
+        intra = vobs["intra_cluster"].astype("object").map(lambda c: f"{int(c) + 1:03d}" if pd.notna(c) and str(c) != "nan" else None)
+        intra = (vobs["species"] + " · " + intra).where(intra.notna()) if view == "joint" else intra
+        hd_name = (lambda x: letter(x - 1)) if view == "joint" else (lambda x: f"{x:03d}")
         hd = {mcs: fit_hdbscan_auto(coords["umap"], mcs) for mcs in tqdm(args.mcs_grid, desc=f"{view} HDBSCAN", leave=False)}
         rows.append(pd.DataFrame({"protein_id": vobs["protein_id"].astype(str), "species": vobs["species"], "view": view} | {f"mcs_{mcs}": lab for mcs, lab in hd.items()}))
         keep = np.sort(rng.choice(len(vobs), args.max_points, replace=False)) if args.max_points and len(vobs) > args.max_points else np.arange(len(vobs))
-        series = {"species": vobs["species"], "cluster": vobs["cluster"], "intra_cluster": intra}
-        sets = {LABEL_SETS[k]: categories(series[k]) for k in LABEL_SETS} | {f"HDBSCAN mcs={mcs}": categories(pd.Series(np.where(lab > 0, [f"U-{x:02d}" for x in lab], None))) for mcs, lab in hd.items()}
+        series = {"species": vobs["species"], "cluster": vobs["cluster"].map(lambda c: letter(int(c))), "intra_cluster": intra}
+        sets = {LABEL_SETS[k]: categories(series[k]) for k in LABEL_SETS} | {f"HDBSCAN mcs={mcs}": categories(pd.Series([hd_name(int(x)) if x > 0 else None for x in lab], dtype="object")) for mcs, lab in hd.items()}
         points = f"{len(keep):,}/{len(vobs):,} points shown" if len(keep) < len(vobs) else f"{len(vobs):,} points"
         pages.append(dict(title="All species" if view == "joint" else names.get(view, view), subtitle=f"{h5ad_path.parent.name} · {param_tag} · {points}", slug=f"{view}_{param_tag}", methods=[[m, t] for m, t in METHODS.items()], coords={m: encode(c[keep], np.float32) for m, c in coords.items()}, ids="\n".join(vobs["protein_id"].astype(str).values[keep]), sets={k: dict(codes=encode(codes[keep], np.uint16), cats=cats) for k, (codes, cats) in sets.items()}))
     write_views(pages, f"{h5ad_path.parent.name} · {param_tag} · 3D views", outs["html"])
