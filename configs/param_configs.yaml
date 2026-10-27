@@ -58,6 +58,7 @@ h5ad_scanpy:
   min_balance: 0.6
   min_module_size: 200
   min_percent_enrichment: 80
+  anova_alpha: 0.05
   overwrite: false
 h5ad_interactive:
   mcs_grid:
