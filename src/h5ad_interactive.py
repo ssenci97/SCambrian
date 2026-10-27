@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Writes one paged, self-contained 3D HTML viewer of the UMAP and t-SNE layouts saved by npz_scanpy.py, plus the HDBSCAN labels of the 3D UMAP.
 
-Per .h5ad a single HTML file is saved under ``<run>/interactive/`` with one page for the joint view and one per species (intra view), browsed with arrows, a page menu or the arrow keys. Every page shows side-by-side 3D UMAP and t-SNE panels and a species/cluster switch; the cluster labels are chosen among Leiden, intra-species and HDBSCAN fitted on the 3D UMAP for every min_cluster_size of ``--mcs_grid``. Inter-species clusters (Leiden, joint HDBSCAN) are named by upper-case letters (A, B, ..., AA) and intra-species clusters (intra Leiden, per-species HDBSCAN) by zero-padded numbers (001, 002, ...). Balanced inter-species clusters, read from the species_cluster_enrichment table of h5ad_scanpy.py, are starred in the barplot, and the one-way ANOVA q-value of every inter-species cluster, read from the same table, is shown as significance asterisks (* q<0.05, ** q<0.01, *** q<0.001, ns) over its stacked bar in the joint view. A left sidebar holds species and cluster checklists, combined to select which points are drawn, and a stacked barplot on top shows the protein count of every inter-species cluster per species. The camera is kept across all changes until reset. The HDBSCAN labels of all views are also written to one TSV per .h5ad. An .h5ad whose outputs all exist is skipped unless ``--overwrite`` is set.
+Per .h5ad a single HTML file is saved under ``<run>/interactive/`` with one page for the joint view and one per species (intra view), browsed with arrows, a page menu or the arrow keys. Every page shows side-by-side 3D UMAP and t-SNE panels and a species/cluster switch; the cluster labels are chosen among Leiden, intra-species and HDBSCAN fitted on the 3D UMAP for every min_cluster_size of ``--mcs_grid``. Inter-species clusters (Leiden, joint HDBSCAN) are named by upper-case letters (A, B, ..., AA) and intra-species clusters (intra Leiden, per-species HDBSCAN) by zero-padded numbers (001, 002, ...). Balanced inter-species clusters, read from the species_cluster_enrichment table of h5ad_scanpy.py, are starred in the barplot, and the one-way ANOVA q-value of every inter-species cluster, read from the same table, is shown as significance asterisks (* q<0.05, ** q<0.01, *** q<0.001, ns) over its stacked bar in the joint view. A left sidebar holds species and cluster checklists, combined to select which points are drawn, and a stacked barplot on top shows the protein count of every inter-species cluster per species. The camera is kept across all changes until reset. The HDBSCAN labels of all views are also written to one TSV per .h5ad. An .h5ad whose outputs all exist and are newer than this script, its template, the .h5ad and the enrichment table is skipped unless ``--overwrite`` is set.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -186,13 +186,14 @@ def interactive(h5ad_path: Path) -> None:
     if not views:
         print(f"[PYTHON-INFO] {h5ad_path.name}: no {DIM}D UMAP/t-SNE layouts. Skipping.")
         return
-    if not args.overwrite and all(p.exists() for p in outs.values()):
-        print(f"[PYTHON-INFO] {h5ad_path.name}: all {len(outs)} outputs already exist in {target_dir}. Skipping.")
+    enr_fp = target_dir.parent / f"species_cluster_enrichment__{param_tag}.csv"
+    src_mtime = max(fp.stat().st_mtime for fp in (Path(__file__), TEMPLATE, h5ad_path, enr_fp) if fp.exists())
+    if not args.overwrite and all(p.exists() and p.stat().st_mtime > src_mtime for p in outs.values()):
+        print(f"[PYTHON-INFO] {h5ad_path.name}: all {len(outs)} outputs already exist in {target_dir} and are newer than their inputs. Skipping.")
         return
     target_dir.mkdir(parents=True, exist_ok=True)
     adata = ad.read_h5ad(h5ad_path)
     obs, rng, rows, pages, names = adata.obs.astype({"species": str}), np.random.default_rng(SEED), [], [], species_names()
-    enr_fp = target_dir.parent / f"species_cluster_enrichment__{param_tag}.csv"
     enr = pd.read_csv(enr_fp).drop_duplicates("cluster") if enr_fp.exists() else pd.DataFrame(columns=["cluster", "balanced", "anova_q"])
     balanced = {letter(int(c)) for c in enr.loc[enr["balanced"].astype(bool), "cluster"]}
     stars = {letter(int(c)): next((st for cut, st in SIG_LEVELS if q < cut), "ns") for c, q in zip(enr["cluster"], enr["anova_q"] if "anova_q" in enr else []) if pd.notna(q)}
