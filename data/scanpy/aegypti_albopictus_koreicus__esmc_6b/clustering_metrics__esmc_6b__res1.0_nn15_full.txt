@@ -1,4 +1,0 @@
-intra_silhouette_aegypti: -0.09888868033885956
-intra_silhouette_albopictus: -0.035818375647068024
-intra_silhouette_koreicus: -0.041602686047554016
-joint_silhouette_full: -0.14630714058876038
