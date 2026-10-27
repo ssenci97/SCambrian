@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Reports the joint and intra-species clusters saved by npz_scanpy.py: tables, protein modules, cluster panels, intra-to-inter cluster flux diagrams and a merged PDF.
 
-Only the .h5ad is read, so no clustering or embedding is recomputed except the re-projection of the top joint clusters. The report panels, each A4/4 wide, are drawn for every method in ``--methods`` (UMAP and t-SNE, 2D layouts): (a) intra-species layouts with all clusters with more than MIN_INTRA_SIZE proteins coloured by protein count, (b) joint layouts coloured by cluster specificity index, labelling per species the MAX_JOINT_LABELS most specific joint clusters with more than MIN_JOINT_SIZE proteins of that species, drawn on top of the others and named by lowercase letters assigned once and shared by all panels, where only joint clusters whose per-protein cluster membership differs across species by one-way ANOVA (BH q < ANOVA_ALPHA) can be labelled, then once: (c) a re-projected UMAP of all proteins of those top joint clusters, optimised on the stored joint kNN graph restricted to them and coloured by cluster, (d) intra-to-top-joint cluster fluxes on a square-root (semi-quantitative) scale, with joint cluster nodes and flows coloured by specificity index and outlined in black above MIN_PERCENT_ENRICHMENT, where intra clusters inherit a cluster colour only when a strict majority of their proteins flows into it, and (e) a per-species protein-count barplot of the top joint clusters with ANOVA significance asterisks in one aligned row over the significant clusters. A report whose outputs all exist and are newer than both this script and the .h5ad is skipped unless ``--overwrite`` is set. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
+Only the .h5ad is read, so no clustering or embedding is recomputed except the re-projection of the top joint clusters. The report panels, each A4/4 wide, are drawn for every method in ``--methods`` (UMAP and t-SNE, 2D layouts): (a) intra-species layouts with all clusters with more than MIN_INTRA_SIZE proteins coloured by protein count, (b) joint layouts coloured by cluster specificity index, labelling per species the MAX_JOINT_LABELS most specific joint clusters with more than MIN_JOINT_SIZE proteins of that species, drawn on top of the others and named by lowercase letters assigned once and shared by all panels, where only joint clusters whose per-protein cluster membership differs across species by one-way ANOVA (BH q < ANOVA_ALPHA) can be labelled, then once: (c) a re-projected UMAP of all proteins of those top joint clusters, optimised on the stored joint kNN graph restricted to them and coloured by cluster, (d) intra-to-top-joint cluster fluxes on a square-root (semi-quantitative) scale, with joint cluster nodes and flows coloured by specificity index and outlined in black above MIN_PERCENT_ENRICHMENT, where intra clusters inherit a cluster colour only when a strict majority of their proteins flows into it, and (e) a per-species protein-count barplot of the top joint clusters with ANOVA significance asterisks stacked vertically over the bars of the significant clusters. A report whose outputs all exist and are newer than both this script and the .h5ad is skipped unless ``--overwrite`` is set. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -68,7 +68,8 @@ REPORT_ORDER = ["umap_intra_species_top_clusters", "tsne_intra_species_top_clust
 SANKEY_HEIGHT_SCALE = 3.0
 SEED = 42
 SIG_LEVELS = [(0.001, "***"), (0.01, "**"), (0.05, "*")]
-STAR_HEADROOM = 0.15
+STAR_HEADROOM = 0.35
+STAR_LINESPACING = 0.55
 YAML_PATH = "configs/param_configs.yaml"
 ###################################### CONFIG_AND_PARSER
 parser = argparse.ArgumentParser(description="ESMC Proteome Cluster Report")
@@ -304,7 +305,7 @@ def draw_flux(ax: plt.Axes, flows: pd.DataFrame, left_colors: dict[str, str], ri
     ax.axis("off")
     ax.set_title(title, fontsize=FONT_FACET * FLUX_FONT_SCALE, fontweight="bold", pad=2)
 def plot_counts_bar(top_counts: pd.DataFrame, species_list: list[str], stars: pd.Series, title: str, path: Path) -> None:
-    """Plot per-species protein counts of the top joint clusters with ANOVA significance asterisks in one aligned row over the significant clusters.
+    """Plot per-species protein counts of the top joint clusters with ANOVA significance asterisks stacked vertically over the bars of the significant clusters.
 
     Args:
         top_counts (pd.DataFrame): Protein counts per top joint cluster letter (rows) and species (columns), in plotting order.
@@ -319,9 +320,10 @@ def plot_counts_bar(top_counts: pd.DataFrame, species_list: list[str], stars: pd
     fig, ax = plt.subplots(figsize=fig_size(n_sp), dpi=PANEL_DPI, layout="constrained")
     for i, sp in enumerate(species_list):
         ax.bar(x - 0.4 + width * (i + 0.5), top_counts[sp].values, width=width, color=sp_colors[sp], linewidth=0)
-    ax.set_ylim(0, top_counts[species_list].values.max() * (1 + STAR_HEADROOM))
-    for xi, st in zip(x, stars.reindex(top_counts.index).fillna("")):
-        ax.text(xi, 1 - STAR_HEADROOM / (1 + STAR_HEADROOM) / 2, st, transform=ax.get_xaxis_transform(), fontsize=FONT_STAR, fontweight="bold", ha="center", va="center_baseline")
+    group_max = top_counts[species_list].max(axis=1).values
+    ax.set_ylim(0, group_max.max() * (1 + STAR_HEADROOM))
+    for xi, ymax, st in zip(x, group_max, stars.reindex(top_counts.index).fillna("")):
+        ax.annotate("\n".join(st), (xi, ymax), xytext=(0, 1), textcoords="offset points", fontsize=FONT_STAR, fontweight="bold", ha="center", va="bottom", linespacing=STAR_LINESPACING)
     ax.set_xticks(x)
     ax.set_xticklabels(top_counts.index, fontsize=FONT_LABEL)
     ax.tick_params(axis="y", labelsize=FONT_TICK)
