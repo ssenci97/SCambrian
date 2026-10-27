@@ -9,8 +9,6 @@
 #SBATCH --job-name=ESMC
 #SBATCH --output=logs/ESMC/ESMC_%A_%a.log
 #SBATCH --array=0-11%2
-# one task per (file, model): task = file_idx * n_models + model_idx, files = every *_dedup.fasta in dedup dir
-# default above is a fallback; slurms/run_all.sh sets --array from the dedup dir contents
 #SBATCH --open-mode=append
 ###################################### env
 module purge
@@ -34,9 +32,9 @@ eval "$(python3 -c '
 import yaml
 with open("configs/param_configs.yaml") as f:
     d = yaml.safe_load(f)
-dedup = d.get("run_mmseqs2", {}).get("dedup_out_dir", "data/dedup")
-reps_dir = d.get("extract_reps_biohub", {}).get("reps_outdir", "data/esm-reps")
-models = d.get("extract_reps_biohub", {}).get("model_name", "esmc_6b")
+dedup = d.get("run_mmseqs2", {}).get("dedup_dir", "data/dedup")
+reps_dir = d.get("extract_reps_biohub", {}).get("embeddings_dir", "data/esm-reps")
+models = d.get("extract_reps_biohub", {}).get("models", "esmc_6b")
 models = [models] if isinstance(models, str) else models
 print("MODELS=(" + " ".join(models) + ")")
 print(f"FASTA_DIR={dedup}")
@@ -82,6 +80,5 @@ echo "[SLURM-INFO] Target reps output: ${REPS_DIR}/${MODEL}/${base_name}_reps.np
 ###################################### run
 START=$(date +%s)
 echo "[SLURM-INFO] Running extract_reps_biohub.py ($MODEL)"
-/usr/bin/time -f "real %e s\nmaxrss %M KB" python src/extract_reps_biohub.py --fasta "$input_file" --model_name "$MODEL" --yaml-in --yaml-out
-END=$(date +%s)
-echo "[SLURM-INFO] Done $(date) elapsed $((END-START))s"
+/usr/bin/time -f "real %e s\nmaxrss %M KB" python src/extract_reps_biohub.py --fasta "$input_file" --models "$MODEL" --yaml-in
+echo "[SLURM-INFO] $(date +'%Y-%m-%d %H:%M:%S') $(( $(date +%s) - START ))s $(free -m | awk 'NR==2 {print $3"MB"}')"

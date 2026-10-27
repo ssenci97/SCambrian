@@ -1,7 +1,4 @@
 #!/bin/bash
-# Submit the pipeline with array sizes derived from the configs, chained with afterok dependencies.
-# Run from the repo root on the login node:  bash slurms/run_all.sh [steps...]   (default: 01 02 03 supp_01 supp_02)
-# DRY_RUN=1 prints the sbatch commands without submitting.
 ###################################### constants-and-init
 CONFIG_YAML="configs/param_configs.yaml"
 STEPS=("$@")
@@ -11,16 +8,15 @@ STEPS=("$@")
 eval "$(python3 -c "
 import yaml
 d = yaml.safe_load(open('${CONFIG_YAML}'))
-models = d.get('extract_reps_biohub', {}).get('model_name', 'esmc_6b')
+models = d.get('extract_reps_biohub', {}).get('models', 'esmc_6b')
 models = [models] if isinstance(models, str) else models
-print(f'TSV_PATH={d.get(\"dw_uniprot_seqs\", {}).get(\"config_path\", \"configs/query_configs.tsv\")}')
+print(f'TSV_PATH={d.get(\"dw_uniprot_seqs\", {}).get(\"query_table\", \"configs/query_configs.tsv\")}')
 print(f'N_MODELS={len(models)}')
-print(f'DEDUP_DIR={d.get(\"run_mmseqs2\", {}).get(\"dedup_out_dir\", \"data/dedup\")}')
+print(f'DEDUP_DIR={d.get(\"run_mmseqs2\", {}).get(\"dedup_dir\", \"data/dedup\")}')
 ")"
 [ ! -f "${TSV_PATH}" ] && echo "[SLURM-INFO] Missing TSV file" && exit 1
 N=$(awk -F'\t' '{sub(/\r$/,"")} NR==1{for(i=1;i<=NF;i++)if($i=="label"){col=i;break};next} col&&$col!=""{n++} END{print n+0}' "${TSV_PATH}")
 [ "${N}" -eq 0 ] && echo "[SLURM-INFO] No labels in ${TSV_PATH}" && exit 1
-# files for 03: TSV labels (produced by 02 if chained) + any *_dedup.fasta already in the dedup dir
 N_FILES=$( { awk -F'\t' '{sub(/\r$/,"")} NR==1{for(i=1;i<=NF;i++)if($i=="label"){col=i;break};next} col&&$col!=""{print $col}' "${TSV_PATH}"
   find "${DEDUP_DIR}" -maxdepth 1 -name "*_dedup.fasta" -printf '%f\n' 2>/dev/null | sed 's/_dedup\.fasta$//'; } | sort -u | wc -l)
 echo "[SLURM-INFO] ${N} labels, ${N_FILES} dedup files x ${N_MODELS} models"

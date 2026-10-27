@@ -1,106 +1,128 @@
 #!/usr/bin/env python3
-"""Download UniProt sequences based on generic text queries."""
-import argparse, random, resource, time, urllib.parse, urllib.request, warnings
-from datetime import datetime
+"""Downloads UniProtKB sequences for every row of the query table, or for one ``--query``, as TSV, FASTA and accession list.
+
+Outputs are ``<sequences_dir>/<label>_seqs.tsv``, ``<label>_seqs.fasta`` and ``<label>_ids.txt``. Rows whose query is a local FASTA path (.fa/.faa/.fasta) are skipped here, because slurms/01_dw_uniprot.sh copies them. A label whose three outputs exist is skipped unless ``--overwrite`` is set.
+"""
+###################################### DEPENDENCIES_AND_CONSTANTS
+import argparse
+import datetime
 from io import StringIO
-from pathlib import Path
 import pandas as pd
-import yaml
+from pathlib import Path
+import resource
+import time
 from tqdm import tqdm
-SEED = 42
-random.seed(SEED)
-DEFAULT_CONFIG_PATH = "configs/query_configs.tsv"
-DEFAULT_OUT_DIR = "data/sequences"
-###################################### config
-def load_config(path: Path) -> pd.DataFrame:
-    if path.exists(): return pd.read_csv(path, sep="\t", dtype=str).replace(r"^\s*$", pd.NA, regex=True)
-    print(f"[PYTHON-INFO] Error: Configuration file {path} not found.")
-    raise FileNotFoundError(f"Configuration file {path} not found.")
-###################################### uniprot
+import urllib.parse
+import urllib.request
+import yaml
+FIELDS = ["accession", "sequence", "length"]
+LOCAL_FASTA_SUFFIXES = (".fa", ".faa", ".fasta")
+OVERWRITE = False
+PROBE_ACCESSION = "A0A0R4I9Y1"
+QUERY_TABLE = "configs/query_configs.tsv"
+SEQUENCES_DIR = "data/sequences"
+UNIPROT_STREAM_URL = "https://rest.uniprot.org/uniprotkb/stream"
+YAML_PATH = "configs/param_configs.yaml"
+###################################### CONFIG_AND_PARSER
+parser = argparse.ArgumentParser(description="Download UniProtKB sequences")
+parser.add_argument("--query", default=None, help="Single UniProtKB query; when omitted every row of the query table is downloaded")
+parser.add_argument("--label", default=None, help="Label of --query, or the only table row to download")
+parser.add_argument("--out_tsv", type=Path, default=None, help="Output TSV path (default <sequences_dir>/<label>_seqs.tsv)")
+parser.add_argument("--out_fasta", type=Path, default=None, help="Output FASTA path (default <sequences_dir>/<label>_seqs.fasta)")
+parser.add_argument("--out_ids", type=Path, default=None, help="Output accession list path (default <sequences_dir>/<label>_ids.txt)")
+parser.add_argument("--query_table", type=str, default=QUERY_TABLE, help="TSV with label, query and exact_species columns")
+parser.add_argument("--sequences_dir", type=str, default=SEQUENCES_DIR, help="Output folder")
+parser.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=OVERWRITE, help="Download again labels whose outputs exist")
+parser.add_argument("--yaml-in", nargs="?", const=YAML_PATH, default=YAML_PATH)
+parser.add_argument("--yaml-out", nargs="?", const=YAML_PATH, default=None)
+cli_preview, _ = parser.parse_known_args()
+script_key = "dw_uniprot_seqs"
+params = dict(query_table=QUERY_TABLE, sequences_dir=SEQUENCES_DIR, overwrite=OVERWRITE)
+if cli_preview.yaml_in and Path(cli_preview.yaml_in).exists():
+    config_data = yaml.safe_load(Path(cli_preview.yaml_in).read_text()) or {}
+    if script_key in config_data: params.update(config_data[script_key])
+parser.set_defaults(**params)
+args = parser.parse_args()
+if args.yaml_out:
+    config_data = yaml.safe_load(Path(args.yaml_out).read_text()) if Path(args.yaml_out).exists() else {}
+    config_data[script_key] = {k: getattr(args, k) for k in params}
+    Path(args.yaml_out).parent.mkdir(parents=True, exist_ok=True)
+    Path(args.yaml_out).write_text(yaml.dump(config_data, sort_keys=False))
+###################################### HELPER_FUNCTIONS
 def fetch_uniprot(query: str, fields: list[str]) -> pd.DataFrame:
-    url = f"https://rest.uniprot.org/uniprotkb/stream?query={urllib.parse.quote(query, safe='')}&format=tsv&fields={','.join(fields)}"
-    print(f"[PYTHON-INFO] Query sequence URL: {url}")
-    with urllib.request.urlopen(url) as resp: return pd.read_csv(StringIO(resp.read().decode("utf-8")), sep="\t")
-def get_feature_map(fields: list[str]) -> dict[str, str]:
-    mock = fetch_uniprot("(accession:A0A0R4I9Y1)", fields)
-    return dict(zip(mock.columns, fields))
-###################################### io
-def save_tsv(df: pd.DataFrame, path: Path) -> None:
-    if path.exists(): warnings.warn(f"Overwriting existing file: {path}", UserWarning)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, sep="\t", index=False)
-def save_fasta(df: pd.DataFrame, path: Path) -> None:
-    if path.exists(): warnings.warn(f"Overwriting existing file: {path}", UserWarning)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        for _, row in df.iterrows():
-            if pd.notna(row.get("accession")) and pd.notna(row.get("sequence")):
-                acc, seq = str(row["accession"]).strip(), str(row["sequence"]).strip()
-                f.write(f"{acc if acc.startswith('>') else f'>{acc}'}\n{seq}\n")
-def save_ids(df: pd.DataFrame, path: Path) -> None:
-    if path.exists(): warnings.warn(f"Overwriting existing file: {path}", UserWarning)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if "accession" in df.columns:
-        ids = df["accession"].dropna().astype(str).str.strip()
-        path.write_text("\n".join(ids) + ("\n" if not ids.empty else ""), encoding="utf-8")
-###################################### main
+    """Stream the UniProtKB entries matching a query as a table.
+
+    Args:
+        query (str): UniProtKB query string.
+        fields (list[str]): UniProtKB return fields.
+
+    Returns:
+        pd.DataFrame: One row per entry, with UniProt's display headers as columns.
+    """
+    url = f"{UNIPROT_STREAM_URL}?query={urllib.parse.quote(query, safe='')}&format=tsv&fields={','.join(fields)}"
+    print(f"[PYTHON-INFO] Query URL: {url}")
+    with urllib.request.urlopen(url) as response:
+        return pd.read_csv(StringIO(response.read().decode("utf-8")), sep="\t")
+def uniprot_column_names(fields: list[str]) -> dict[str, str]:
+    """Map UniProt's display headers to the requested field names, by fetching one probe entry.
+
+    Args:
+        fields (list[str]): UniProtKB return fields.
+
+    Returns:
+        dict[str, str]: Display header -> field name.
+    """
+    return dict(zip(fetch_uniprot(f"(accession:{PROBE_ACCESSION})", fields).columns, fields))
+def query_jobs() -> list[tuple[str, str]]:
+    """List the (label, query) pairs to download: ``--query`` alone, or the table rows filtered by ``--label``.
+
+    Returns:
+        list[tuple[str, str]]: Label and UniProtKB query per download.
+    """
+    if args.query: return [(args.label or "query", args.query)]
+    table = pd.read_csv(args.query_table, sep="\t", dtype=str).replace(r"^\s*$", pd.NA, regex=True)
+    jobs = []
+    for row in table.to_dict("records"):
+        label, query = row.get("label"), row.get("query")
+        if args.label and label != args.label: continue
+        if pd.isna(query): raise ValueError(f"[PYTHON-ERROR] Query missing for label '{label}' in {args.query_table}.")
+        if str(query).strip().endswith(LOCAL_FASTA_SUFFIXES):
+            print(f"[PYTHON-INFO] '{label}' is a local FASTA source, copied by slurms/01_dw_uniprot.sh. Skipping.")
+            continue
+        jobs.append((label, str(query).strip()))
+    return jobs
+def save_outputs(records: pd.DataFrame, out_tsv: Path, out_fasta: Path, out_ids: Path) -> None:
+    """Write the downloaded entries as TSV, FASTA and accession list.
+
+    Args:
+        records (pd.DataFrame): Entries with accession and sequence columns.
+        out_tsv (Path): TSV output.
+        out_fasta (Path): FASTA output.
+        out_ids (Path): Accession list output.
+    """
+    for path in (out_tsv, out_fasta, out_ids):
+        if path.exists(): print(f"[PYTHON-INFO] Overwriting {path}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+    records.to_csv(out_tsv, sep="\t", index=False)
+    complete = records.dropna(subset=["accession", "sequence"])
+    accessions, sequences = complete["accession"].astype(str).str.strip().str.lstrip(">"), complete["sequence"].astype(str).str.strip()
+    out_fasta.write_text("".join(f">{acc}\n{seq}\n" for acc, seq in zip(accessions, sequences)), encoding="utf-8")
+    out_ids.write_text("".join(f"{acc}\n" for acc in records["accession"].dropna().astype(str).str.strip()), encoding="utf-8")
+###################################### MAIN
 def main() -> None:
+    """Download the sequences of every requested label."""
     start_time = time.time()
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--query", default=None)
-    parser.add_argument("--label", default="example")
-    parser.add_argument("--fp_seqs", type=Path)
-    parser.add_argument("--fp_fasta", type=Path)
-    parser.add_argument("--fp_ids", type=Path)
-    parser.add_argument("--overwrite", action="store_true")
-    parser.add_argument("--yaml-in", nargs="?", const=Path("configs/param_configs.yaml"), type=Path, default=Path("configs/param_configs.yaml"))
-    parser.add_argument("--yaml-out", nargs="?", const=Path("configs/param_configs.yaml"), type=Path)
-    args = parser.parse_args()
-    script_name = Path(__file__).stem
-    params = {"config_path": DEFAULT_CONFIG_PATH, "seq_out_dir": DEFAULT_OUT_DIR, "overwrite": False}
-    if args.yaml_in and args.yaml_in.exists():
-        data = yaml.safe_load(args.yaml_in.read_text())
-        if isinstance(data, dict) and script_name in data:
-            params.update(data[script_name])
-    params["overwrite"] = bool(params["overwrite"] or args.overwrite)
-    if args.yaml_out:
-        yaml_out_path = args.yaml_out if isinstance(args.yaml_out, Path) else Path("configs/param_configs.yaml")
-        yaml_out_path.parent.mkdir(parents=True, exist_ok=True)
-        data = yaml.safe_load(yaml_out_path.read_text()) if yaml_out_path.exists() else {}
-        if not isinstance(data, dict): data = {}
-        data[script_name] = params
-        yaml_out_path.write_text(yaml.dump(data, default_flow_style=False))
-    config_path = Path(params["config_path"])
-    out_dir = Path(params["seq_out_dir"])
-    fields = ["accession", "sequence", "length"]
-    feature_map = get_feature_map(fields)
-    if args.query:
-        fps = [args.fp_seqs or (out_dir / f"{args.label}_seqs.tsv"), args.fp_fasta or (out_dir / f"{args.label}_seqs.fasta"), args.fp_ids or (out_dir / f"{args.label}_ids.txt")]
-        if not params["overwrite"] and all(p.exists() for p in fps): print(f"[PYTHON-INFO] Sequences of '{args.label}' already exist. Skipping.")
-        else:
-            df_sub = fetch_uniprot(args.query, fields).rename(columns=feature_map)
-            save_tsv(df_sub, fps[0])
-            save_fasta(df_sub, fps[1])
-            save_ids(df_sub, fps[2])
-    else:
-        df_config = load_config(config_path)
-        if df_config.empty:
-            print("[PYTHON-INFO] Error: Configuration file is empty.")
-            raise ValueError("Configuration file is empty.")
-        for item in tqdm(df_config.to_dict("records"), desc="Processing queries"):
-            q_val, lbl = item.get("query"), item.get("label", "example")
-            if args.label and lbl != args.label: continue
-            if pd.isna(q_val) or not str(q_val).strip():
-                print(f"[PYTHON-INFO] Error: query missing for label '{lbl}'.")
-                raise ValueError(f"query missing for label '{lbl}'.")
-            fps = [args.fp_seqs or (out_dir / f"{lbl}_seqs.tsv"), args.fp_fasta or (out_dir / f"{lbl}_seqs.fasta"), args.fp_ids or (out_dir / f"{lbl}_ids.txt")]
-            if not params["overwrite"] and all(p.exists() for p in fps):
-                print(f"[PYTHON-INFO] Sequences of '{lbl}' already exist. Skipping.")
-                continue
-            df_sub = fetch_uniprot(str(q_val).strip(), fields).rename(columns=feature_map)
-            save_tsv(df_sub, fps[0])
-            save_fasta(df_sub, fps[1])
-            save_ids(df_sub, fps[2])
-    exec_time, max_mem, dt = f"{time.time() - start_time:.2f}s", f"{resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024:.2f}MB", datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"[PYTHON-INFO] {dt} {exec_time} {max_mem}")
-if __name__ == "__main__": main()
+    column_names = uniprot_column_names(FIELDS)
+    for label, query in tqdm(query_jobs(), desc="Sequence downloads"):
+        out_dir = Path(args.sequences_dir)
+        out_paths = (args.out_tsv or out_dir / f"{label}_seqs.tsv", args.out_fasta or out_dir / f"{label}_seqs.fasta", args.out_ids or out_dir / f"{label}_ids.txt")
+        if not args.overwrite and all(p.exists() for p in out_paths):
+            print(f"[PYTHON-INFO] Sequences of '{label}' already exist. Skipping.")
+            continue
+        records = fetch_uniprot(query, FIELDS).rename(columns=column_names)
+        save_outputs(records, *out_paths)
+        print(f"[PYTHON-INFO][SAVE] {label}: {len(records):,} entries -> {out_paths[1]}")
+    max_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    print(f"[PYTHON-INFO] {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {time.time() - start_time:.2f}s {max_mem:.2f}MB")
+if __name__ == "__main__":
+    main()
