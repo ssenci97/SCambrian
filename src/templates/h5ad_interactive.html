@@ -34,12 +34,22 @@ button:disabled,select:disabled{opacity:.4;cursor:default}
 main{flex:1;display:grid;grid-template-columns:clamp(250px,19vw,320px) minmax(0,1fr);grid-template-rows:minmax(0,1fr);min-height:0;padding:8px 10px;gap:8px}
 aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 10px;overflow:auto;min-height:0;display:flex;flex-direction:column;gap:10px}
 .right{display:flex;flex-direction:column;gap:8px;min-height:0;min-width:0}
-#barsBox{position:relative;flex:none;height:clamp(200px,27vh,300px);background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+#barsBox{position:relative;flex:1;min-height:0;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 #bars{position:absolute;inset:6px 10px 4px 6px}
 .stage{position:relative;flex:1;min-height:0;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 #plot{position:absolute;inset:0}
 #busy{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:var(--busy);color:var(--muted);font-size:16px;z-index:5}
 .stage.loading #busy{display:flex}
+.right>[hidden]{display:none!important}
+.seg{gap:0}
+.seg button{border-radius:0;margin-left:-1px}
+.seg button:first-child{border-radius:8px 0 0 8px;margin-left:0}
+.seg button:last-child{border-radius:0 8px 8px 0}
+.seg button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.ctl{display:flex;flex:none;flex-wrap:wrap;gap:6px 14px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:6px 10px;color:var(--muted)}
+.ctl select{padding:3px 6px}
+.ctl .sz input{width:110px}
+#pAzV,#pElV{min-width:40px;font-variant-numeric:tabular-nums}
 .muted{color:var(--muted);font-size:12px;line-height:1.35}
 .sec[hidden]{display:none}
 .shead{display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:6px}
@@ -64,7 +74,7 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
 #sizeV{min-width:24px;font-variant-numeric:tabular-nums}
 .found{margin-top:4px;padding:6px 8px;border-radius:8px;background:var(--bg);font-size:13px;word-break:break-all}
 .found[hidden]{display:none}
-@media (max-width:900px){html,body{height:auto}body{overflow:auto}main{grid-template-columns:1fr;grid-template-rows:auto auto}aside{max-height:45vh}.stage{flex:none;height:900px}}
+@media (max-width:900px){html,body{height:auto}body{overflow:auto}main{grid-template-columns:1fr;grid-template-rows:auto auto}aside{max-height:45vh}.stage{flex:none;height:900px}#barsBox{flex:none;height:600px}}
 </style>
 </head>
 <body>
@@ -80,6 +90,7 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
     <label class="switch" title="Toggle colouring (C)"><span id="labS" class="lab">Species</span><input type="checkbox" id="toggle" aria-label="Colour by cluster"><span id="labC" class="lab">Cluster</span></label>
     <select id="clusterSel" aria-label="Cluster labels"></select>
   </div>
+  <div class="group seg" role="group" aria-label="View"><button data-view="3d" title="3D scatter (V cycles views)">3D</button><button data-view="2d" title="2D projection of the 3D layouts">2D</button><button data-view="bars" title="Protein count per inter-species cluster">Bars</button></div>
   <div class="group">
     <label class="sz" title="Point size">Size <input type="range" id="size" min="0.5" max="8" step="0.5"><span id="sizeV"></span></label>
     <button id="reset" title="Reset camera">&#10226; View</button>
@@ -87,12 +98,13 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
 </header>
 <main>
   <aside id="side">
-    <div><div class="find"><input id="find" type="search" placeholder="Find protein ID…" aria-label="Find protein ID" autocomplete="off"><button id="exportIds" title="Download the IDs of the points shown">&#10515; IDs</button></div><div id="linfo" class="muted"></div><div class="muted">click toggles · double-click isolates · click a bar isolates its cluster<br>← → pages · C colouring · L log bars · / find</div><div id="found" class="found" hidden></div></div>
+    <div><div class="find"><input id="find" type="search" placeholder="Find protein ID…" aria-label="Find protein ID" autocomplete="off"><button id="exportIds" title="Download the IDs of the points shown">&#10515; IDs</button></div><div id="linfo" class="muted"></div><div class="muted">click toggles · double-click isolates · click a bar shows its cluster<br>← → pages · V view · C colouring · L log bars · / find</div><div id="found" class="found" hidden></div></div>
     <section class="sec" id="secSp"><div class="shead"><b>Species</b><span><button data-all="sp">All</button> <button data-none="sp">None</button></span></div><input class="q" id="qSp" placeholder="Filter species…" aria-label="Filter species"><div id="listSp"></div></section>
-    <section class="sec" id="secCl"><div class="shead"><b id="clTitle"></b><span><button data-all="cl">All</button> <button data-none="cl">None</button></span></div><input class="q" id="qCl" placeholder="Filter clusters…" aria-label="Filter clusters"><div id="listCl"></div></section>
+    <section class="sec" id="secCl"><div class="shead"><b id="clTitle"></b><span><button id="selBtn" title="Tick only the joint clusters selected by the report (re-projected)">Sel</button> <button data-all="cl">All</button> <button data-none="cl">None</button></span></div><input class="q" id="qCl" placeholder="Filter clusters…" aria-label="Filter clusters"><div id="listCl"></div></section>
   </aside>
   <div class="right">
     <div id="barsBox"><button id="logBtn" class="corner" title="Toggle log scale (L)">log</button><div id="bars"></div></div>
+    <div id="ctl2d" class="ctl" hidden><label>X <select id="pX" aria-label="X dimension"></select></label><label>Y <select id="pY" aria-label="Y dimension"></select></label><label class="sz">Azimuth <input type="range" id="pAz" min="-180" max="180" step="5"><span id="pAzV"></span></label><label class="sz">Elevation <input type="range" id="pEl" min="-90" max="90" step="5"><span id="pElV"></span></label><button id="pDef" title="Dimension 1 vs 2, no rotation">Default</button></div>
     <div class="stage" id="stage"><div id="plot"></div><div id="busy">Rendering…</div></div>
   </div>
 </main>
@@ -101,7 +113,7 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
 <script>
 const D = JSON.parse(document.getElementById("payload").textContent);
 const C = D.config, P = D.pages, $ = id => document.getElementById(id);
-const S = {page: 0, byCluster: false, cluster: D.cluster_keys[0], hidden: {sp: new Set(), cl: new Set()}, q: {sp: "", cl: ""}, size: C.marker_size, rev: 0, cam: {}, stacked: innerWidth < 900, log: false, find: null, keep: []};
+const S = {page: 0, byCluster: false, cluster: D.cluster_keys[0], hidden: {sp: new Set(), cl: new Set()}, q: {sp: "", cl: ""}, size: C.marker_size, rev: 0, cam: {}, stacked: innerWidth < 900, log: false, find: null, keep: [], view: "3d", last: "3d", fit: false, proj: {x: 0, y: 1, az: 0, el: 0}};
 function decode(s, T) { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new T(u.buffer); }
 function page() {
   const p = P[S.page];
@@ -118,32 +130,60 @@ function page() {
 function ranges(c) {
   const r = [0, 1, 2].map(() => [Infinity, -Infinity]);
   for (let i = 0; i < c.length; i++) { const a = r[i % 3], v = c[i]; if (v < a[0]) a[0] = v; if (v > a[1]) a[1] = v; }
-  return r.map(([a, b]) => { const d = (b - a || 1) * 0.02; return [a - d, b + d]; });
+  return r.map(pad);
 }
+function pad([a, b]) { const d = (b - a || 1) * 0.02; return [a - d, b + d]; }
 function key() { return S.byCluster ? S.cluster : "species"; }
 function axis(t, r) { return {range: r, autorange: false, title: {text: t, font: {size: C.font_tick + 1}}, backgroundcolor: "#ffffff", showbackground: true, gridcolor: "#e6e8ec", zerolinecolor: "#c9ced6", showline: true, linecolor: "#3a3f4b", tickfont: {size: C.font_tick}, showspikes: false}; }
+function axis2(t, r, dom, anchor) { return {title: {text: t, font: {size: C.font_tick + 1}}, range: r, autorange: false, domain: dom, anchor, constrain: "domain", zeroline: false, showline: true, mirror: true, linecolor: "#3a3f4b", gridcolor: "#e6e8ec", tickfont: {size: C.font_tick}}; }
 function render() {
-  const p = page(), k = key(), set = p.sets[k], codes = p._s[k], cols = set.cats.map(c => c[1]), keep = [], sp = p._s.species, cl = p._s[S.cluster];
+  const p = page(), k = key(), codes = p._s[k], keep = [], sp = p._s.species, cl = p._s[S.cluster];
   for (let i = 0; i < codes.length; i++) if (!S.hidden.sp.has(sp[i]) && !S.hidden.cl.has(cl[i])) keep.push(i);
-  const extra = D.hover_keys.includes(k) ? null : k, n = p.methods.length;
-  const text = keep.map(i => extra ? p._h[i] + `<br>${extra}: ${set.cats[codes[i]][0]}` : p._h[i]), color = keep.map(i => cols[codes[i]]);
-  const layout = {uirevision: `${S.rev}`, margin: {l: 0, r: 0, t: 36, b: 0}, paper_bgcolor: "rgba(0,0,0,0)", font: {family: C.font_family, size: C.font_tick, color: "#1f2330"}, hoverlabel: {font: {size: 13, family: C.font_family}, bgcolor: "#ffffff", bordercolor: "#c9ced6"}, annotations: []};
-  const traces = p.methods.map(([m, t], j) => {
-    const c = p._c[m], x = new Float32Array(keep.length), y = new Float32Array(keep.length), z = new Float32Array(keep.length), sc = j ? "scene" + (j + 1) : "scene";
-    keep.forEach((i, q) => { x[q] = c[3 * i]; y[q] = c[3 * i + 1]; z[q] = c[3 * i + 2]; });
-    const a = j / n + (j ? 0.005 : 0), b = (j + 1) / n - (j < n - 1 ? 0.005 : 0), dom = S.stacked ? {x: [0, 1], y: [1 - b, 1 - a - (j < n - 1 ? 0.03 : 0)]} : {x: [a, b], y: [0, 1]};
-    layout[sc] = {domain: dom, aspectmode: "cube", xaxis: axis(t + "-1", p._r[m][0]), yaxis: axis(t + "-2", p._r[m][1]), zaxis: axis(t + "-3", p._r[m][2])};
-    if (S.cam[sc]) layout[sc].camera = S.cam[sc];
-    layout.annotations.push({text: `<b>${t}</b>`, showarrow: false, xref: "paper", yref: "paper", x: (dom.x[0] + dom.x[1]) / 2, y: dom.y[1], yanchor: "bottom", font: {size: C.font_title}});
-    return {type: "scatter3d", mode: "markers", x, y, z, text, hovertemplate: "%{text}<extra></extra>", showlegend: false, scene: sc, marker: {size: S.size, opacity: C.alpha, color, line: {width: 0}}};
-  });
-  if (S.find !== null) p.methods.forEach(([m], j) => { const c = p._c[m], f = S.find; traces.push({type: "scatter3d", mode: "markers", x: [c[3 * f]], y: [c[3 * f + 1]], z: [c[3 * f + 2]], text: [p._h[f]], hovertemplate: "%{text}<extra></extra>", showlegend: false, scene: j ? "scene" + (j + 1) : "scene", marker: {size: 14, symbol: "circle-open", color: "#000000", line: {width: 3}}}); });
   S.keep = keep;
-  Plotly.react($("plot"), traces, layout, {responsive: true, displaylogo: false, toImageButtonOptions: {format: "png", scale: 2, filename: `${p.slug}_${k.replace(/\W+/g, "_")}`}});
-  if (!$("plot")._camHook) { $("plot")._camHook = true; $("plot").on("plotly_relayout", e => Object.keys(e).forEach(k => { const m = k.match(/^(scene\d*)\.camera$/); if (m) S.cam[m[1]] = e[k]; })); }
-  bars(p);
+  if (S.view === "bars") bars(p); else plot(p, k, keep);
+  if (S.fit) { S.fit = false; Plotly.Plots.resize(S.view === "bars" ? $("bars") : $("plot")); }
   sidebar(p, keep.length);
   $("stage").classList.remove("loading");
+}
+function project(p, m) {
+  const pr = S.proj, id = `${pr.x}${pr.y}|${pr.az}|${pr.el}`;
+  p._p = p._p || {};
+  if (p._p[m] && p._p[m].id === id) return p._p[m];
+  const c = p._c[m], i = pr.x, j = pr.y, k = 3 - i - j, mid = p._r[m].map(([a, b]) => (a + b) / 2), N = c.length / 3;
+  const th = pr.az * Math.PI / 180, ph = pr.el * Math.PI / 180, ct = Math.cos(th), st = Math.sin(th), cp = Math.cos(ph), sp = Math.sin(ph);
+  const x = new Float32Array(N), y = new Float32Array(N), rx = [Infinity, -Infinity], ry = [Infinity, -Infinity];
+  for (let n = 0; n < N; n++) {
+    const a = c[3 * n + i] - mid[i], b = c[3 * n + j] - mid[j], d = c[3 * n + k] - mid[k];
+    x[n] = a * ct + d * st; y[n] = b * cp + (a * st - d * ct) * sp;
+    if (x[n] < rx[0]) rx[0] = x[n]; if (x[n] > rx[1]) rx[1] = x[n]; if (y[n] < ry[0]) ry[0] = y[n]; if (y[n] > ry[1]) ry[1] = y[n];
+  }
+  return (p._p[m] = {id, x, y, rx: pad(rx), ry: pad(ry)});
+}
+function plot(p, k, keep) {
+  const set = p.sets[k], codes = p._s[k], cols = set.cats.map(c => c[1]), extra = D.hover_keys.includes(k) ? null : k, n = p.methods.length, is3 = S.view === "3d", pr = S.proj, rot = pr.az || pr.el ? "′" : "";
+  const text = keep.map(i => extra ? p._h[i] + `<br>${extra}: ${set.cats[codes[i]][0]}` : p._h[i]), color = keep.map(i => cols[codes[i]]);
+  const layout = {uirevision: is3 ? `${S.rev}` : `${S.rev}|${pr.x}${pr.y}|${pr.az}|${pr.el}`, margin: is3 ? {l: 0, r: 0, t: 36, b: 0} : {l: 56, r: 12, t: 36, b: 48}, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "#ffffff", font: {family: C.font_family, size: C.font_tick, color: "#1f2330"}, hoverlabel: {font: {size: 13, family: C.font_family}, bgcolor: "#ffffff", bordercolor: "#c9ced6"}, annotations: []};
+  const traces = p.methods.map(([m, t], j) => {
+    const a = j / n + (j ? 0.005 : 0), b = (j + 1) / n - (j < n - 1 ? 0.005 : 0), dom = S.stacked ? {x: [0, 1], y: [1 - b, 1 - a - (j < n - 1 ? 0.03 : 0)]} : {x: [a + (is3 ? 0 : 0.02), b - (is3 ? 0 : 0.02)], y: [0, 1]}, s = j ? String(j + 1) : "";
+    layout.annotations.push({text: `<b>${t}</b>`, showarrow: false, xref: "paper", yref: "paper", x: (dom.x[0] + dom.x[1]) / 2, y: dom.y[1], yanchor: "bottom", font: {size: C.font_title}});
+    if (is3) {
+      const c = p._c[m], x = new Float32Array(keep.length), y = new Float32Array(keep.length), z = new Float32Array(keep.length), sc = "scene" + s;
+      keep.forEach((i, q) => { x[q] = c[3 * i]; y[q] = c[3 * i + 1]; z[q] = c[3 * i + 2]; });
+      layout[sc] = {domain: dom, aspectmode: "cube", xaxis: axis(t + "-1", p._r[m][0]), yaxis: axis(t + "-2", p._r[m][1]), zaxis: axis(t + "-3", p._r[m][2])};
+      if (S.cam[sc]) layout[sc].camera = S.cam[sc];
+      return {type: "scatter3d", mode: "markers", x, y, z, text, hovertemplate: "%{text}<extra></extra>", showlegend: false, scene: sc, marker: {size: S.size, opacity: C.alpha, color, line: {width: 0}}};
+    }
+    const q = project(p, m);
+    layout["xaxis" + s] = axis2(`${t}-${pr.x + 1}${rot}`, q.rx, dom.x, "y" + s);
+    layout["yaxis" + s] = {...axis2(`${t}-${pr.y + 1}${rot}`, q.ry, dom.y, "x" + s), scaleanchor: "x" + s};
+    return {type: "scattergl", mode: "markers", x: Float32Array.from(keep, i => q.x[i]), y: Float32Array.from(keep, i => q.y[i]), xaxis: "x" + s, yaxis: "y" + s, text, hovertemplate: "%{text}<extra></extra>", showlegend: false, marker: {size: S.size * 2, opacity: C.alpha, color, line: {width: 0}}};
+  });
+  if (S.find !== null) p.methods.forEach(([m], j) => {
+    const f = S.find, s = j ? String(j + 1) : "", ring = {mode: "markers", text: [p._h[f]], hovertemplate: "%{text}<extra></extra>", showlegend: false, marker: {size: 14, symbol: "circle-open", color: "#000000", line: {width: 3}}}, c = p._c[m], q = is3 ? null : project(p, m);
+    traces.push(is3 ? {...ring, type: "scatter3d", x: [c[3 * f]], y: [c[3 * f + 1]], z: [c[3 * f + 2]], scene: "scene" + s} : {...ring, type: "scattergl", x: [q.x[f]], y: [q.y[f]], xaxis: "x" + s, yaxis: "y" + s});
+  });
+  Plotly.react($("plot"), traces, layout, {responsive: true, displaylogo: false, toImageButtonOptions: {format: "png", scale: 2, filename: `${p.slug}_${S.view}_${k.replace(/\W+/g, "_")}`}});
+  if (!$("plot")._camHook) { $("plot")._camHook = true; $("plot").on("plotly_relayout", e => Object.keys(e).forEach(k => { const m = k.match(/^(scene\d*)\.camera$/); if (m) S.cam[m[1]] = e[k]; })); }
 }
 function bars(p) {
   const b = p.bars, cats = p.sets.species.cats, col = Object.fromEntries(cats.map(c => [c[0], c[1]])), clCats = p.sets[S.cluster].cats;
@@ -152,7 +192,7 @@ function bars(p) {
   const traces = b.species.map((sp, j) => ({type: "bar", name: sp, x, y: idx.map(i => b.counts[j][i]), marker: {color: col[sp], line: {width: 0}}, hovertemplate: `<b>%{x}</b> · ${sp.replace(/%/g, "%%")}: %{y:,}<br>click to isolate<extra></extra>`})).filter(t => !hidSp.has(t.name));
   const visSp = b.species.map((sp, j) => j).filter(j => !hidSp.has(b.species[j])), tot = i => visSp.reduce((s, j) => s + b.counts[j][i], 0), top = Math.max(1, ...idx.map(tot));
   const starred = idx.filter(i => b.stars && b.stars[i]), lines = Math.max(0, ...starred.map(i => b.stars[i].length)), mt = 30, mb = 24, ph = Math.max(60, $("bars").clientHeight - mt - mb), room = lines ? lines * C.font_tick * 1.15 + 6 : 4;
-  const annotations = starred.map(i => ({x: b.clusters[i], y: tot(i), text: `<b>${[...b.stars[i]].join("<br>")}</b>`, y: S.log ? Math.log10(Math.max(1, tot(i))) : tot(i), yanchor: "bottom", yshift: 1, showarrow: false, font: {size: C.font_tick}}));
+  const annotations = starred.map(i => ({x: b.clusters[i], text: `<b>${[...b.stars[i]].join("<br>")}</b>`, y: S.log ? Math.log10(Math.max(1, tot(i))) : tot(i), yanchor: "bottom", yshift: 1, showarrow: false, font: {size: C.font_tick}}));
   const layout = {annotations, barmode: "stack", bargap: 0.15, margin: {l: 56, r: 6, t: mt, b: mb}, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)", font: {family: C.font_family, size: C.font_tick, color: "#1f2330"}, showlegend: true, legend: {orientation: "h", x: 1, xanchor: "right", y: 1, yanchor: "bottom", itemclick: false, itemdoubleclick: false, font: {size: C.font_tick}}, xaxis: {type: "category", tickfont: {size: 11}, fixedrange: true}, yaxis: {title: {text: "proteins", font: {size: C.font_tick}}, type: S.log ? "log" : "linear", range: S.log ? [Math.log10(0.8), Math.log10(top) + (Math.log10(top) - Math.log10(0.8)) * room / Math.max(ph - room, ph * 0.4)] : [0, top * ph / Math.max(ph - room, ph * 0.4)], gridcolor: "#e6e8ec", fixedrange: true}, hoverlabel: {font: {size: 13, family: C.font_family}, bgcolor: "#ffffff", bordercolor: "#c9ced6"}};
   Plotly.react($("bars"), traces, layout, {responsive: true, displayModeBar: false});
   if (!$("bars")._clickHook) { $("bars")._clickHook = true; $("bars").on("plotly_click", e => isolate(e.points[0].x)); }
@@ -168,7 +208,7 @@ function checklist(s, cats, coloured) {
   return shown(s).map(i => {
     const [nm, col, cnt] = cats[i], el = document.createElement("div"), off = S.hidden[s].has(i), bi = leiden ? p._b[nm] : undefined, st = bi !== undefined && b.stars ? b.stars[bi] : "";
     el.className = "chip" + (off ? " off" : "");
-    el.title = `${nm} (n=${cnt.toLocaleString()})` + (bi !== undefined ? b.species.map((sp, j) => `\n${sp}: ${b.counts[j][bi].toLocaleString()}`).join("") : "") + (st ? `\nANOVA ${st}` : "");
+    el.title = `${nm} (n=${cnt.toLocaleString()})` + (bi !== undefined ? b.species.map((sp, j) => `\n${sp}: ${b.counts[j][bi].toLocaleString()}`).join("") : "") + (st ? `\nχ² ${st}` : "");
     el.innerHTML = `<input type="checkbox" tabindex="-1"${off ? "" : " checked"}><i class="${coloured ? "" : "plain"}" style="background:${col}"></i><span class="nm"></span><span class="st">${st}</span><span class="n">${cnt.toLocaleString()}</span>`;
     el.querySelector(".nm").textContent = nm;
     el.onclick = () => chip(s, i, order(cats, s === "cl"));
@@ -192,6 +232,7 @@ function chip(s, i, all) {
 function isolate(name) {
   const p = page(), cats = p.sets[D.leiden_key].cats, i = cats.findIndex(c => c[0] === name);
   if (i < 0) return;
+  if (S.view === "bars") { S.view = S.last; S.fit = true; syncView(); }
   const all = order(cats, true), only = S.cluster === D.leiden_key && S.hidden.cl.size === all.length - 1 && !S.hidden.cl.has(i);
   S.cluster = D.leiden_key; $("clusterSel").value = S.cluster; S.byCluster = true; S.q.cl = ""; $("qCl").value = "";
   S.hidden.cl = only ? new Set() : new Set(all.filter(j => j !== i));
@@ -215,6 +256,13 @@ function exportIds() {
   a.download = `${p.slug}_${key().replace(/\W+/g, "_")}_${S.keep.length}_ids.txt`;
   a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
+function defaults() {
+  const p = P[S.page], sel = new Set(p.selected || []), cats = p.sets[D.leiden_key].cats;
+  $("selBtn").hidden = !sel.size;
+  if (!sel.size) return;
+  S.cluster = D.leiden_key; $("clusterSel").value = S.cluster; S.byCluster = true; S.q.cl = ""; $("qCl").value = "";
+  S.hidden.cl = new Set(cats.map((_, i) => i).filter(i => !sel.has(cats[i][0])));
+}
 function unfilter(s) { (s ? [s] : ["sp", "cl"]).forEach(k => { S.hidden[k].clear(); S.q[k] = ""; $(k === "sp" ? "qSp" : "qCl").value = ""; }); }
 function sync() {
   const p = P[S.page];
@@ -224,22 +272,37 @@ function sync() {
   $("labS").classList.toggle("on", !S.byCluster); $("labC").classList.toggle("on", S.byCluster);
   try { history.replaceState(null, "", "#" + (S.page + 1)); } catch (e) {}
 }
-function go(i) { if (i < 0 || i >= P.length || i === S.page) return; S.page = i; S.find = null; $("find").value = ""; $("find").classList.remove("miss"); $("found").hidden = true; unfilter(); sync(); draw(); }
+function go(i) { if (i < 0 || i >= P.length || i === S.page) return; S.page = i; S.find = null; $("find").value = ""; $("find").classList.remove("miss"); $("found").hidden = true; unfilter(); defaults(); sync(); draw(); }
+function syncView() {
+  document.querySelectorAll("[data-view]").forEach(b => b.classList.toggle("on", b.dataset.view === S.view));
+  $("barsBox").hidden = S.view !== "bars"; $("stage").hidden = S.view === "bars"; $("ctl2d").hidden = S.view !== "2d";
+  $("size").disabled = S.view === "bars"; $("reset").disabled = S.view === "bars"; $("reset").title = S.view === "3d" ? "Reset camera" : "Reset zoom";
+}
+function setView(v) { if (v === S.view) return; S.view = v; if (v !== "bars") S.last = v; S.fit = true; syncView(); draw(); }
+function syncProj() { const pr = S.proj; $("pX").value = pr.x; $("pY").value = pr.y; $("pAz").value = pr.az; $("pEl").value = pr.el; $("pAzV").textContent = pr.az + "°"; $("pElV").textContent = pr.el + "°"; }
+function setAxis(w, v) { const o = w === "x" ? "y" : "x"; if (S.proj[o] === v) S.proj[o] = S.proj[w]; S.proj[w] = v; syncProj(); draw(); }
 function colourBy(cluster) { S.byCluster = cluster; sync(); draw(); }
 document.title = D.title;
 $("pageSel").replaceChildren(...P.map((p, i) => new Option(`${i + 1}. ${p.title}`, i)));
 $("clusterSel").replaceChildren(...D.cluster_keys.map(k => new Option(k, k)));
+["pX", "pY"].forEach(id => $(id).replaceChildren(...[0, 1, 2].map(d => new Option(`dim ${d + 1}`, d))));
+document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => setView(b.dataset.view));
+$("pX").onchange = e => setAxis("x", +e.target.value);
+$("pY").onchange = e => setAxis("y", +e.target.value);
+["pAz", "pEl"].forEach(id => { $(id).oninput = e => { S.proj[id === "pAz" ? "az" : "el"] = +e.target.value; syncProj(); }; $(id).onchange = () => draw(); });
+$("pDef").onclick = () => { S.proj = {x: 0, y: 1, az: 0, el: 0}; syncProj(); draw(); };
 $("size").value = S.size; $("sizeV").textContent = S.size;
 $("prev").onclick = () => go(S.page - 1);
 $("next").onclick = () => go(S.page + 1);
 $("pageSel").onchange = e => go(+e.target.value);
 $("toggle").onchange = e => colourBy(e.target.checked);
 $("clusterSel").onchange = e => { S.cluster = e.target.value; unfilter("cl"); draw(); };
-$("size").oninput = e => { S.size = +e.target.value; $("sizeV").textContent = S.size; Plotly.restyle($("plot"), {"marker.size": S.size}, P[S.page].methods.map((_, j) => j)); };
+$("size").oninput = e => { S.size = +e.target.value; $("sizeV").textContent = S.size; Plotly.restyle($("plot"), {"marker.size": S.view === "2d" ? S.size * 2 : S.size}, P[S.page].methods.map((_, j) => j)); };
 $("logBtn").onclick = () => { S.log = !S.log; bars(page()); };
 $("find").onkeydown = e => { if (e.key === "Enter") find(e.target.value); else if (e.key === "Escape") { e.target.value = ""; find(""); e.target.blur(); } };
 $("find").onsearch = e => { if (!e.target.value) find(""); };
 $("exportIds").onclick = exportIds;
+$("selBtn").onclick = () => { defaults(); sync(); draw(); };
 $("reset").onclick = () => { S.rev++; S.cam = {}; draw(); };
 document.querySelectorAll("[data-all]").forEach(b => b.onclick = () => { shown(b.dataset.all).forEach(i => S.hidden[b.dataset.all].delete(i)); draw(); });
 document.querySelectorAll("[data-none]").forEach(b => b.onclick = () => { shown(b.dataset.none).forEach(i => S.hidden[b.dataset.none].add(i)); draw(); });
@@ -250,14 +313,15 @@ addEventListener("keydown", e => {
   if (e.key === "ArrowLeft") go(S.page - 1);
   else if (e.key === "ArrowRight") go(S.page + 1);
   else if (e.key === "c" || e.key === "C") colourBy(!S.byCluster);
-  else if (e.key === "l" || e.key === "L") { S.log = !S.log; bars(page()); }
+  else if (e.key === "l" || e.key === "L") { S.log = !S.log; if (S.view === "bars") bars(page()); }
+  else if (e.key === "v" || e.key === "V") setView(["3d", "2d", "bars"][(["3d", "2d", "bars"].indexOf(S.view) + 1) % 3]);
   else if (e.key === "/") { e.preventDefault(); $("find").focus(); }
 });
 let rt = null;
-addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { const st = innerWidth < 900; if (st !== S.stacked) { S.stacked = st; draw(); } else bars(page()); }, 200); });
+addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { const st = innerWidth < 900; if (st !== S.stacked) { S.stacked = st; draw(); } else if (S.view === "bars") bars(page()); }, 200); });
 const h = parseInt(location.hash.slice(1), 10);
 S.page = h >= 1 && h <= P.length ? h - 1 : 0;
-sync(); draw();
+defaults(); syncView(); syncProj(); sync(); draw();
 </script>
 </body>
 </html>

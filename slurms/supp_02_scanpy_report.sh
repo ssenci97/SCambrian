@@ -14,8 +14,8 @@ conda activate ./.env
 [ -f configs/param_configs.yaml ] || { echo "[SLURM-INFO] Error: configs/param_configs.yaml not found in $(pwd). Submit from the repo root." >&2; exit 1; }
 
 ###################################### config
-# Reports every <outdir>/<run>/*.h5ad written by supp_01_scanpy.sh
-OUT_DIR=$(python3 -c "import yaml; print(yaml.safe_load(open('configs/param_configs.yaml')).get('npz_scanpy', {}).get('outdir', 'data/scanpy/'))")
+START_TIME=$(date +%s)
+OUT_DIR=$(python3 -c "import yaml; print(yaml.safe_load(open('configs/param_configs.yaml')).get('npz_scanpy', {}).get('scanpy_dir', 'data/scanpy/'))")
 [ -n "$OUT_DIR" ] && [ "$OUT_DIR" != "/" ] && [ -d "$OUT_DIR" ] || { echo "[SLURM-INFO] Error: invalid OUT_DIR '$OUT_DIR'." >&2; exit 1; }
 mapfile -t H5ADS < <(find "$OUT_DIR" -mindepth 2 -maxdepth 2 -name "*.h5ad" | sort)
 [ ${#H5ADS[@]} -gt 0 ] || { echo "[SLURM-INFO] Error: no .h5ad found in $OUT_DIR/<run>/." >&2; exit 1; }
@@ -26,3 +26,4 @@ H5AD_LIST=$(printf "%s\n" "${H5ADS[@]}" | paste -sd, -)
 python3 src/h5ad_scanpy.py --h5ad "$H5AD_LIST" --yaml-in --yaml-out
 echo "[SLURM-INFO] --- Writing interactive 3D UMAP/t-SNE and HDBSCAN HTML views ---"
 python3 src/h5ad_interactive.py --h5ad "$H5AD_LIST" --n_jobs "${SLURM_CPUS_PER_TASK:-1}" --yaml-in --yaml-out
+echo "[SLURM-INFO] $(date +'%Y-%m-%d %H:%M:%S') $(( $(date +%s) - START_TIME ))s $(free -m | awk 'NR==2 {print $3"MB"}')"

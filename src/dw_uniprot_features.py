@@ -1,89 +1,110 @@
 #!/usr/bin/env python3
-"""Download UniProt features based on generic text queries."""
-import argparse, random, resource, time, urllib.parse, urllib.request, warnings
-from datetime import datetime
+"""Downloads the UniProtKB annotation fields (everything except the sequence) for every row of the query table, or for one ``--query``.
+
+The output is ``<features_dir>/<label>_feats.tsv`` with one column per field of FEATURE_FIELDS. Rows whose query is a local FASTA path (.fa/.faa/.fasta) have no UniProt annotation and are skipped. A label whose output exists is skipped unless ``--overwrite`` is set.
+"""
+###################################### DEPENDENCIES_AND_CONSTANTS
+import argparse
+import datetime
 from io import StringIO
-from pathlib import Path
 import pandas as pd
-import yaml
+from pathlib import Path
+import resource
+import time
 from tqdm import tqdm
-SEED = 42
-random.seed(SEED)
-DEFAULT_CONFIG_PATH = "configs/query_configs.tsv"
-DEFAULT_OUT_DIR = "data/features"
-###################################### config
-def load_config(path: Path) -> pd.DataFrame:
-    if path.exists(): return pd.read_csv(path, sep="\t", dtype=str).replace(r"^\s*$", pd.NA, regex=True)
-    print(f"[PYTHON-INFO] Error: Configuration file {path} not found.")
-    raise FileNotFoundError(f"Configuration file {path} not found.")
-###################################### uniprot
+import urllib.parse
+import urllib.request
+import yaml
+FEATURES_DIR = "data/features"
+FEATURE_FIELDS = [f for f in ["accession", "id", "uniparc_id", "sequence_version", "version", "date_created", "date_modified", "date_sequence_modified", "gene_names", "gene_primary", "gene_synonym", "gene_oln", "gene_orf", "protein_name", "protein_existence", "reviewed", "fragment", "organism_name", "organism_id", "lineage", "lineage_ids", "virus_hosts", "sequence", "length", "mass", "encoded_in", "ft_act_site", "ft_binding", "ft_carbohyd", "ft_chain", "ft_coiled", "ft_compbias", "ft_conflict", "ft_crosslnk", "ft_disulfid", "ft_dna_bind", "ft_domain", "ft_helix", "ft_init_met", "ft_intramem", "ft_lipid", "ft_mod_res", "ft_motif", "ft_mutagen", "ft_non_cons", "ft_non_std", "ft_non_ter", "ft_peptide", "ft_propep", "ft_region", "ft_repeat", "ft_signal", "ft_site", "ft_strand", "ft_topo_dom", "ft_transit", "ft_transmem", "ft_turn", "ft_unsure", "ft_var_seq", "ft_variant", "ft_zn_fing", "ec", "rhea", "cc_catalytic_activity", "cc_cofactor", "cc_activity_regulation", "kinetics", "ph_dependence", "redox_potential", "temp_dependence", "absorption", "cc_function", "cc_pathway", "cc_miscellaneous", "cc_caution", "cc_sequence_caution", "cc_polymorphism", "cc_rna_editing", "cc_alternative_products", "cc_sc_epred", "cc_interaction", "cc_subunit", "cc_subcellular_location", "cc_developmental_stage", "cc_induction", "cc_tissue_specificity", "cc_allergen", "cc_biotechnology", "cc_disruption_phenotype", "cc_disease", "cc_pharmaceutical", "cc_toxic_dose", "cc_ptm", "cc_domain", "protein_families", "go", "go_id", "go_p", "go_c", "go_f", "xref_proteomes", "structure_3d", "lit_pubmed_id", "keywordid", "keyword", "annotation_score", "comment_count", "feature_count", "tools"] if f != "sequence"]
+LOCAL_FASTA_SUFFIXES = (".fa", ".faa", ".fasta")
+OVERWRITE = False
+PROBE_ACCESSION = "A0A0R4I9Y1"
+QUERY_TABLE = "configs/query_configs.tsv"
+UNIPROT_STREAM_URL = "https://rest.uniprot.org/uniprotkb/stream"
+YAML_PATH = "configs/param_configs.yaml"
+###################################### CONFIG_AND_PARSER
+parser = argparse.ArgumentParser(description="Download UniProtKB annotation fields")
+parser.add_argument("--query", default=None, help="Single UniProtKB query; when omitted every row of the query table is downloaded")
+parser.add_argument("--label", default=None, help="Label of --query, or the only table row to download")
+parser.add_argument("--out_tsv", type=Path, default=None, help="Output TSV path (default <features_dir>/<label>_feats.tsv)")
+parser.add_argument("--query_table", type=str, default=QUERY_TABLE, help="TSV with label, query and exact_species columns")
+parser.add_argument("--features_dir", type=str, default=FEATURES_DIR, help="Output folder")
+parser.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=OVERWRITE, help="Download again labels whose output exists")
+parser.add_argument("--yaml-in", nargs="?", const=YAML_PATH, default=YAML_PATH)
+parser.add_argument("--yaml-out", nargs="?", const=YAML_PATH, default=None)
+cli_preview, _ = parser.parse_known_args()
+script_key = "dw_uniprot_features"
+params = dict(query_table=QUERY_TABLE, features_dir=FEATURES_DIR, overwrite=OVERWRITE)
+if cli_preview.yaml_in and Path(cli_preview.yaml_in).exists():
+    config_data = yaml.safe_load(Path(cli_preview.yaml_in).read_text()) or {}
+    if script_key in config_data: params.update(config_data[script_key])
+parser.set_defaults(**params)
+args = parser.parse_args()
+if args.yaml_out:
+    config_data = yaml.safe_load(Path(args.yaml_out).read_text()) if Path(args.yaml_out).exists() else {}
+    config_data[script_key] = {k: getattr(args, k) for k in params}
+    Path(args.yaml_out).parent.mkdir(parents=True, exist_ok=True)
+    Path(args.yaml_out).write_text(yaml.dump(config_data, sort_keys=False))
+###################################### HELPER_FUNCTIONS
 def fetch_uniprot(query: str, fields: list[str]) -> pd.DataFrame:
-    fields_query = fields[0] if len(fields) == 1 else ",".join(fields)
-    encoded = urllib.parse.quote(query, safe="")
-    url = f"https://rest.uniprot.org/uniprotkb/stream?query={encoded}&format=tsv&fields={fields_query}"
-    print(f"[PYTHON-INFO] Query feature URL: {url}")
-    with urllib.request.urlopen(url) as response: tsv = response.read().decode("utf-8")
-    return pd.read_csv(StringIO(tsv), sep="\t", dtype=str)
-def get_feature_map(fields: list[str]) -> dict[str, str]:
-    mock = fetch_uniprot("(accession:A0A0R4I9Y1)", fields=fields)
-    return dict(zip(mock.columns, fields))
-def rename_columns(df: pd.DataFrame, feature_map: dict[str, str]) -> pd.DataFrame:
-    return df.rename(columns=feature_map)
-###################################### io
-def save_tsv(df: pd.DataFrame, path: Path) -> None:
-    if path.exists(): warnings.warn(f"Overwriting existing file: {path}", UserWarning)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, sep="\t", index=False)
-###################################### main
+    """Stream the UniProtKB entries matching a query as a string table.
+
+    Args:
+        query (str): UniProtKB query string.
+        fields (list[str]): UniProtKB return fields.
+
+    Returns:
+        pd.DataFrame: One row per entry, with UniProt's display headers as columns.
+    """
+    url = f"{UNIPROT_STREAM_URL}?query={urllib.parse.quote(query, safe='')}&format=tsv&fields={','.join(fields)}"
+    print(f"[PYTHON-INFO] Query URL: {url}")
+    with urllib.request.urlopen(url) as response:
+        return pd.read_csv(StringIO(response.read().decode("utf-8")), sep="\t", dtype=str)
+def uniprot_column_names(fields: list[str]) -> dict[str, str]:
+    """Map UniProt's display headers to the requested field names, by fetching one probe entry.
+
+    Args:
+        fields (list[str]): UniProtKB return fields.
+
+    Returns:
+        dict[str, str]: Display header -> field name.
+    """
+    return dict(zip(fetch_uniprot(f"(accession:{PROBE_ACCESSION})", fields).columns, fields))
+def query_jobs() -> list[tuple[str, str]]:
+    """List the (label, query) pairs to download: ``--query`` alone, or the table rows filtered by ``--label``.
+
+    Returns:
+        list[tuple[str, str]]: Label and UniProtKB query per download.
+    """
+    if args.query: return [(args.label or "query", args.query)]
+    table = pd.read_csv(args.query_table, sep="\t", dtype=str).replace(r"^\s*$", pd.NA, regex=True)
+    jobs = []
+    for row in table.to_dict("records"):
+        label, query = row.get("label"), row.get("query")
+        if args.label and label != args.label: continue
+        if pd.isna(query): raise ValueError(f"[PYTHON-ERROR] Query missing for label '{label}' in {args.query_table}.")
+        if str(query).strip().endswith(LOCAL_FASTA_SUFFIXES):
+            print(f"[PYTHON-INFO] '{label}' is a local FASTA source without UniProt annotation. Skipping.")
+            continue
+        jobs.append((label, str(query).strip()))
+    return jobs
+###################################### MAIN
 def main() -> None:
+    """Download the annotation fields of every requested label."""
     start_time = time.time()
-    parser = argparse.ArgumentParser(description="Fetch UniProt features.")
-    parser.add_argument("--query", default=None)
-    parser.add_argument("--label", default="example")
-    parser.add_argument("--fp_feats", type=Path)
-    parser.add_argument("--overwrite", action="store_true")
-    parser.add_argument("--yaml-in", nargs="?", const=Path("configs/param_configs.yaml"), type=Path, default=Path("configs/param_configs.yaml"))
-    parser.add_argument("--yaml-out", nargs="?", const=Path("configs/param_configs.yaml"), type=Path)
-    args = parser.parse_args()
-    script_name = Path(__file__).stem
-    params = {"config_path": DEFAULT_CONFIG_PATH, "features_out_dir": DEFAULT_OUT_DIR, "overwrite": False}
-    if args.yaml_in and args.yaml_in.exists():
-        data = yaml.safe_load(args.yaml_in.read_text())
-        if isinstance(data, dict) and script_name in data:
-            params.update(data[script_name])
-    params["overwrite"] = bool(params["overwrite"] or args.overwrite)
-    if args.yaml_out:
-        yaml_out_path = args.yaml_out if isinstance(args.yaml_out, Path) else Path("configs/param_configs.yaml")
-        yaml_out_path.parent.mkdir(parents=True, exist_ok=True)
-        data = yaml.safe_load(yaml_out_path.read_text()) if yaml_out_path.exists() else {}
-        if not isinstance(data, dict): data = {}
-        data[script_name] = params
-        yaml_out_path.write_text(yaml.dump(data, default_flow_style=False))
-    config_path = Path(params["config_path"])
-    out_dir = Path(params["features_out_dir"])
-    all_fields = ["accession", "id", "uniparc_id", "sequence_version", "version", "date_created", "date_modified", "date_sequence_modified", "gene_names", "gene_primary", "gene_synonym", "gene_oln", "gene_orf", "protein_name", "protein_existence", "reviewed", "fragment", "organism_name", "organism_id", "lineage", "lineage_ids", "virus_hosts", "sequence", "length", "mass", "encoded_in", "ft_act_site", "ft_binding", "ft_carbohyd", "ft_chain", "ft_coiled", "ft_compbias", "ft_conflict", "ft_crosslnk", "ft_disulfid", "ft_dna_bind", "ft_domain", "ft_helix", "ft_init_met", "ft_intramem", "ft_lipid", "ft_mod_res", "ft_motif", "ft_mutagen", "ft_non_cons", "ft_non_std", "ft_non_ter", "ft_peptide", "ft_propep", "ft_region", "ft_repeat", "ft_signal", "ft_site", "ft_strand", "ft_topo_dom", "ft_transit", "ft_transmem", "ft_turn", "ft_unsure", "ft_var_seq", "ft_variant", "ft_zn_fing", "ec", "rhea", "cc_catalytic_activity", "cc_cofactor", "cc_activity_regulation", "kinetics", "ph_dependence", "redox_potential", "temp_dependence", "absorption", "cc_function", "cc_pathway", "cc_miscellaneous", "cc_caution", "cc_sequence_caution", "cc_polymorphism", "cc_rna_editing", "cc_alternative_products", "cc_sc_epred", "cc_interaction", "cc_subunit", "cc_subcellular_location", "cc_developmental_stage", "cc_induction", "cc_tissue_specificity", "cc_allergen", "cc_biotechnology", "cc_disruption_phenotype", "cc_disease", "cc_pharmaceutical", "cc_toxic_dose", "cc_ptm", "cc_domain", "protein_families", "go", "go_id", "go_p", "go_c", "go_f", "xref_proteomes", "structure_3d", "lit_pubmed_id", "keywordid", "keyword", "annotation_score", "comment_count", "feature_count", "tools"]
-    keys_noseq = [col for col in all_fields if col != "sequence"]
-    feature_map = get_feature_map(all_fields)
-    if args.query:
-        fp = args.fp_feats or (out_dir / f"{args.label}_feats.tsv")
-        if not params["overwrite"] and fp.exists(): print(f"[PYTHON-INFO] Features of '{args.label}' already exist. Skipping.")
-        else: save_tsv(rename_columns(fetch_uniprot(args.query, fields=keys_noseq), feature_map), fp)
-    else:
-        df_config = load_config(config_path)
-        if df_config.empty:
-            print(f"[PYTHON-INFO] Error: Configuration file {config_path} is empty.")
-            raise ValueError(f"Configuration file {config_path} is empty.")
-        for _, row in tqdm(df_config.iterrows(), total=len(df_config), desc="Processing features"):
-            q_val, label = row.get("query"), row.get("label")
-            if args.label and label != args.label: continue
-            if pd.isna(q_val) or not str(q_val).strip():
-                print(f"[PYTHON-INFO] Error: query missing for label '{label}'.")
-                raise ValueError(f"query missing for label '{label}'.")
-            fp = args.fp_feats or (out_dir / f"{label}_feats.tsv")
-            if not params["overwrite"] and fp.exists():
-                print(f"[PYTHON-INFO] Features of '{label}' already exist. Skipping.")
-                continue
-            save_tsv(rename_columns(fetch_uniprot(str(q_val).strip(), fields=keys_noseq), feature_map), fp)
-    exec_time, max_mem, dt = f"{time.time() - start_time:.2f}s", f"{resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024:.2f}MB", datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"[PYTHON-INFO] {dt} {exec_time} {max_mem}")
-if __name__ == "__main__": main()
+    column_names = uniprot_column_names(FEATURE_FIELDS)
+    for label, query in tqdm(query_jobs(), desc="Feature downloads"):
+        out_tsv = args.out_tsv or Path(args.features_dir) / f"{label}_feats.tsv"
+        if not args.overwrite and out_tsv.exists():
+            print(f"[PYTHON-INFO] Features of '{label}' already exist. Skipping.")
+            continue
+        if out_tsv.exists(): print(f"[PYTHON-INFO] Overwriting {out_tsv}")
+        out_tsv.parent.mkdir(parents=True, exist_ok=True)
+        records = fetch_uniprot(query, FEATURE_FIELDS).rename(columns=column_names)
+        records.to_csv(out_tsv, sep="\t", index=False)
+        print(f"[PYTHON-INFO][SAVE] {label}: {len(records):,} entries x {records.shape[1]} fields -> {out_tsv}")
+    max_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    print(f"[PYTHON-INFO] {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {time.time() - start_time:.2f}s {max_mem:.2f}MB")
+if __name__ == "__main__":
+    main()

@@ -12,13 +12,9 @@
 ###################################### env
 module purge
 unset LD_LIBRARY_PATH
-# Prefer a GLIBC-compatible compiler. Adjust the module name to whatever
-# your cluster provides (gcc/11, gcc/12, system-gcc, …).
-# If no suitable module exists, force the system compiler.
 module load gcc/11.4.0 2>/dev/null || true
 export CC=$(command -v gcc)
 export CXX=$(command -v g++)
-# Sanity: never use the Fedora-41 binary
 if [[ "$CC" == *fedora41* ]]; then
   export CC=/usr/bin/gcc
   export CXX=/usr/bin/g++
@@ -57,7 +53,6 @@ else
 fi
 
 ###################################### analysis (uniprot / dimred / scanpy) — also runs on an existing .env
-# numpy pinned: numba (scanpy) and torch 2.4.1 break on newer numpy
 echo "[SLURM-INFO] Installing analysis deps..."
 pip install "numpy<2.3" pyyaml tqdm seaborn scikit-learn umap-learn pynndescent "scanpy>=1.10" anndata plotly ipywidgets anywidget hdbscan pyprojroot matplotlib-venn numba safetensors igraph pymupdf kaleido
 
