@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Writes one paged, self-contained 3D HTML viewer of the UMAP and t-SNE layouts saved by npz_scanpy.py, plus the HDBSCAN labels of the 3D UMAP.
 
-Per .h5ad a single HTML file is saved under ``<run>/interactive/`` with one page for the joint view and one per species (intra view), browsed with arrows, a page menu or the arrow keys. Every page shows side-by-side 3D UMAP and t-SNE panels and a species/cluster switch; the cluster labels are chosen among Leiden, intra-species and HDBSCAN fitted on the 3D UMAP for every min_cluster_size of ``--mcs_grid``. Inter-species clusters (Leiden, joint HDBSCAN) are named by upper-case letters (A, B, ..., AA) and intra-species clusters (intra Leiden, per-species HDBSCAN) by zero-padded numbers (001, 002, ...). A left sidebar holds species and cluster checklists, combined to select which points are drawn, and a stacked barplot on top shows the protein count of every inter-species cluster per species. The camera is kept across all changes until reset. The HDBSCAN labels of all views are also written to one TSV per .h5ad. An .h5ad whose outputs all exist is skipped unless ``--overwrite`` is set.
+Per .h5ad a single HTML file is saved under ``<run>/interactive/`` with one page for the joint view and one per species (intra view), browsed with arrows, a page menu or the arrow keys. Every page shows side-by-side 3D UMAP and t-SNE panels and a species/cluster switch; the cluster labels are chosen among Leiden, intra-species and HDBSCAN fitted on the 3D UMAP for every min_cluster_size of ``--mcs_grid``. Inter-species clusters (Leiden, joint HDBSCAN) are named by upper-case letters (A, B, ..., AA) and intra-species clusters (intra Leiden, per-species HDBSCAN) by zero-padded numbers (001, 002, ...). Balanced inter-species clusters, read from the species_cluster_enrichment table of h5ad_scanpy.py, are starred in the barplot. A left sidebar holds species and cluster checklists, combined to select which points are drawn, and a stacked barplot on top shows the protein count of every inter-species cluster per species. The camera is kept across all changes until reset. The HDBSCAN labels of all views are also written to one TSV per .h5ad. An .h5ad whose outputs all exist is skipped unless ``--overwrite`` is set.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -168,7 +168,7 @@ def write_views(pages: list[dict], title: str, out_fp: Path) -> None:
     """
     config = dict(alpha=ALPHA, font_family=FONT_FAMILY, font_legend=FONT_LEGEND, font_tick=FONT_TICK, font_title=FONT_TITLE, marker_size=MARKER_SIZE)
     cluster_keys = list(LABEL_SETS.values())[1:] + [f"HDBSCAN mcs={mcs}" for mcs in args.mcs_grid]
-    payload = json.dumps(dict(title=title, config=config, hover_keys=list(LABEL_SETS.values()), cluster_keys=cluster_keys, pages=pages), separators=(",", ":")).replace("</", "<\\/")
+    payload = json.dumps(dict(title=title, config=config, hover_keys=list(LABEL_SETS.values()), cluster_keys=cluster_keys, leiden_key=LABEL_SETS["cluster"], pages=pages), separators=(",", ":")).replace("</", "<\\/")
     out_fp.write_text(TEMPLATE.read_text().replace("__TITLE__", escape(title), 1).replace("__PLOTLYJS__", get_plotlyjs(), 1).replace("__DATA__", payload, 1), encoding="utf-8")
 ###################################### REPORT
 def interactive(h5ad_path: Path) -> None:
@@ -191,6 +191,8 @@ def interactive(h5ad_path: Path) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
     adata = ad.read_h5ad(h5ad_path)
     obs, rng, rows, pages, names = adata.obs.astype({"species": str}), np.random.default_rng(SEED), [], [], species_names()
+    enr_fp = target_dir.parent / f"species_cluster_enrichment__{param_tag}.csv"
+    balanced = {letter(int(c)) for c in pd.read_csv(enr_fp).query("balanced")["cluster"]} if enr_fp.exists() else set()
     for view in tqdm(views, desc=f"{h5ad_path.parent.name} views"):
         mask = np.ones(adata.n_obs, dtype=bool) if view == "joint" else (obs["species"] == view).values
         suffix = "" if view == "joint" else "_intra"
@@ -207,7 +209,7 @@ def interactive(h5ad_path: Path) -> None:
         sets = {LABEL_SETS[k]: categories(series[k]) for k in LABEL_SETS} | {f"HDBSCAN mcs={mcs}": categories(pd.Series([hd_name(int(x)) if x > 0 else None for x in lab], dtype="object")) for mcs, lab in hd.items()}
         ct = pd.crosstab(series["cluster"], vobs["species"])
         ct, sp_order = ct.loc[sorted(ct.index, key=lambda c: (len(c), c))], [c[0] for c in sets["species"][1][1:] if c[0] in ct.columns]
-        bars = dict(clusters=list(ct.index), species=sp_order, counts=[ct[sp].astype(int).tolist() for sp in sp_order])
+        bars = dict(clusters=list(ct.index), balanced=[c in balanced for c in ct.index], species=sp_order, counts=[ct[sp].astype(int).tolist() for sp in sp_order])
         points = f"{len(keep):,}/{len(vobs):,} points shown" if len(keep) < len(vobs) else f"{len(vobs):,} points"
         pages.append(dict(title="All species" if view == "joint" else names.get(view, view), subtitle=f"{h5ad_path.parent.name} · {param_tag} · {points}", slug=f"{view}_{param_tag}", methods=[[m, t] for m, t in METHODS.items()], coords={m: encode(c[keep], np.float32) for m, c in coords.items()}, ids="\n".join(vobs["protein_id"].astype(str).values[keep]), sets={k: dict(codes=encode(codes[keep], np.uint16), cats=cats) for k, (codes, cats) in sets.items()}, bars=bars))
     write_views(pages, f"{h5ad_path.parent.name} · {param_tag} · 3D views", outs["html"])

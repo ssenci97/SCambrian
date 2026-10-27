@@ -55,6 +55,7 @@ h5ad_scanpy:
   max_joint_labels: 6
   min_joint_size: 100
   min_intra_size: 150
+  min_balance: 0.6
   min_module_size: 200
   min_percent_enrichment: 80
   overwrite: false
