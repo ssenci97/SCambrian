@@ -54,7 +54,7 @@ fi
 
 ###################################### analysis (uniprot / dimred / scanpy) — also runs on an existing .env
 echo "[SLURM-INFO] Installing analysis deps..."
-pip install "numpy<2.3" pyyaml tqdm seaborn scikit-learn umap-learn pynndescent "scanpy>=1.10.3" anndata plotly ipywidgets anywidget hdbscan pyprojroot matplotlib-venn numba safetensors igraph pymupdf kaleido
+pip install "numpy<2.3" pyyaml tqdm seaborn scikit-learn umap-learn pynndescent "scanpy>=1.10" anndata plotly ipywidgets anywidget hdbscan pyprojroot matplotlib-venn numba safetensors igraph pymupdf kaleido
 
 ###################################### verify
 echo "[SLURM-INFO] Comprehensive verification..."
