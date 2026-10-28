@@ -1,0 +1,17 @@
+=== Clustering Summary for japonicus ===
+Timestamp: 2026-10-28 11:08:32
+Dedup: dmin0.95_dcov0.8_dmode0
+
+--- Representative Sequences ---
+Representative sequences retained: 19148
+
+--- Clustering Metrics ---
+threshold	clusters	singleton_clusters	max_cluster_size	avg_cluster_size	min_coverage
+0.9	17585	16235	13	1.09	0.8
+0.8	17141	15491	34	1.12	0.8
+0.7	16873	15074	59	1.13	0.8
+0.6	16600	14650	59	1.15	0.8
+0.5	16131	13967	59	1.19	0.8
+0.4	15520	13200	59	1.23	0.8
+0.3	14837	12421	59	1.29	0.8
+0.2	14346	11888	76	1.33	0.8

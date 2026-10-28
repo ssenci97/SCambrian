@@ -1,0 +1,17 @@
+=== Clustering Summary for albopictus ===
+Timestamp: 2026-10-28 11:05:41
+Dedup: dmin0.95_dcov0.8_dmode0
+
+--- Representative Sequences ---
+Representative sequences retained: 25087
+
+--- Clustering Metrics ---
+threshold	clusters	singleton_clusters	max_cluster_size	avg_cluster_size	min_coverage
+0.9	20633	18044	46	1.22	0.8
+0.8	19773	16793	46	1.27	0.8
+0.7	19130	15900	46	1.31	0.8
+0.6	18175	14651	46	1.38	0.8
+0.5	16883	13214	46	1.49	0.8
+0.4	15577	11967	136	1.61	0.8
+0.3	14315	10775	230	1.75	0.8
+0.2	13535	10046	242	1.85	0.8

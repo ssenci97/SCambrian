@@ -1,0 +1,1 @@
+/orfeo/cephfs/home/area/ssenci/.conda/envs/transdecoder/opt/transdecoder/util/../util/compute_base_probs.pl raw/tsa.GKMD.fsa_nt 0 > /orfeo/cephfs/scratch/area/ssenci/senci_projects/REPR_LRN/Aedes_japonicus_koreicus_curation/data/italian/transdecoder_out/tsa.GKMD.fsa_nt.transdecoder_dir/base_freqs.dat

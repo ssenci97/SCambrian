@@ -1,0 +1,51 @@
+extract_reps_biohub:
+  models:
+  - esmc_300m
+  - esmc_600m
+  - esmc_6b
+  sequences_per_chunk: 500
+  embeddings_dir: data/esm-reps
+  overwrite: false
+dw_uniprot_seqs:
+  query_table: configs/query_configs.tsv
+  sequences_dir: data/sequences
+  overwrite: false
+dw_uniprot_features:
+  query_table: configs/query_configs.tsv
+  features_dir: data/features
+  overwrite: false
+npz_scanpy:
+  seed: 42
+  leiden_resolution: 1.0
+  knn_neighbors: 15
+  pca_components: null
+  layout_dimensions:
+  - 2
+  - 3
+  umap_min_dist: 0.5
+  tsne_perplexity: 30.0
+  tsne_iterations: 1000
+  scanpy_dir: data/scanpy/
+  overwrite: false
+h5ad_scanpy:
+  layout_methods:
+  - umap
+  - tsne
+  max_selected_per_species: 6
+  min_species_proteins: 100
+  min_intra_cluster_proteins: 150
+  balanced_min_share_ratio: 0.6
+  min_module_proteins: 200
+  module_min_specificity_percent: 80
+  chi2_max_q: 0.05
+  min_fold_change: 2.0
+  overwrite: false
+h5ad_interactive:
+  hdbscan_min_cluster_sizes:
+  - 500
+  - 800
+  - 1600
+  hdbscan_min_samples: 10
+  hdbscan_max_clusters: 15
+  max_points_per_view: null
+  overwrite: false

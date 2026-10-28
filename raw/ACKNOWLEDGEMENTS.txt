@@ -1,0 +1,18 @@
+DATA SOURCES
+[1] Catapano PL, Falcinelli M, Damiani C, Cappelli A, Koukouli D, Rossi P, Ricci I, Napolioni V, Favia G.
+    De novo genome assembly of the invasive mosquito species Aedes japonicus and Aedes koreicus.
+    Parasites & Vectors. 2023;16(1):427. doi:10.1186/s13071-023-06048-w. PMID: 37986088; PMCID: PMC10658958.
+[2] Nagy NA, Toth GE, Kurucz K, Kemenesi G, Laczko L.
+    The updated genome of the Hungarian population of Aedes koreicus.
+    Scientific Reports. 2024;14:7545. doi:10.1038/s41598-024-58096-6.
+(BibTeX entries: CITATION.bib)
+
+DATA AVAILABILITY
+  Ae. koreicus  (Italy)   : NCBI TSA GKMD01 [1]
+  Ae. japonicus (Italy)   : NCBI TSA GKMC01, isolate Unicam-2023b, BioProject PRJNA947978 [1]
+  Ae. koreicus  (Hungary) : genome assembly and annotation, Zenodo record 10278300 (https://zenodo.org/records/10278300) [2]
+
+ACKNOWLEDGEMENTS
+We thank Paolo L. Catapano, Guido Favia and co-authors (School of Biosciences and Veterinary Medicine,
+University of Camerino) and Nikoletta A. Nagy, Levente Laczko and co-authors for generating these
+data and making them publicly available.
