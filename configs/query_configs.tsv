@@ -1,5 +1,6 @@
-label	query	exact_species
-aegypti	(organism_id:7159)	Ae. aegypti
-albopictus	(organism_id:7160)	Ae. albopictus
-koreicus	../Aedes_japonicus_koreicus_curation/proteomes/koreicus_seqs.fasta	Ae. koreicus
-japonicus	../Aedes_japonicus_koreicus_curation/proteomes/japonicus_seqs.fasta	Ae. japonicus
+label	query	exact_species	input_type
+aegypti	(organism_id:7159)	Ae. aegypti	target
+albopictus	(organism_id:7160)	Ae. albopictus	target
+koreicus	raw/proteomes/koreicus_seqs.fasta	Ae. koreicus	target
+japonicus	raw/proteomes/japonicus_seqs.fasta	Ae. japonicus	target
+insecta_immune	(taxonomy_id:50557) AND ((go:0006955) OR (keyword:KW-0391) OR (keyword:KW-0399))	Insecta spp.	probe

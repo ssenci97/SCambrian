@@ -8,7 +8,7 @@
 #SBATCH --time=04:00:00
 #SBATCH --job-name=ESMC
 #SBATCH --output=logs/ESMC/ESMC_%A_%a.log
-#SBATCH --array=0-11%2
+#SBATCH --array=0-14%2
 #SBATCH --open-mode=append
 ###################################### env
 module purge
@@ -40,6 +40,7 @@ print("MODELS=(" + " ".join(models) + ")")
 print(f"FASTA_DIR={dedup}")
 print(f"REPS_DIR={reps_dir}")
 print("TSV_PATH=" + d.get("dw_uniprot_seqs", {}).get("query_table", "configs/query_configs.tsv"))
+print("OVERWRITE=" + str(bool(d.get("extract_reps_biohub", {}).get("overwrite", False))).lower())
 ')"
 [ ! -f "${TSV_PATH}" ] && echo "[SLURM-INFO] Missing TSV file" && exit 1
 mkdir -p "$REPS_DIR"
@@ -83,7 +84,12 @@ base_name="${filename%_dedup.fasta}"
 base_name="${base_name%_seqs}"
 echo "[SLURM-INFO] Target input: $input_file"
 echo "[SLURM-INFO] Target model: $MODEL"
-echo "[SLURM-INFO] Target reps output: ${REPS_DIR}/${MODEL}/${base_name}_reps.npz"
+OUT_FILE="${REPS_DIR}/${MODEL}/${base_name}_reps.npz"
+echo "[SLURM-INFO] Target reps output: ${OUT_FILE}"
+if [ "${OVERWRITE}" != "true" ] && [ "${OUT_FILE}" -nt "${input_file}" ]; then
+  echo "[SLURM-INFO] Fresh output ${OUT_FILE} (newer than ${input_file}), python not started"
+  exit 0
+fi
 ###################################### run
 START=$(date +%s)
 echo "[SLURM-INFO] Running extract_reps_biohub.py ($MODEL)"
