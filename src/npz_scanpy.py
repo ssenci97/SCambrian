@@ -14,7 +14,7 @@ from pathlib import Path
 from pynndescent import NNDescent
 import resource
 import scanpy as sc
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_array, csr_matrix
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from sklearn.metrics import silhouette_score
@@ -24,6 +24,8 @@ import warnings
 import yaml
 warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
 warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*invalid value encountered in log2.*")
+if not hasattr(csr_array, "getnnz"):
+    csr_array.getnnz = csr_array._getnnz
 EARLY_EXAGGERATION = 12.0
 KNN_NEIGHBORS = 15
 LAYOUT_DIMENSIONS = [2, 3]
