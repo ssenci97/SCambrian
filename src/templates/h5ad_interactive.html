@@ -74,6 +74,7 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
 #sizeV{min-width:24px;font-variant-numeric:tabular-nums}
 .found{margin-top:4px;padding:6px 8px;border-radius:8px;background:var(--bg);font-size:13px;word-break:break-all}
 .found[hidden]{display:none}
+.tog{display:flex;flex-wrap:wrap;gap:6px 16px}
 @media (max-width:900px){html,body{height:auto}body{overflow:auto}main{grid-template-columns:1fr;grid-template-rows:auto auto}aside{max-height:45vh}.stage{flex:none;height:900px}#barsBox{flex:none;height:600px}}
 </style>
 </head>
@@ -98,7 +99,8 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
 </header>
 <main>
   <aside id="side">
-    <div><div class="find"><input id="find" type="search" placeholder="Find protein ID…" aria-label="Find protein ID" autocomplete="off"><button id="exportIds" title="Download the IDs of the points shown">&#10515; IDs</button><button id="lassoClr" title="Clear the lasso selection" hidden>&#10005; lasso</button></div><div id="linfo" class="muted"></div><div class="muted">click toggles · double-click isolates · click a bar shows its cluster<br>2D: lasso filters points · double-click clears<br>← → pages · V view · C colouring · L log bars · / find</div><div id="found" class="found" hidden></div></div>
+    <div><div class="find"><input id="find" type="search" placeholder="Find protein ID…" aria-label="Find protein ID" autocomplete="off"><button id="exportIds" title="Download the IDs of the points shown">&#10515; IDs</button></div><div id="linfo" class="muted"></div><div class="muted">click toggles · double-click isolates · click a bar shows its cluster<br>2D: lasso filters points · double-click clears<br>← → pages · V view · C colouring · L log bars · / find</div><div id="found" class="found" hidden></div></div>
+    <section class="sec" id="sec2d" hidden><div class="shead"><b>2D</b><span><button id="lassoClr" title="Clear the lasso selection" hidden>&#10005; lasso</button></span></div><div class="tog"><label class="switch" title="Drag lassoes points (on) or pans (off)"><input type="checkbox" id="lassoTog" aria-label="Lasso selection"><span class="lab on">Lasso</span></label><label class="switch" title="Write the cluster labels at the centre of every shown cluster"><input type="checkbox" id="labTog" aria-label="Cluster labels"><span class="lab on">Labels</span></label></div></section>
     <section class="sec" id="secSp"><div class="shead"><b>Species</b><span><button data-all="sp">All</button> <button data-none="sp">None</button></span></div><input class="q" id="qSp" placeholder="Filter species…" aria-label="Filter species"><div id="listSp"></div></section>
     <section class="sec" id="secCl"><div class="shead"><b id="clTitle"></b><span><button id="selBtn" title="Tick only the joint clusters selected by the report (re-projected)">Sel</button> <button id="focusBtn" title="Tick only the functional focus clusters of the report">Focus</button> <button data-all="cl">All</button> <button data-none="cl">None</button></span></div><input class="q" id="qCl" placeholder="Filter clusters…" aria-label="Filter clusters"><div id="listCl"></div></section>
   </aside>
@@ -113,7 +115,7 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
 <script>
 const D = JSON.parse(document.getElementById("payload").textContent);
 const C = D.config, P = D.pages, $ = id => document.getElementById(id);
-const S = {page: 0, byCluster: false, cluster: D.cluster_keys[0], hidden: {sp: new Set(), cl: new Set()}, q: {sp: "", cl: ""}, size: C.marker_size, rev: 0, cam: {}, stacked: innerWidth < 900, log: false, find: null, lasso: null, drag: "lasso", keep: [], view: "3d", last: "3d", fit: false, proj: {x: 0, y: 1, az: 0, el: 0}};
+const S = {page: 0, byCluster: false, cluster: D.cluster_keys[0], hidden: {sp: new Set(), cl: new Set()}, q: {sp: "", cl: ""}, size: C.marker_size, rev: 0, cam: {}, stacked: innerWidth < 900, log: false, find: null, lasso: null, drag: "lasso", labels: true, keep: [], view: "3d", last: "3d", fit: false, proj: {x: 0, y: 1, az: 0, el: 0}};
 function decode(s, T) { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new T(u.buffer); }
 function page() {
   const p = P[S.page];
@@ -177,6 +179,7 @@ function plot(p, k, keep) {
     const q = project(p, m);
     layout["xaxis" + s] = axis2(`${t}-${pr.x + 1}${rot}`, q.rx, dom.x, "y" + s);
     layout["yaxis" + s] = {...axis2(`${t}-${pr.y + 1}${rot}`, q.ry, dom.y, "x" + s), scaleanchor: "x" + s};
+    if (S.labels) labels(p, q, keep, s).forEach(a => layout.annotations.push(a));
     return {type: "scattergl", mode: "markers", x: Float32Array.from(keep, i => q.x[i]), y: Float32Array.from(keep, i => q.y[i]), xaxis: "x" + s, yaxis: "y" + s, text, hovertemplate: "%{text}<extra></extra>", showlegend: false, selectedpoints: null, marker: {size: S.size * 2, opacity: C.alpha, color, line: {width: 0}}};
   });
   if (S.find !== null) p.methods.forEach(([m], j) => {
@@ -186,10 +189,15 @@ function plot(p, k, keep) {
   Plotly.react($("plot"), traces, layout, {responsive: true, displaylogo: false, toImageButtonOptions: {format: "png", scale: 2, filename: `${p.slug}_${S.view}_${k.replace(/\W+/g, "_")}`}});
   if (!$("plot")._camHook) {
     $("plot")._camHook = true;
-    $("plot").on("plotly_relayout", e => Object.keys(e).forEach(k => { const m = k.match(/^(scene\d*)\.camera$/); if (m) S.cam[m[1]] = e[k]; if (k === "dragmode") S.drag = e[k]; }));
+    $("plot").on("plotly_relayout", e => Object.keys(e).forEach(k => { const m = k.match(/^(scene\d*)\.camera$/); if (m) S.cam[m[1]] = e[k]; if (k === "dragmode") { S.drag = e[k]; $("lassoTog").checked = S.drag === "lasso"; } }));
     $("plot").on("plotly_selected", e => { if (!e || S.view !== "2d") return; const n = P[S.page].methods.length, sel = new Set(); e.points.forEach(pt => { if (pt.curveNumber < n) sel.add(S.keep[pt.pointIndex]); }); if (sel.size) { S.lasso = sel; draw(); } });
     $("plot").on("plotly_deselect", () => { if (S.lasso) { S.lasso = null; draw(); } });
   }
+}
+function labels(p, q, keep, s) {
+  const cats = p.sets[S.cluster].cats, cl = p._s[S.cluster], g = new Map(), med = a => { a.sort((u, v) => u - v); return a[a.length >> 1]; };
+  keep.forEach(i => { const c = cl[i]; if (!c) return; if (!g.has(c)) g.set(c, [[], []]); const v = g.get(c); v[0].push(q.x[i]); v[1].push(q.y[i]); });
+  return [...g].map(([c, [x, y]]) => ({text: `<b>${cats[c][0]}</b>`, x: med(x), y: med(y), xref: "x" + s, yref: "y" + s, showarrow: false, font: {size: C.font_legend, color: "#1f2330"}, bgcolor: "rgba(255,255,255,0.7)", borderpad: 1}));
 }
 function bars(p) {
   const b = p.bars, cats = p.sets.species.cats, col = Object.fromEntries(cats.map(c => [c[0], c[1]])), clCats = p.sets[S.cluster].cats;
@@ -286,7 +294,7 @@ function sync() {
 function go(i) { if (i < 0 || i >= P.length || i === S.page) return; S.page = i; S.find = null; S.lasso = null; $("find").value = ""; $("find").classList.remove("miss"); $("found").hidden = true; unfilter(); defaults(); sync(); draw(); }
 function syncView() {
   document.querySelectorAll("[data-view]").forEach(b => b.classList.toggle("on", b.dataset.view === S.view));
-  $("barsBox").hidden = S.view !== "bars"; $("stage").hidden = S.view === "bars"; $("ctl2d").hidden = S.view !== "2d";
+  $("barsBox").hidden = S.view !== "bars"; $("stage").hidden = S.view === "bars"; $("ctl2d").hidden = S.view !== "2d"; $("sec2d").hidden = S.view !== "2d";
   $("size").disabled = S.view === "bars"; $("reset").disabled = S.view === "bars"; $("reset").title = S.view === "3d" ? "Reset camera" : "Reset zoom";
 }
 function setView(v) { if (v === S.view) return; S.view = v; if (v !== "bars") S.last = v; S.fit = true; syncView(); draw(); }
@@ -314,6 +322,9 @@ $("find").onkeydown = e => { if (e.key === "Enter") find(e.target.value); else i
 $("find").onsearch = e => { if (!e.target.value) find(""); };
 $("exportIds").onclick = exportIds;
 $("lassoClr").onclick = () => { S.lasso = null; draw(); };
+$("lassoTog").checked = S.drag === "lasso"; $("labTog").checked = S.labels;
+$("lassoTog").onchange = e => { S.drag = e.target.checked ? "lasso" : "pan"; if (S.view === "2d") Plotly.relayout($("plot"), {dragmode: S.drag}); };
+$("labTog").onchange = e => { S.labels = e.target.checked; if (S.view === "2d") draw(); };
 $("selBtn").onclick = () => { defaults(); sync(); draw(); };
 $("focusBtn").onclick = () => { tick(P[S.page].focus); sync(); draw(); };
 $("reset").onclick = () => { S.rev++; S.cam = {}; draw(); };
