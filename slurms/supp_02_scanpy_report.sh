@@ -24,6 +24,9 @@ mapfile -t H5ADS < <(find "$OUT_DIR" -mindepth 2 -maxdepth 2 -name "*.h5ad" | so
 echo "[SLURM-INFO] --- Reporting ${#H5ADS[@]} .h5ad files ---"
 H5AD_LIST=$(printf "%s\n" "${H5ADS[@]}" | paste -sd, -)
 python3 src/h5ad_scanpy.py --h5ad "$H5AD_LIST" --yaml-in --yaml-out
+REPORT_RC=$?
+[ "$REPORT_RC" -ne 0 ] && echo "[SLURM-INFO] Error: h5ad_scanpy.py exited with $REPORT_RC (e.g. focus capture below min_capture_percent); the viewers are still written."
 echo "[SLURM-INFO] --- Writing interactive 3D UMAP/t-SNE and HDBSCAN HTML views ---"
 python3 src/h5ad_interactive.py --h5ad "$H5AD_LIST" --n_jobs "${SLURM_CPUS_PER_TASK:-1}" --yaml-in --yaml-out
 echo "[SLURM-INFO] $(date +'%Y-%m-%d %H:%M:%S') $(( $(date +%s) - START_TIME ))s $(free -m | awk 'NR==2 {print $3"MB"}')"
+exit "$REPORT_RC"

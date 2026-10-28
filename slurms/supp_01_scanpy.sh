@@ -5,7 +5,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=32G
-#SBATCH --time=08:00:00
+#SBATCH --time=16:00:00
 #SBATCH --output=logs/scanpy/scanpy_compute_%A_%a.log
 #SBATCH --array=0-2
 
@@ -28,16 +28,33 @@ MODEL=${MODELS[$TASK]}
 MODEL_DIR="$REPS_DIR/$MODEL"
 [ -d "$MODEL_DIR" ] || { echo "[SLURM-INFO] Error: missing model directory $MODEL_DIR." >&2; exit 1; }
 mapfile -t LABELS < <(awk -F'\t' '{sub(/\r$/,"")} NR==1{for(i=1;i<=NF;i++)if($i=="label"){col=i;break};next} col&&$col!=""{print $col}' "$TSV_PATH")
+mapfile -t PROBES < <(awk -F'\t' '{sub(/\r$/,"")} NR==1{for(i=1;i<=NF;i++){if($i=="label")l=i; if($i=="input_type")t=i};next} l&&t&&$t=="probe"{print $l}' "$TSV_PATH")
 NPZ_ARRAY=()
-for label in "${LABELS[@]}"; do [ -f "$MODEL_DIR/${label}_reps.npz" ] && NPZ_ARRAY+=("$MODEL_DIR/${label}_reps.npz") || echo "[SLURM-INFO] Warning: missing $MODEL_DIR/${label}_reps.npz"; done
+NPZ_TARGETS=()
+for label in "${LABELS[@]}"; do
+  [ -f "$MODEL_DIR/${label}_reps.npz" ] || { echo "[SLURM-INFO] Warning: missing $MODEL_DIR/${label}_reps.npz"; continue; }
+  NPZ_ARRAY+=("$MODEL_DIR/${label}_reps.npz")
+  [[ " ${PROBES[*]} " == *" ${label} "* ]] || NPZ_TARGETS+=("$MODEL_DIR/${label}_reps.npz")
+done
 [ ${#NPZ_ARRAY[@]} -ge 2 ] || { echo "[SLURM-INFO] Error: at least 2 *_reps.npz files are required in $MODEL_DIR for comparative analysis." >&2; exit 1; }
+[ ${#NPZ_TARGETS[@]} -ge 1 ] || { echo "[SLURM-INFO] Error: at least 1 target *_reps.npz is required in $MODEL_DIR." >&2; exit 1; }
 
 ###################################### run
-echo "[SLURM-INFO] === MODE: COMBINED (All files jointly) | MODEL: $MODEL ==="
-du -sh "${NPZ_ARRAY[@]}"
-NPZ_FILES_STR=$(printf "%s\n" "${NPZ_ARRAY[@]}" | paste -sd, -)
 YAML_OUT=""
 [ "$TASK" -eq 0 ] && YAML_OUT="--yaml-out"
-echo "[SLURM-INFO] --- Running Scanpy clustering + UMAP/t-SNE ---"
-python3 src/npz_scanpy.py --npzs "$NPZ_FILES_STR" --scanpy_dir "$OUT_DIR" --n_jobs "${SLURM_CPUS_PER_TASK:-1}" --yaml-in $YAML_OUT
+RUNS=()
+if [ ${#PROBES[@]} -gt 0 ] && [ ${#NPZ_TARGETS[@]} -lt ${#NPZ_ARRAY[@]} ]; then
+  [ ${#NPZ_TARGETS[@]} -ge 2 ] && RUNS+=("baseline:$(printf "%s\n" "${NPZ_TARGETS[@]}" | paste -sd, -)") || echo "[SLURM-INFO] Warning: fewer than 2 targets, no baseline run."
+  RUNS+=("focus:$(printf "%s\n" "${NPZ_ARRAY[@]}" | paste -sd, -)")
+else
+  RUNS+=("baseline:$(printf "%s\n" "${NPZ_ARRAY[@]}" | paste -sd, -)")
+fi
+for RUN in "${RUNS[@]}"; do
+  echo "[SLURM-INFO] === RUN: ${RUN%%:*} | MODEL: $MODEL ==="
+  NPZ_FILES_STR="${RUN#*:}"
+  du -sh ${NPZ_FILES_STR//,/ }
+  echo "[SLURM-INFO] --- Running Scanpy clustering + UMAP/t-SNE ---"
+  python3 src/npz_scanpy.py --npzs "$NPZ_FILES_STR" --scanpy_dir "$OUT_DIR" --n_jobs "${SLURM_CPUS_PER_TASK:-1}" --yaml-in $YAML_OUT || exit 1
+  YAML_OUT=""
+done
 echo "[SLURM-INFO] $(date +'%Y-%m-%d %H:%M:%S') $(( $(date +%s) - START_TIME ))s $(free -m | awk 'NR==2 {print $3"MB"}')"

@@ -1,0 +1,311 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[a4paper,margin=2.2cm]{geometry}
+\usepackage{array,booktabs,tabularx,ragged2e}
+\usepackage{enumitem}
+\usepackage{needspace}
+\usepackage{seqsplit}
+\usepackage[dvipsnames]{xcolor}
+\usepackage[hidelinks]{hyperref}
+\PassOptionsToPackage{obeyspaces,spaces}{url}
+\usepackage{xurl}
+
+\setlist{nosep,leftmargin=1.4em}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.5em}
+\widowpenalty=10000
+\clubpenalty=10000
+\renewcommand{\arraystretch}{1.25}
+\newcolumntype{L}{>{\RaggedRight\arraybackslash}X}
+\newcolumntype{P}[1]{>{\RaggedRight\arraybackslash}p{#1}}
+
+\DeclareUrlCommand\code{\urlstyle{tt}}
+\newcommand{\hash}[1]{\texttt{\seqsplit{#1}}}
+\newcommand{\tbd}[1]{\textcolor{BrickRed}{[#1]}}
+\newcommand{\doi}[1]{\href{https://doi.org/#1}{doi:#1}}
+\makeatletter
+\newcommand{\lbl}[1]{\par\if@nobreak\else\needspace{6\baselineskip}\fi\textbf{#1}\par\nopagebreak\@nobreaktrue}
+\makeatother
+\newenvironment{dtable}[2][\small]{\par\nopagebreak#1\noindent\tabularx{\linewidth}{#2}\toprule}{\bottomrule\endtabularx\par}
+
+\hypersetup{pdftitle={Data Management Plan -- SCambrian},pdfauthor={Sergio Senci}}
+
+\begin{document}
+
+\begin{center}
+{\LARGE\bfseries Data Management Plan}\\[0.6em]
+{\large Protein embedding and clustering of \emph{Aedes koreicus}, \emph{Ae.\ japonicus}, \emph{Ae.\ aegypti} and \emph{Ae.\ albopictus} proteomes and an Insecta immune-process reference set with the SCambrian pipeline}\\[0.4em]
+Data Management Plan (DMP), living document
+\end{center}
+
+\begin{dtable}{P{3.4cm}L}
+Item & Description \\ \midrule
+Version & 1.4 (2026-10-28) \\
+Data steward & Sergio Senci (\href{mailto:sergio.senci@areasciencepark.it}{sergio.senci@areasciencepark.it}, ORCID \href{https://orcid.org/0009-0005-9543-0461}{0009-0005-9543-0461}) \\
+Principal investigator & Francesca Cuturello (\href{mailto:francesca.cuturello@areasciencepark.it}{francesca.cuturello@areasciencepark.it}, ORCID \href{https://orcid.org/0000-0001-7242-7298}{0000-0001-7242-7298}) \\
+Affiliation & Laboratory of Data Engineering (LADE), Research and Innovation Technology Institute (RIT), Area Science Park, Trieste, Italy \\
+Infrastructure & ORFEO HPC cluster (Slurm; THIN and EPYC CPU partitions, DGX partition with NVIDIA A100), CephFS storage \\
+Repositories & \url{https://github.com/ssenci97/SCambrian}. Curation is the self-contained \code{raw/} workflow (download slurms pointing to stable sources, \code{CITATION.bib}, \code{ACKNOWLEDGEMENTS.txt}); analysis is the rest of the repository \\
+Out of scope & Differential gene expression. It will be added in a later version. \\
+\end{dtable}
+
+\section{Data summary}
+
+\subsection{Purpose}
+
+The project compares the proteomes of four \emph{Aedes} species, together with a reference set of insect proteins annotated to the immune system process, in protein language model embedding space. It identifies protein groups whose share differs between species and groups that are conserved. It reuses public data only and generates no experimental data.
+
+\subsection{Input data}
+
+\begin{dtable}{P{2.2cm}P{2.3cm}LP{3.6cm}P{2.4cm}}
+Label & Species & Source & Identifiers & Content \\ \midrule
+\code{koreicus} & \emph{Ae.\ koreicus} & Curated proteome from kor\_it (complete ORFs) and kor\_hu, concatenated & see below & Protein FASTA \\
+\code{japonicus} & \emph{Ae.\ japonicus} & Curated proteome from jap\_it & see below & Protein FASTA \\
+\code{aegypti} & \emph{Ae.\ aegypti} & UniProtKB & query \code{(organism_id:7159)}, release 2026\_03 & Protein FASTA and annotation TSV \\
+\code{albopictus} & \emph{Ae.\ albopictus} & UniProtKB & query \code{(organism_id:7160)}, release 2026\_03 & Protein FASTA and annotation TSV \\
+\code{insecta_immune} (probe) & Insecta spp. & UniProtKB & query \code{(taxonomy_id:50557) AND ((go:0006955) OR (keyword:KW-0391) OR (keyword:KW-0399))}, release \tbd{UniProt release at download} & Protein FASTA and annotation TSV \\
+\end{dtable}
+
+The UniProt queries return all entries of the taxon (Swiss-Prot and TrEMBL), not only the reference proteome. UniProtKB release 2026\_03 (published 2026-09-02) was current for the whole project; the files were downloaded between 2026-09-28 (first commit) and 2026-10-26 (first commit of the files). The exact date is the file modification time on ORFEO.
+
+Every input has an \code{input_type} in the query table: \code{target} (compared set) or \code{probe} (functional reference). The \code{insecta_immune} probe is not a species: it holds every UniProtKB entry of Insecta (NCBI Taxonomy 50557) matching the functional focus, a documented and arbitrary choice: GO:0006955 \emph{immune system process} with its descendant terms, or the keywords KW-0391 \emph{Immunity} and KW-0399 \emph{Innate immunity}; KW-0393 \emph{Immunoglobulin domain} is excluded because it marks a fold, not a function. On UniProtKB 2026\_03 (2026-10-28) the focus matches 23,310 Insecta, 255 \emph{Ae.\ aegypti} and 314 \emph{Ae.\ albopictus} entries. The same clause is applied to every UniProtKB target (\code{src/dw_uniprot_focus.py}) to tag its annotated proteins; local-FASTA targets have no annotation. Probe accessions already present in a target are dropped from the probe, so each protein is counted once. The analysis is a paired comparison: for every model, a baseline run of the targets alone and a focus run of the targets with the probe are clustered with the same parameters and compared on the shared target proteins (adjusted Rand index, normalised mutual information, cluster flows); without a probe row the pipeline runs the baseline alone. The probe release and download date are recorded when step~01 downloads it, and every focus list stores its clause, UniProt release and date in a \code{.params} sidecar.
+
+\lbl{Sources of the curated proteomes}
+\begin{dtable}{P{1.4cm}P{3.0cm}P{2.2cm}LP{2.2cm}}
+ID & Data & Repository & Identifiers & Size \\ \midrule
+\code{kor_it} & \emph{Ae.\ koreicus} transcriptome, Italy & NCBI TSA & GKMD01, BioProject PRJNA947548, BioSample SAMN34994639 & 310,687 contigs \\
+\code{jap_it} & \emph{Ae.\ japonicus} transcriptome, Italy & NCBI TSA & GKMC01, BioProject PRJNA947978, BioSample SAMN34997961, isolate Unicam-2023b & 394,152 contigs \\
+\code{kor_hu} & \emph{Ae.\ koreicus} genome and annotation, Hungary & Zenodo (v1, 2023-12-06) & \doi{10.5281/zenodo.10278300}, assembly GCA\_024533555.2 & 1.2 GB (FASTA, GFF3) \\
+\end{dtable}
+
+\lbl{Models}
+\begin{dtable}{P{1.8cm}P{5.9cm}L}
+Model & Source & Version \\ \midrule
+ESMC 300M & Hugging Face \code{biohub/esmc-300m-2024-12} (formerly \code{EvolutionaryScale/}) & via \code{esm} 3.2.1.post1; revision \hash{7f10b20ae75017b2dbc884070e03434515709a8d} (to confirm from the ORFEO cache) \\
+ESMC 600M & Hugging Face \code{biohub/esmc-600m-2024-12} (formerly \code{EvolutionaryScale/}) & via \code{esm} 3.2.1.post1; revision \hash{e4d83bc7e10fd55c92e598e545f4a76bf04a6e5c} (to confirm from the ORFEO cache) \\
+ESMC 6B & Hugging Face \code{biohub/ESMC-6B} & snapshot \hash{af1602ba7406f521b11bf8f81d52af378cde09e4} (25.4 GB) \\
+\end{dtable}
+
+\subsection{Generated data}
+
+\begin{dtable}{P{4.6cm}LP{4.2cm}}
+Data & Location & Format \\ \midrule
+Curated proteomes & \code{raw/proteomes/} & FASTA \\
+Sequences and UniProt annotations & \code{data/sequences/}, \code{data/features/} & FASTA, TSV \\
+Deduplicated sequences & \code{data/dedup/} & FASTA, \code{.params} \\
+Sequence clusters & \code{data/clusters/<label>/} & TSV, FASTA, text \\
+Embeddings & \code{data/esm-reps/<model>/} & NPZ (float32) \\
+Focus accession lists & \code{data/features/<label>_focus_ids.txt}, \code{.params} & text, YAML \\
+Embedding-space analysis & \code{data/scanpy/<labels>__<model>/} & H5AD, CSV, PNG, PDF, HTML \\
+Functional focus layer & \code{data/scanpy/<labels>__<model>/focus_*}, \code{focus-modules/} & CSV, PNG, PDF, text \\
+Code, configuration, logs & \code{src/}, \code{slurms/}, \code{configs/}, \code{nbs/}, \code{logs/} & Python, Bash, YAML, TSV, text \\
+\end{dtable}
+
+\subsection{Volume}
+
+\begin{itemize}
+\item Raw inputs: a few GB.
+\item Model weights: about 27 GB. They are cached, not redistributed.
+\item Embeddings: about 4 KB (300M), 4.5 KB (600M) and 10 KB (6B) per protein.
+\item Total derived data: below 50 GB.
+\end{itemize}
+
+\subsection{Sensitive data}
+
+None. All data are public and come from non-human organisms.
+
+\section{FAIR data management}
+
+\subsection{Findable}
+
+\begin{itemize}
+\item Source data have persistent identifiers (section~1.2).
+\item Derived data will be deposited on Zenodo with a DOI: \doi{10.5281/zenodo.23741554}.
+\item The repository will be released through GitHub--Zenodo with a DOI: \tbd{code DOI}.
+\item Files are prefixed with the label. Output names carry their parameters.
+\item Joint clusters are named with letters, per-species clusters with numbers.
+\item Metadata:
+  \begin{itemize}
+  \item curated FASTA headers carry provenance (section~2.3);
+  \item \code{CITATION.bib} and \code{ACKNOWLEDGEMENTS.txt} list sources and licences;
+  \item \code{.h5ad} files store their parameters in \code{uns["params"]};
+  \item dedup outputs have a \code{.params} file.
+  \end{itemize}
+\item Each published result reports the repository commits, model versions, software versions, UniProt release and download date (2026-09-28 to 2026-10-26, see section~1.2).
+\end{itemize}
+
+\subsection{Accessible}
+
+\begin{itemize}
+\item Source data are open on NCBI, Zenodo and UniProt. No login is needed.
+\item ESMC weights are public. No token is needed.
+  \begin{itemize}
+  \item 300M and 600M are downloaded by \code{ESMC.from_pretrained()}.
+  \item 6B is downloaded by \code{huggingface_hub.snapshot_download()} and mapped onto the \code{esm} model by \code{src/extract_reps_biohub.py}.
+  \item Inference runs locally. The hosted API (biohub.ai, formerly Forge) is not used.
+  \end{itemize}
+\item Derived data will be open on Zenodo at publication.
+\item Code is public on GitHub under Apache-2.0.
+\item Download scripts:
+  \begin{itemize}
+  \item mosquito data: \code{raw/slurm_dw_proc.sh} (HTTPS, Zenodo API);
+  \item UniProtKB: \code{slurms/01_dw_uniprot.sh} (UniProt REST \code{stream} endpoint).
+  \end{itemize}
+\end{itemize}
+
+\subsection{Interoperable}
+
+\begin{itemize}
+\item Formats are open: FASTA, GFF3, TSV/CSV, NPZ, H5AD, YAML, PNG/PDF/HTML.
+\item FASTA headers:
+  \begin{itemize}
+  \item Italy: \code{>id=<seqid> organism=<species> dataset=<IT_GKMD01|IT_GKMC01> type=<ORF type> len=<aa> strand=<+|-> pos=<start-end> score=<score>}
+  \item Hungary: \code{>id=<seqid> organism=Aedes_koreicus dataset=HU_GCA_024533555.2}
+  \end{itemize}
+\item UniProtKB accessions, NCBI Taxonomy IDs (7159, 7160, 140438, 50557) Gene Ontology terms (GO:0006955) and UniProt keywords (KW-0391, KW-0399) are kept as provided.
+\item Curation:
+  \begin{itemize}
+  \item TransDecoder (\code{--single_best_only}) predicts ORFs from transcripts;
+  \item gffread extracts proteins from the genome annotation;
+  \item SCambrian uses the filtered (complete ORFs only) proteomes.
+  \end{itemize}
+\item The proteomes differ in origin (predicted ORFs, gene models, UniProtKB entries). Two steps limit the bias: deduplication at 95\% identity, and normalisation of cluster counts by proteome size.
+\item Software: Python 3.10, PyTorch 2.4.1 (CUDA 12.1), flash-attn 2.6.3, \code{esm} 3.2.1.post1, Scanpy $\geq$ 1.10, igraph, umap-learn, scikit-learn, hdbscan, MMseqs2 (commit \hash{8cc5ce367b5638c4306c2d7cfc652dd099a4643f}), TransDecoder 6.0.0, gffread \tbd{gffread version}. The environment is built by \code{esmc_config.sh}.
+\end{itemize}
+
+\subsection{Reusable}
+
+\lbl{Licences}
+\begin{dtable}{P{4.2cm}LP{4.4cm}}
+Resource & Licence & Conditions \\ \midrule
+UniProtKB & CC BY 4.0 & Cite UniProt and the release \\
+Zenodo 10278300 & CC BY 4.0 & Cite the dataset and article \\
+NCBI TSA & NCBI policy: no restrictions; submitters may claim rights & Cite the accessions and article \\
+ESMC weights and \code{esm} code & MIT (\textcopyright{} 2026 Chan Zuckerberg Biohub) and Biohub Acceptable Use Policy (27 May 2026) & Keep the licence notice; follow the policy; cite ESMC \\
+MMseqs2, gffread & MIT & Cite \\
+TransDecoder & BSD-style (Broad Institute) & Cite \\
+PyTorch, flash-attn, Scanpy, umap-learn, scikit-learn, hdbscan & BSD-3-Clause & Cite \\
+python-igraph & GPL-2.0 & Used as a library, not redistributed \\
+Tectonic & MIT & Used to build this document \\
+\end{dtable}
+
+\lbl{Notes}
+\begin{itemize}
+\item Earlier ESMC releases had other licences: Cambrian Open (300M), Cambrian Non-Commercial (600M), Cambrian Inference Clickthrough (6B, Forge/AWS only). The Hugging Face repositories were relicensed to MIT plus the Biohub Acceptable Use Policy on 2026-06-03, before this project started (2026-09-28), so all weights used here are under MIT. Snapshot hashes are recorded in section~1.2.
+\item Derived data, embeddings included, will be released under CC BY 4.0. Sources and changes will be stated.
+\end{itemize}
+
+\lbl{Quality assurance}
+\begin{itemize}
+\item Downloads are checked (gzip/FASTA signature, no HTML error pages), written atomically and retried.
+\item FASTA headers are validated. Sequence and error counts are logged.
+\item Missing inputs or invalid paths stop a step with an error. Dependent steps are cancelled.
+\item The 6B checkpoint load fails on any missing or unexpected parameter.
+\item Cluster metrics are reviewed before interpretation.
+\item The report fails, after writing all its outputs, when the focus clusters capture less than 1\% of the target proteins; the capture is recorded overall and per target.
+\end{itemize}
+
+\lbl{Reproducibility}
+\begin{itemize}
+\item Parameters are in \code{configs/param_configs.yaml}. Labels and queries are in \code{configs/query_configs.tsv}.
+\item Scripts read and write their parameters with \code{--yaml-in} and \code{--yaml-out}.
+\item Steps rebuild only missing or outdated outputs.
+\item The random seed is 42.
+\item Slurm logs record job ID, date, run time and memory.
+\end{itemize}
+
+\textbf{Availability:} Zenodo keeps deposits for the lifetime of the repository (at least 20 years).
+
+\subsection{Citations}
+
+\lbl{Data}
+\begin{itemize}
+\item Catapano PL et al. De novo genome assembly of the invasive mosquito species \emph{Aedes japonicus} and \emph{Aedes koreicus}. \emph{Parasites \& Vectors} 2023;16:427. \doi{10.1186/s13071-023-06048-w}.
+\item Nagy NA et al. The updated genome of the Hungarian population of \emph{Aedes koreicus}. \emph{Scientific Reports} 2024;14:7545. \doi{10.1038/s41598-024-58096-6}. Data: \doi{10.5281/zenodo.10278300}.
+\item The UniProt Consortium. UniProt: the Universal Protein Knowledgebase in 2025. \emph{Nucleic Acids Research} 2025;53(D1):D609--D617. \doi{10.1093/nar/gkae1010}.
+\end{itemize}
+
+\lbl{Models and software}
+\begin{itemize}
+\item Candido S et al. Language Modeling Materializes a World Model of Protein Biology. bioRxiv 2026. \doi{10.64898/2026.06.03.729735}.
+\item ESM Team. ESM Cambrian. EvolutionaryScale, 2024. \url{https://evolutionaryscale.ai/blog/esm-cambrian}
+\item Haas BJ et al. \emph{Nature Protocols} 2013;8:1494--1512. \doi{10.1038/nprot.2013.084} (TransDecoder).
+\item Pertea G, Pertea M. \emph{F1000Research} 2020;9:304. \doi{10.12688/f1000research.23297.2} (gffread).
+\item Steinegger M, S\"oding J. \emph{Nature Biotechnology} 2017;35:1026--1028. \doi{10.1038/nbt.3988} (MMseqs2).
+\item Steinegger M, S\"oding J. \emph{Nature Communications} 2018;9:2542. \doi{10.1038/s41467-018-04964-5} (Linclust).
+\item Wolf FA et al. \emph{Genome Biology} 2018;19:15. \doi{10.1186/s13059-017-1382-0} (Scanpy).
+\item Traag VA et al. \emph{Scientific Reports} 2019;9:5233. \doi{10.1038/s41598-019-41695-z} (Leiden).
+\item McInnes L et al. UMAP. arXiv:1802.03426, 2018.
+\item McInnes L et al. \emph{JOSS} 2017;2(11):205. \doi{10.21105/joss.00205} (HDBSCAN).
+\item Benjamini Y, Hochberg Y. \emph{J R Stat Soc B} 1995;57:289--300.
+\item The Tectonic Project. Tectonic typesetting system, v0.15.0. \url{https://tectonic-typesetting.github.io} (builds this document: \code{tectonic DMP.tex}).
+\item SCambrian, \url{https://github.com/ssenci97/SCambrian}, release v1.0.0. doi:\tbd{code DOI}.
+\end{itemize}
+
+\lbl{Acknowledgement}
+\begin{quote}
+We thank the UniProt Consortium for UniProtKB; P.L.~Catapano, G.~Favia and co-authors (University of Camerino) for the NCBI TSA transcriptomes GKMD01 and GKMC01; N.A.~Nagy, L.~Laczk\'o and co-authors for the Hungarian \emph{Ae.\ koreicus} genome (\doi{10.5281/zenodo.10278300}); NCBI/INSDC for data hosting; Biohub for the ESM Cambrian models; and Area Science Park for the ORFEO cluster.
+\end{quote}
+
+\section{Workflow}
+
+\begin{dtable}[\footnotesize]{P{2.0cm}P{4.6cm}LP{2.4cm}P{2.5cm}}
+Step & Script & Tool and settings & Slurm resources & Output \\ \midrule
+0. Environment & \code{esmc_config.sh} & conda & DGX, 1 A100, 16 GB, 4 h & \code{./.env} \\
+1. Mosquito download & \code{raw/slurm_dw_proc.sh} & HTTPS, Zenodo API & 1 CPU, 4 GB, 2 h & \code{raw/raw/} \\
+2. Curation & \code{raw/slurm_transdecoder.sh} & TransDecoder, gffread & 2 CPU, 16 GB, 8 h & \code{raw/proteomes/} \\
+3. Sequences & \code{slurms/01_dw_uniprot.sh} & UniProt REST, or copy of local FASTA; focus accessions per UniProt target & THIN, 1 CPU, 2 GB, 2 h & \code{data/sequences/}, \code{data/features/} \\
+4. Clustering & \code{slurms/02_mmseqs2.sh} & MMseqs2: dedup at 0.95 identity, then clusters at 0.9 $\rightarrow$ 0.2; coverage 0.8 & THIN, 16 CPU, 20 GB, 4 h & \code{data/dedup/}, \code{data/clusters/} \\
+5. Embeddings & \code{slurms/03_reps.sh} & ESMC 300M, 600M, 6B; mean over residues & DGX, 1 A100, 100 GB, 4 h per label $\times$ model & \code{data/esm-reps/} \\
+6. Embedding clusters (baseline and focus runs) & \code{slurms/supp_01_scanpy.sh} & L2 norm, cosine kNN ($k = 15$), Leiden (res.\ 1.0), UMAP, t-SNE & EPYC, 16 CPU, 32 GB, 16 h & \code{.h5ad} \\
+7. Report & \code{slurms/supp_02_scanpy_report.sh} & Targets: chi-square with BH ($q < 0.05$), fold change $\geq 2$; focus: hypergeometric with BH, capture $\geq 1\%$; HDBSCAN viewer & EPYC, 4 CPU, 16 GB, 1 h & PDF, CSV, PNG, HTML \\
+\end{dtable}
+
+\code{bash slurms/run_all.sh} chains steps 3--7.
+
+\section{Resources}
+
+\textbf{Costs:} none for data, models or Zenodo. Compute and storage are covered by Area Science Park on ORFEO. Step~5 uses at most 48 A100 GPU-hours per full run.
+
+\lbl{Roles}
+\begin{dtable}{P{3.6cm}P{3.6cm}L}
+Role & Name & Tasks \\ \midrule
+Data steward & Sergio Senci & Runs the workflow, maintains code and documentation, manages backups and deposits \\
+Principal investigator & Francesca Cuturello & Approves sharing and checks licence compliance \\
+\end{dtable}
+
+\section{Storage and preservation}
+
+\begin{itemize}
+\item \textbf{Storage:} ORFEO CephFS. Access is limited to project members.
+\item \textbf{Git:} embeddings, logs, temporary files and the conda environment are not tracked.
+\item \textbf{Raw data:} read-only after download. No script modifies it.
+\item \textbf{Preserved:} code, configuration, credit files, the processed curation outputs (\code{raw/proteomes/}, \code{raw/data/}), curated proteomes, downloaded UniProt files, clusters, embeddings, \code{.h5ad} files and result tables.
+\item \textbf{Not preserved:} the original downloads in \code{raw/raw/} (re-fetched by \code{raw/slurm_dw_proc.sh} from NCBI TSA and Zenodo), intermediates and model weights. They can be regenerated.
+\item \textbf{Backup:} Git and GitHub for code. Data are copied to the ORFEO Long Term Storage (LTS) partition (see the ORFEO documentation) every \tbd{backup frequency}.
+\item \textbf{Integrity:} SHA-256 checksums are stored in \code{SHA256SUMS} and deposited with the data.
+\item \textbf{Cleaning:} temporary files are deleted after outputs are validated. Outputs made with outdated parameters are deleted by hand.
+\item \textbf{Long term:} Zenodo.
+\end{itemize}
+
+\section{Ethics and legal compliance}
+
+\begin{itemize}
+\item The data are public, non-human and non-personal. No ethics approval, consent or GDPR measure is needed.
+\item Licences are respected as described in section~2.4.
+\item ESMC is used to describe existing proteomes only. No sequences are designed. This complies with the Biohub Acceptable Use Policy.
+\end{itemize}
+
+\section{Revision history}
+
+\begin{dtable}{P{1.6cm}P{2.4cm}L}
+Version & Date & Description \\ \midrule
+1.0 & 2026-10-28 & Initial version \\
+1.1 & 2026-10-28 & Renamed to \code{DMP.md}; placeholders filled (PI, versions, UniProt release, model revisions, licence, backup); curation moved to \code{raw/} \\
+1.2 & 2026-10-28 & Converted to LaTeX (\code{DMP.tex}) for stable A4 pagination; built with Tectonic \\
+1.3 & 2026-10-28 & Added the \code{insecta_immune} reference set (UniProtKB, GO:0006955, Insecta); dataset DOI reserved \\
+1.4 & 2026-10-28 & Input roles (target, probe); documented immune focus clause (GO:0006955, KW-0391, KW-0399); annotated focus tier of UniProt targets; functional focus layer (enrichment, capture, gravity); paired baseline and focus runs \\
+\end{dtable}
+
+\end{document}

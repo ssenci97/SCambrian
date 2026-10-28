@@ -7,7 +7,7 @@
 #SBATCH --mem=2G
 #SBATCH --time=02:00:00
 #SBATCH --output=logs/uniprot/dw_UP_%A_%a.log
-#SBATCH --array=1-4
+#SBATCH --array=1-5
 #SBATCH --open-mode=append
 ###################################### conda
 source ~/scratch/miniconda/etc/profile.d/conda.sh
@@ -19,6 +19,7 @@ START_TIME=$(date +%s)
 if [ "${SLURM_ARRAY_TASK_ID:-1}" -eq 1 ]; then
   python3 src/dw_uniprot_seqs.py --yaml-out
   python3 src/dw_uniprot_features.py --yaml-out
+  python3 src/dw_uniprot_focus.py --yaml-out
 fi
 ###################################### parse-config
 eval "$(python3 -c "import yaml; p = yaml.safe_load(open('${CONFIG_YAML}')); s1 = p.get('dw_uniprot_seqs', {}); s2 = p.get('dw_uniprot_features', {}); print(f'SEQ_DIR={s1.get(\"sequences_dir\", \"data/sequences\")}'); print(f'FEAT_DIR={s2.get(\"features_dir\", \"data/features\")}'); print(f'TSV_PATH={s1.get(\"query_table\", \"configs/query_configs.tsv\")}'); print(f'OVERWRITE={str(bool(s1.get(\"overwrite\") or s2.get(\"overwrite\"))).lower()}')")"
@@ -40,6 +41,7 @@ fi
 FP_TSV="${SEQ_DIR}/${LABEL}_seqs.tsv"
 FP_FASTA="${SEQ_DIR}/${LABEL}_seqs.fasta"
 FP_FEAT="${FEAT_DIR}/${LABEL}_feats.tsv"
+python3 src/dw_uniprot_focus.py --label "${LABEL}" --yaml-in "${CONFIG_YAML}"
 [ "${OVERWRITE}" != "true" ] && [ -f "${FP_TSV}" ] && [ -f "${FP_FASTA}" ] && [ -f "${FP_FEAT}" ] && echo "[SLURM-INFO] Files exist. Skipping" && exit 0
 python3 src/dw_uniprot_seqs.py --query "${QUERY_STR}" --label "${LABEL}" --out_tsv "${FP_TSV}" --out_fasta "${FP_FASTA}" --out_ids "${SEQ_DIR}/${LABEL}_ids.txt" --yaml-in "${CONFIG_YAML}"
 python3 src/dw_uniprot_features.py --query "${QUERY_STR}" --label "${LABEL}" --out_tsv "${FP_FEAT}" --yaml-in "${CONFIG_YAML}"

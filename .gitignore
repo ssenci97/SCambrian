@@ -10,3 +10,11 @@ logs/
 tmp/
 CLAUDE.md
 __pycache__/
+# Original downloads, re-fetched by raw/slurm_dw_proc.sh
+raw/raw/
+# TransDecoder checkpoints and intermediates (contain absolute HPC paths)
+*.transdecoder_dir/
+# Partial downloads
+*.part
+# Build output of DMP.tex (tectonic DMP.tex)
+DMP.pdf

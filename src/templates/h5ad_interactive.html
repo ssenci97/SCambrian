@@ -98,9 +98,9 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
 </header>
 <main>
   <aside id="side">
-    <div><div class="find"><input id="find" type="search" placeholder="Find protein ID…" aria-label="Find protein ID" autocomplete="off"><button id="exportIds" title="Download the IDs of the points shown">&#10515; IDs</button></div><div id="linfo" class="muted"></div><div class="muted">click toggles · double-click isolates · click a bar shows its cluster<br>← → pages · V view · C colouring · L log bars · / find</div><div id="found" class="found" hidden></div></div>
+    <div><div class="find"><input id="find" type="search" placeholder="Find protein ID…" aria-label="Find protein ID" autocomplete="off"><button id="exportIds" title="Download the IDs of the points shown">&#10515; IDs</button><button id="lassoClr" title="Clear the lasso selection" hidden>&#10005; lasso</button></div><div id="linfo" class="muted"></div><div class="muted">click toggles · double-click isolates · click a bar shows its cluster<br>2D: lasso filters points · double-click clears<br>← → pages · V view · C colouring · L log bars · / find</div><div id="found" class="found" hidden></div></div>
     <section class="sec" id="secSp"><div class="shead"><b>Species</b><span><button data-all="sp">All</button> <button data-none="sp">None</button></span></div><input class="q" id="qSp" placeholder="Filter species…" aria-label="Filter species"><div id="listSp"></div></section>
-    <section class="sec" id="secCl"><div class="shead"><b id="clTitle"></b><span><button id="selBtn" title="Tick only the joint clusters selected by the report (re-projected)">Sel</button> <button data-all="cl">All</button> <button data-none="cl">None</button></span></div><input class="q" id="qCl" placeholder="Filter clusters…" aria-label="Filter clusters"><div id="listCl"></div></section>
+    <section class="sec" id="secCl"><div class="shead"><b id="clTitle"></b><span><button id="selBtn" title="Tick only the joint clusters selected by the report (re-projected)">Sel</button> <button id="focusBtn" title="Tick only the functional focus clusters of the report">Focus</button> <button data-all="cl">All</button> <button data-none="cl">None</button></span></div><input class="q" id="qCl" placeholder="Filter clusters…" aria-label="Filter clusters"><div id="listCl"></div></section>
   </aside>
   <div class="right">
     <div id="barsBox"><button id="logBtn" class="corner" title="Toggle log scale (L)">log</button><div id="bars"></div></div>
@@ -113,7 +113,7 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
 <script>
 const D = JSON.parse(document.getElementById("payload").textContent);
 const C = D.config, P = D.pages, $ = id => document.getElementById(id);
-const S = {page: 0, byCluster: false, cluster: D.cluster_keys[0], hidden: {sp: new Set(), cl: new Set()}, q: {sp: "", cl: ""}, size: C.marker_size, rev: 0, cam: {}, stacked: innerWidth < 900, log: false, find: null, keep: [], view: "3d", last: "3d", fit: false, proj: {x: 0, y: 1, az: 0, el: 0}};
+const S = {page: 0, byCluster: false, cluster: D.cluster_keys[0], hidden: {sp: new Set(), cl: new Set()}, q: {sp: "", cl: ""}, size: C.marker_size, rev: 0, cam: {}, stacked: innerWidth < 900, log: false, find: null, lasso: null, drag: "lasso", keep: [], view: "3d", last: "3d", fit: false, proj: {x: 0, y: 1, az: 0, el: 0}};
 function decode(s, T) { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new T(u.buffer); }
 function page() {
   const p = P[S.page];
@@ -138,7 +138,7 @@ function axis(t, r) { return {range: r, autorange: false, title: {text: t, font:
 function axis2(t, r, dom, anchor) { return {title: {text: t, font: {size: C.font_tick + 1}}, range: r, autorange: false, domain: dom, anchor, constrain: "domain", zeroline: false, showline: true, mirror: true, linecolor: "#3a3f4b", gridcolor: "#e6e8ec", tickfont: {size: C.font_tick}}; }
 function render() {
   const p = page(), k = key(), codes = p._s[k], keep = [], sp = p._s.species, cl = p._s[S.cluster];
-  for (let i = 0; i < codes.length; i++) if (!S.hidden.sp.has(sp[i]) && !S.hidden.cl.has(cl[i])) keep.push(i);
+  for (let i = 0; i < codes.length; i++) if (!S.hidden.sp.has(sp[i]) && !S.hidden.cl.has(cl[i]) && (!S.lasso || S.lasso.has(i))) keep.push(i);
   S.keep = keep;
   if (S.view === "bars") bars(p); else plot(p, k, keep);
   if (S.fit) { S.fit = false; Plotly.Plots.resize(S.view === "bars" ? $("bars") : $("plot")); }
@@ -163,6 +163,7 @@ function plot(p, k, keep) {
   const set = p.sets[k], codes = p._s[k], cols = set.cats.map(c => c[1]), extra = D.hover_keys.includes(k) ? null : k, n = p.methods.length, is3 = S.view === "3d", pr = S.proj, rot = pr.az || pr.el ? "′" : "";
   const text = keep.map(i => extra ? p._h[i] + `<br>${extra}: ${set.cats[codes[i]][0]}` : p._h[i]), color = keep.map(i => cols[codes[i]]);
   const layout = {uirevision: is3 ? `${S.rev}` : `${S.rev}|${pr.x}${pr.y}|${pr.az}|${pr.el}`, margin: is3 ? {l: 0, r: 0, t: 36, b: 0} : {l: 56, r: 12, t: 36, b: 48}, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "#ffffff", font: {family: C.font_family, size: C.font_tick, color: "#1f2330"}, hoverlabel: {font: {size: 13, family: C.font_family}, bgcolor: "#ffffff", bordercolor: "#c9ced6"}, annotations: []};
+  if (!is3) { layout.dragmode = S.drag; layout.selections = []; }
   const traces = p.methods.map(([m, t], j) => {
     const a = j / n + (j ? 0.005 : 0), b = (j + 1) / n - (j < n - 1 ? 0.005 : 0), dom = S.stacked ? {x: [0, 1], y: [1 - b, 1 - a - (j < n - 1 ? 0.03 : 0)]} : {x: [a + (is3 ? 0 : 0.02), b - (is3 ? 0 : 0.02)], y: [0, 1]}, s = j ? String(j + 1) : "";
     layout.annotations.push({text: `<b>${t}</b>`, showarrow: false, xref: "paper", yref: "paper", x: (dom.x[0] + dom.x[1]) / 2, y: dom.y[1], yanchor: "bottom", font: {size: C.font_title}});
@@ -176,14 +177,19 @@ function plot(p, k, keep) {
     const q = project(p, m);
     layout["xaxis" + s] = axis2(`${t}-${pr.x + 1}${rot}`, q.rx, dom.x, "y" + s);
     layout["yaxis" + s] = {...axis2(`${t}-${pr.y + 1}${rot}`, q.ry, dom.y, "x" + s), scaleanchor: "x" + s};
-    return {type: "scattergl", mode: "markers", x: Float32Array.from(keep, i => q.x[i]), y: Float32Array.from(keep, i => q.y[i]), xaxis: "x" + s, yaxis: "y" + s, text, hovertemplate: "%{text}<extra></extra>", showlegend: false, marker: {size: S.size * 2, opacity: C.alpha, color, line: {width: 0}}};
+    return {type: "scattergl", mode: "markers", x: Float32Array.from(keep, i => q.x[i]), y: Float32Array.from(keep, i => q.y[i]), xaxis: "x" + s, yaxis: "y" + s, text, hovertemplate: "%{text}<extra></extra>", showlegend: false, selectedpoints: null, marker: {size: S.size * 2, opacity: C.alpha, color, line: {width: 0}}};
   });
   if (S.find !== null) p.methods.forEach(([m], j) => {
     const f = S.find, s = j ? String(j + 1) : "", ring = {mode: "markers", text: [p._h[f]], hovertemplate: "%{text}<extra></extra>", showlegend: false, marker: {size: 14, symbol: "circle-open", color: "#000000", line: {width: 3}}}, c = p._c[m], q = is3 ? null : project(p, m);
     traces.push(is3 ? {...ring, type: "scatter3d", x: [c[3 * f]], y: [c[3 * f + 1]], z: [c[3 * f + 2]], scene: "scene" + s} : {...ring, type: "scattergl", x: [q.x[f]], y: [q.y[f]], xaxis: "x" + s, yaxis: "y" + s});
   });
   Plotly.react($("plot"), traces, layout, {responsive: true, displaylogo: false, toImageButtonOptions: {format: "png", scale: 2, filename: `${p.slug}_${S.view}_${k.replace(/\W+/g, "_")}`}});
-  if (!$("plot")._camHook) { $("plot")._camHook = true; $("plot").on("plotly_relayout", e => Object.keys(e).forEach(k => { const m = k.match(/^(scene\d*)\.camera$/); if (m) S.cam[m[1]] = e[k]; })); }
+  if (!$("plot")._camHook) {
+    $("plot")._camHook = true;
+    $("plot").on("plotly_relayout", e => Object.keys(e).forEach(k => { const m = k.match(/^(scene\d*)\.camera$/); if (m) S.cam[m[1]] = e[k]; if (k === "dragmode") S.drag = e[k]; }));
+    $("plot").on("plotly_selected", e => { if (!e || S.view !== "2d") return; const n = P[S.page].methods.length, sel = new Set(); e.points.forEach(pt => { if (pt.curveNumber < n) sel.add(S.keep[pt.pointIndex]); }); if (sel.size) { S.lasso = sel; draw(); } });
+    $("plot").on("plotly_deselect", () => { if (S.lasso) { S.lasso = null; draw(); } });
+  }
 }
 function bars(p) {
   const b = p.bars, cats = p.sets.species.cats, col = Object.fromEntries(cats.map(c => [c[0], c[1]])), clCats = p.sets[S.cluster].cats;
@@ -218,7 +224,8 @@ function checklist(s, cats, coloured) {
 function sidebar(p, n) {
   const spCats = p.sets.species.cats;
   S.n = n;
-  $("linfo").textContent = `${n.toLocaleString()} / ${p._s.species.length.toLocaleString()} points shown`;
+  $("linfo").textContent = `${n.toLocaleString()} / ${p._s.species.length.toLocaleString()} points shown${S.lasso ? ` · lasso ${S.lasso.size.toLocaleString()}` : ""}`;
+  $("lassoClr").hidden = !S.lasso;
   $("secSp").hidden = order(spCats, false).filter(i => i > 0).length < 2;
   $("clTitle").textContent = S.cluster;
   $("listSp").replaceChildren(...checklist("sp", spCats, !S.byCluster));
@@ -256,12 +263,16 @@ function exportIds() {
   a.download = `${p.slug}_${key().replace(/\W+/g, "_")}_${S.keep.length}_ids.txt`;
   a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-function defaults() {
-  const p = P[S.page], sel = new Set(p.selected || []), cats = p.sets[D.leiden_key].cats;
-  $("selBtn").hidden = !sel.size;
-  if (!sel.size) return;
+function tick(list) {
+  const p = P[S.page], want = new Set(list || []), cats = p.sets[D.leiden_key].cats;
+  if (!want.size) return;
   S.cluster = D.leiden_key; $("clusterSel").value = S.cluster; S.byCluster = true; S.q.cl = ""; $("qCl").value = "";
-  S.hidden.cl = new Set(cats.map((_, i) => i).filter(i => !sel.has(cats[i][0])));
+  S.hidden.cl = new Set(cats.map((_, i) => i).filter(i => !want.has(cats[i][0])));
+}
+function defaults() {
+  const p = P[S.page];
+  $("selBtn").hidden = !(p.selected || []).length; $("focusBtn").hidden = !(p.focus || []).length;
+  tick(p.selected);
 }
 function unfilter(s) { (s ? [s] : ["sp", "cl"]).forEach(k => { S.hidden[k].clear(); S.q[k] = ""; $(k === "sp" ? "qSp" : "qCl").value = ""; }); }
 function sync() {
@@ -272,7 +283,7 @@ function sync() {
   $("labS").classList.toggle("on", !S.byCluster); $("labC").classList.toggle("on", S.byCluster);
   try { history.replaceState(null, "", "#" + (S.page + 1)); } catch (e) {}
 }
-function go(i) { if (i < 0 || i >= P.length || i === S.page) return; S.page = i; S.find = null; $("find").value = ""; $("find").classList.remove("miss"); $("found").hidden = true; unfilter(); defaults(); sync(); draw(); }
+function go(i) { if (i < 0 || i >= P.length || i === S.page) return; S.page = i; S.find = null; S.lasso = null; $("find").value = ""; $("find").classList.remove("miss"); $("found").hidden = true; unfilter(); defaults(); sync(); draw(); }
 function syncView() {
   document.querySelectorAll("[data-view]").forEach(b => b.classList.toggle("on", b.dataset.view === S.view));
   $("barsBox").hidden = S.view !== "bars"; $("stage").hidden = S.view === "bars"; $("ctl2d").hidden = S.view !== "2d";
@@ -302,7 +313,9 @@ $("logBtn").onclick = () => { S.log = !S.log; bars(page()); };
 $("find").onkeydown = e => { if (e.key === "Enter") find(e.target.value); else if (e.key === "Escape") { e.target.value = ""; find(""); e.target.blur(); } };
 $("find").onsearch = e => { if (!e.target.value) find(""); };
 $("exportIds").onclick = exportIds;
+$("lassoClr").onclick = () => { S.lasso = null; draw(); };
 $("selBtn").onclick = () => { defaults(); sync(); draw(); };
+$("focusBtn").onclick = () => { tick(P[S.page].focus); sync(); draw(); };
 $("reset").onclick = () => { S.rev++; S.cam = {}; draw(); };
 document.querySelectorAll("[data-all]").forEach(b => b.onclick = () => { shown(b.dataset.all).forEach(i => S.hidden[b.dataset.all].delete(i)); draw(); });
 document.querySelectorAll("[data-none]").forEach(b => b.onclick = () => { shown(b.dataset.none).forEach(i => S.hidden[b.dataset.none].add(i)); draw(); });
