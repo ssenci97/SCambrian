@@ -183,8 +183,10 @@ focus_gravity__<params>.csv                                     # per target (an
 {umap,tsne}_focus_clusters__<params>.png                        # focus clusters, one facet per input
 umap_reprojected_focus_clusters__<params>.png
 barplot_focus_clusters_protein_counts__<params>.png
-focus-modules/                                                  # target proteins of every focus cluster
-interactive/views_3d__<params>.html                             # 3D | 2D | Bars views, opens with the selected clusters ticked; Focus button and "focus tier" colouring
+focus_selection__<params>.csv                                   # target proteins of the focus selection: I (immune annotated) and E (extended by probing), with cluster and focus_similarity
+{umap,tsne}_focus_tiers__<params>.png                           # focus selection, one facet per target: I red, E dark red
+focus-modules/                                                  # target proteins of every focus cluster, and <target>_<n>_focus_selection_<params>.txt per target
+interactive/views_3d__<params>.html                             # 3D | 2D | Bars views, opens with the selected clusters ticked; Focus button and "focus selection" colouring (I / E)
 interactive/hdbscan_umap3d__<params>.tsv
 ```
 
@@ -250,7 +252,8 @@ The focus criteria are defined once, in `src/h5ad_scanpy.py`, after the species 
 10. **Focus test**: one-sided hypergeometric `P(X ≥ f_k)`, BH-corrected across all joint clusters (`focus_q`).
 11. **Focus cluster**: `focus_q < focus_max_q` ∧ `f_k ≥ min_focus_proteins`, keeping the `max_focus_clusters` highest focus shares.
 12. **Capture**: target proteins inside focus clusters, overall (`all_targets`, the headline number) and per target, split into `annotated` (agreement with the annotation; circular, so reported, not tested) and `unannotated` (candidate focus-like proteins, the main result for unannotated proteomes). supp_02 fails, after writing every output, when the overall capture is below `min_capture_percent`.
-13. **Gravity**: the median `focus_similarity` of the target proteins of every joint cluster, overall and per target, ranked. It is descriptive and does not take part in any selection.
+13. **Focus selection** (`focus_selection`, the end product): the target proteins only, the probe excluded. **I** (red) = target protein with its own focus annotation (`annotated` tier); **E** (dark red) = any other target protein inside a focus cluster, i.e. extended by co-clustering with the probe and the annotated proteins. Written to `focus_selection__<params>.csv`, one ID list per target in `focus-modules/`, the `focus_selection` column of `protein_clusters_metadata`, the focus tier layouts and the "focus selection" label set of the HTML. Local-FASTA targets (koreicus, japonicus) have E proteins only.
+14. **Gravity**: the median `focus_similarity` of the target proteins of every joint cluster, overall and per target, ranked. It is descriptive and does not take part in any selection.
 
 ## Notebooks
 
