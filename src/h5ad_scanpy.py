@@ -16,9 +16,10 @@ Inputs carry the ``input_type`` of the query table. Without probe inputs (compar
     10. focus test: one-sided hypergeometric P(X >= f_k), BH-corrected across all joint clusters (focus_q);
     11. focus cluster: focus_q < focus_max_q and f_k >= min_focus_proteins, keeping the max_focus_clusters highest focus shares;
     12. capture: target proteins inside focus clusters, overall and per target, split into annotated (agreement with the annotation, reported but circular) and unannotated (candidate focus-like proteins); the report fails, after writing everything, when the overall capture is below min_capture_percent;
-    13. gravity: median ``focus_similarity`` (cosine similarity to the focus centroid, computed by npz_scanpy.py) of the target proteins of every joint cluster, overall and per target, ranked; it is descriptive and does not take part in any selection.
+    13. focus selection (``focus_selection``, target proteins only, probe proteins excluded): I for every target protein with its own focus annotation, E (extended through probing) for every other target protein inside a focus cluster, none otherwise;
+    14. gravity: median ``focus_similarity`` (cosine similarity to the focus centroid, computed by npz_scanpy.py) of the target proteins of every joint cluster, overall and per target, ranked; it is descriptive and does not take part in any selection.
 A focus run is also compared with its baseline run, the run of the same targets, model and parameters without probes (supp_01 builds both): on the target proteins shared by the two runs, the agreement of their joint clusters (adjusted Rand index, normalised mutual information), the protein flow from every baseline cluster to every focus-run cluster with its Jaccard index, and the fate of every selected cluster (best-matching cluster of the other run, Jaccard, still selected), written as paired_* files in the focus run folder.
-Focus outputs are separate files: focus_cluster_enrichment, focus_capture and focus_gravity tables, focus-modules/ protein lists, focus tier layouts with one facet per input coloured by ``focus_tier`` (probe, annotated, none), focus cluster layouts with one facet per input, a re-projection of the focus clusters and a barplot with focus significance asterisks; in the focus cluster panels the UniProt-annotated target proteins (the special tier) are ringed in black. In focus mode the species panels (b), (c) and (e) also get one facet or bar group per probe, drawn for reference only: probes are coloured by selected cluster instead of specificity index and never enter the species criteria.
+Focus outputs are separate files: focus_cluster_enrichment, focus_capture, focus_gravity and focus_selection tables, focus-modules/ protein lists (per focus cluster and per target selection), focus selection layouts with one facet per target coloured by ``focus_selection`` (I red, E dark red, none), focus cluster layouts with one facet per input, a re-projection of the focus clusters and a barplot with focus significance asterisks; in the focus cluster panels the UniProt-annotated target proteins (the special tier) are ringed in black. In focus mode the species panels (b), (c) and (e) also get one facet or bar group per probe, drawn for reference only: probes are coloured by selected cluster instead of specificity index and never enter the species criteria.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -96,10 +97,11 @@ REPORT_ORDER = ["umap_intra_species_top_clusters", "tsne_intra_species_top_clust
 RING_LABEL = "UniProt-annotated"
 SANKEY_HEIGHT_SCALE = 3.0
 SEED = 42
+SELECTION_COLORS = {"none": COLOR_BG, "E": "#8B0000", "I": "#FF0000"}
+SELECTION_LABELS = {"none": "none", "E": "E: extended by probing", "I": "I: immune annotated"}
 SIG_LEVELS = [(0.001, "***"), (0.01, "**"), (0.05, "*")]
 STAR_HEADROOM = 0.35
 STAR_LINESPACING = 0.55
-TIER_COLORS = {"none": COLOR_BG, "probe": PALETTE_ALT[0], "annotated": PALETTE_ALT[1]}
 YAML_PATH = "configs/param_configs.yaml"
 ###################################### CONFIG_AND_PARSER
 parser = argparse.ArgumentParser(description="ESMC Proteome Cluster Report")
@@ -484,7 +486,7 @@ def write_tables(adata: ad.AnnData, js: JointStats, target_dir: Path, modules_di
         f.writelines(f"{k}: {v}\n" for k, v in adata.uns["metrics"].items())
     top_rows = [(sp, cl, rk + 1, js.counts.loc[cl, sp], js.spec.loc[cl, sp], js.chi2_q[cl], js.fold_change[cl]) for sp, cls in js.ranked.items() for rk, cl in enumerate(cls)]
     pd.DataFrame(top_rows, columns=["species", "cluster", "rank", "protein_count", "specificity", "chi2_q", "fold_change"]).to_csv(target_dir / f"species_top_clusters__{param_tag}.csv", index=False)
-    obs[[c for c in ("protein_id", "species", "input_type", "focus_tier", "focus_similarity", "cluster", "intra_cluster") if c in obs]].to_csv(target_dir / f"protein_clusters_metadata__{param_tag}.csv", index=False)
+    obs[[c for c in ("protein_id", "species", "input_type", "focus_tier", "focus_selection", "focus_similarity", "cluster", "intra_cluster") if c in obs]].to_csv(target_dir / f"protein_clusters_metadata__{param_tag}.csv", index=False)
     stats = pd.DataFrame({"chi2_q": js.chi2_q, "chi2_valid": js.valid, "fold_change": js.fold_change, "significant": js.significant, "balanced": js.balanced, "selected": js.counts.index.isin(js.selected)}, index=js.counts.index)
     enrichment = pd.concat({"protein_count": js.counts.stack(), "specificity": js.spec.stack()}, axis=1).rename_axis(["cluster", "species"]).reset_index().join(stats, on="cluster")
     enrichment.to_csv(target_dir / f"species_cluster_enrichment__{param_tag}.csv", index=False)
@@ -657,8 +659,9 @@ def report(h5ad_path: Path) -> str | None:
     print(f"[PYTHON-INFO][DATA-SHAPE] {h5ad_path.name}: {adata.n_obs:,} proteins, {len(species_list)} targets ({', '.join(species_list)}), {len(probes)} probes ({', '.join(probes) or 'none'}), obsm: {', '.join(adata.obsm.keys())}")
     js = joint_stats(adata.obs, species_list)
     counts = pd.crosstab(adata.obs["cluster"].astype(str), adata.obs["species"]).reindex(columns=species_list + probes, fill_value=0)
-    write_tables(adata, js, target_dir, modules_dir, param_tag)
     fs = focus_stats(adata.obs, species_list, species_list + probes)
+    if fs is not None: adata.obs["focus_selection"] = focus_selection(adata.obs, fs.clusters, species_list)
+    write_tables(adata, js, target_dir, modules_dir, param_tag)
     if fs is not None: write_focus_tables(adata.obs, fs, species_list, target_dir, param_tag)
     intra = intra_summary(adata.obs, species_list, modules_dir, param_tag)
     plot_layout_panels(adata, js, counts, intra, target_dir, intra_dir, param_tag)
@@ -668,7 +671,7 @@ def report(h5ad_path: Path) -> str | None:
         top_counts = counts.loc[js.selected]
         top_counts = top_counts.loc[top_counts[species_list].sum(axis=1).sort_values(ascending=False, kind="stable").index]
         plot_counts_bar(top_counts, list(counts.columns), js.chi2_q.loc[js.selected].map(sig_stars), "Protein per cluster (number by species)", target_dir / f"barplot_umap_labelled_clusters_protein_counts__{param_tag}.png", legend_title="Input" if probes else "Species")
-    if fs is not None: plot_focus_panels(adata, fs, target_dir, param_tag)
+    if fs is not None: plot_focus_panels(adata, fs, species_list, target_dir, param_tag)
     out = target_dir / f"{target_dir.name}_scanpy.pdf"
     pdfs = sorted((p for p in target_dir.rglob(f"*__{param_tag}.pdf") if p != out), key=lambda p: next((i for i, s in enumerate(REPORT_ORDER) if p.stem.startswith(s)), len(REPORT_ORDER)))
     merge_pdfs(pdfs, out)
@@ -730,8 +733,27 @@ def focus_stats(obs: pd.DataFrame, targets: list[str], inputs: list[str]) -> Foc
     print(f"[PYTHON-INFO][FOCUS] {n_focus:,} focus proteins ({int(tiers['probe'].sum()):,} probe, {int(tiers['annotated'].sum()):,} annotated); {len(eligible)} enriched clusters, {len(clusters)} kept: {', '.join(clusters)}")
     print(f"[PYTHON-INFO][FOCUS] Capture: {capture.iloc[0]['captured']:,}/{capture.iloc[0]['proteins']:,} target proteins ({capture.iloc[0]['capture_percent']:.2f}%)")
     return FocusStats(table, clusters, {cl: PALETTE_ALT[i % len(PALETTE_ALT)] for i, cl in enumerate(clusters)}, counts, capture, gravity)
+def focus_selection(obs: pd.DataFrame, clusters: list[str], targets: list[str]) -> pd.Series:
+    """Label every target protein I (own focus annotation), E (extended through probing: unannotated, inside a focus cluster) or none; probe proteins get no label.
+
+    Args:
+        obs (pd.DataFrame): Observation table with letter-named ``cluster``, ``species``, ``input_type`` and ``focus_tier``.
+        clusters (list[str]): Focus clusters.
+        targets (list[str]): Target inputs.
+
+    Returns:
+        pd.Series: Focus selection per protein (NaN for probe proteins).
+    """
+    annotated, in_focus = (obs["focus_tier"].astype(str) == "annotated").values, obs["cluster"].astype(str).isin(clusters).values
+    sel = np.where(annotated, "I", np.where(in_focus, "E", "none")).astype(object)
+    sel[(obs["input_type"] != "target").values] = None
+    sel = pd.Series(pd.Categorical(sel, categories=list(SELECTION_COLORS)[::-1]), index=obs.index)
+    for sp in targets:
+        is_sp = (obs["species"] == sp).values
+        print(f"[PYTHON-INFO][FOCUS] Selection {sp}: {int((sel[is_sp] == 'I').sum()):,} I, {int((sel[is_sp] == 'E').sum()):,} E of {int(is_sp.sum()):,} proteins")
+    return sel
 def write_focus_tables(obs: pd.DataFrame, fs: FocusStats, targets: list[str], target_dir: Path, param_tag: str) -> None:
-    """Write the focus enrichment, capture and gravity tables and the target protein lists of every focus cluster.
+    """Write the focus enrichment, capture, gravity and selection tables, the target protein lists of every focus cluster and the selection list of every target.
 
     Args:
         obs (pd.DataFrame): Observation table with letter-named joint clusters.
@@ -750,40 +772,46 @@ def write_focus_tables(obs: pd.DataFrame, fs: FocusStats, targets: list[str], ta
         for sp in targets:
             mask = (species_labels == sp).values & (cluster_labels == cl).values
             if mask.any(): obs.loc[mask, "protein_id"].to_csv(focus_dir / f"{sp}_{mask.sum():07d}_clust{cl}_{param_tag}.txt", index=False, header=False)
-def plot_focus_tiers(adata: ad.AnnData, inputs: list[str], target_dir: Path, param_tag: str) -> None:
-    """Draw for every layout method one facet per input coloured by focus tier, the annotated and probe proteins on top of the rest.
+    sel = obs[obs["focus_selection"].isin(["I", "E"])]
+    sel[[c for c in ("protein_id", "species", "cluster", "focus_selection", "focus_similarity") if c in sel]].sort_values(["species", "focus_selection", "focus_similarity"], ascending=[True, True, False], kind="stable").to_csv(target_dir / f"focus_selection__{param_tag}.csv", index=False)
+    for sp in targets:
+        ids = sel.loc[(sel["species"] == sp).values, "protein_id"]
+        if len(ids): ids.to_csv(focus_dir / f"{sp}_{len(ids):07d}_focus_selection_{param_tag}.txt", index=False, header=False)
+def plot_focus_tiers(adata: ad.AnnData, targets: list[str], target_dir: Path, param_tag: str) -> None:
+    """Draw for every layout method one facet per target coloured by focus selection, I on top of E on top of the rest.
 
     Args:
-        adata (ad.AnnData): Saved clusters with ``focus_tier``.
-        inputs (list[str]): Inputs in facet order (targets then probes).
+        adata (ad.AnnData): Saved clusters with ``focus_selection``.
+        targets (list[str]): Target inputs in facet order.
         target_dir (Path): Report folder.
         param_tag (str): Parameter tag of the clustering.
     """
-    tier = adata.obs["focus_tier"].astype(str).values
+    sel = adata.obs["focus_selection"].astype(str).values
     for m in args.layout_methods:
         if f"X_{m}_2d" not in adata.obsm: continue
         name, coords = METHOD_NAMES.get(m, m), adata.obsm[f"X_{m}_2d"]
-        fig, gs = row_figure(len(inputs), f"Functional focus tiers ({name})", strip=False)
-        for idx, sp in enumerate(inputs):
+        fig, gs = row_figure(len(targets), f"Functional focus selection ({name})", strip=False)
+        for idx, sp in enumerate(targets):
             ax, is_sp = fig.add_subplot(gs[0, idx]), (adata.obs["species"] == sp).values
-            for t, c in TIER_COLORS.items():
-                pts = is_sp & (tier == t)
+            for t, c in SELECTION_COLORS.items():
+                pts = is_sp & (sel == t)
                 ax.scatter(coords[pts, 0], coords[pts, 1], c=c, s=PT_SIZE if t == "none" else 2 * PT_SIZE, alpha=ALPHA_BG if t == "none" else ALPHA_MAX, rasterized=True, linewidths=0)
             style_axes(ax, facet_title(adata.obs, is_sp, sp), name)
-        add_bottom_legend(fig, {f"{t} ({(tier == t).sum():,})": c for t, c in TIER_COLORS.items()}, "Focus tier")
+        add_bottom_legend(fig, {f"{SELECTION_LABELS[t]} ({(sel == t).sum():,})": c for t, c in reversed(SELECTION_COLORS.items())}, "Focus selection")
         save_fig(fig, target_dir / f"{m}_focus_tiers__{param_tag}.png")
         plt.close(fig)
-def plot_focus_panels(adata: ad.AnnData, fs: FocusStats, target_dir: Path, param_tag: str) -> None:
-    """Draw the focus tier layouts, then for every layout method one facet per input with the focus clusters coloured and the annotated proteins ringed, plus the re-projection and barplot of the focus clusters.
+def plot_focus_panels(adata: ad.AnnData, fs: FocusStats, targets: list[str], target_dir: Path, param_tag: str) -> None:
+    """Draw the focus selection layouts, then for every layout method one facet per input with the focus clusters coloured and the annotated proteins ringed, plus the re-projection and barplot of the focus clusters.
 
     Args:
         adata (ad.AnnData): Saved clusters with letter-named joint clusters.
         fs (FocusStats): Focus statistics.
+        targets (list[str]): Target inputs.
         target_dir (Path): Report folder.
         param_tag (str): Parameter tag of the clustering.
     """
     inputs = list(fs.counts.columns)
-    plot_focus_tiers(adata, inputs, target_dir, param_tag)
+    plot_focus_tiers(adata, targets, target_dir, param_tag)
     if not fs.clusters: return
     annotated = (adata.obs["focus_tier"].astype(str) == "annotated").values
     for m in args.layout_methods:
