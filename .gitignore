@@ -5,7 +5,11 @@
 !.gitignore
 !.here
 
-data/esm-reps/
+data/
+raw/data/
+analyses/*/runs/**
+!analyses/*/runs/**/
+!analyses/*/runs/**/ro-crate-metadata.json
 logs/
 tmp/
 CLAUDE.md
