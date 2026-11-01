@@ -24,3 +24,4 @@ raw/raw/
 *.part
 # Build output of DMP.tex (tectonic DMP.tex)
 DMP.pdf
+docs/*.pdf

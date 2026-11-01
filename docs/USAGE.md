@@ -153,3 +153,11 @@ git worktree add ../SCambrian-pre-reorg pre-reorg
 | `WARNING: pip packages differ from env/requirements.lock.txt` | someone installed into `./.env` by hand: rebuild it from the lock |
 | `focus capture below min_capture_percent` (supp_02 exit code 1) | too few probe or annotated proteins in the focus clusters; the viewers are still written. Check the focus lists or lower `h5ad_scanpy.min_capture_percent` |
 | a test fails | the log shows the failing command and the tail of its output; rerun locally with `python -m pytest -x -k <name>` |
+
+## 10. Startup guide PDF
+
+`docs/STARTUP.md` is the short startup guide. Build the PDF (git-ignored) with:
+
+```bash
+mkdir -p tmp && pandoc docs/STARTUP.md -s -o tmp/STARTUP.tex -V geometry:margin=2cm -V fontsize=10pt -V colorlinks && tectonic tmp/STARTUP.tex --outdir docs
+```

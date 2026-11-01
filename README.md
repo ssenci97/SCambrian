@@ -3,7 +3,7 @@ Area Science Park -- Laboratory of Data Engineering
 
 ## Quick start
 
-On ORFEO, from a fresh clone; the full guide is [docs/USAGE.md](docs/USAGE.md).
+On ORFEO, from a fresh clone. Short guide: [docs/STARTUP.md](docs/STARTUP.md) (PDF build command in USAGE.md); full guide: [docs/USAGE.md](docs/USAGE.md).
 
 ```bash
 git clone https://github.com/ssenci97/SCambrian.git && cd SCambrian
