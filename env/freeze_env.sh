@@ -2,8 +2,8 @@
 ###################################### constants-and-init
 ENV_PREFIX="${1:-.env}"
 CONDA_SH="${CONDA_SH:-$HOME/scratch/miniconda/etc/profile.d/conda.sh}"
-OUT_DIR="env"
-TORCH_INDEX="https://download.pytorch.org/whl/cu121"
+OUT_DIR="${OUT_DIR:-env}"
+TORCH_INDEX="${TORCH_INDEX:-https://download.pytorch.org/whl/cu121}"
 FLASH_ATTN_URL="https://github.com/Dao-AILab/flash-attention/releases/download/v2.6.3/flash_attn-2.6.3+cu123torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl"
 START_TIME=$(date +%s)
 [ -d "${ENV_PREFIX}" ] || { echo "[BASH-INFO] Error: env ${ENV_PREFIX} not found. Run from the repo root." >&2; exit 1; }

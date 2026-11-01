@@ -51,6 +51,16 @@ Never `pip install` into `./.env` by hand. To add a dependency:
 3. Compare the new lock files with the old ones (`git diff env/`).
 4. Commit them.
 
+### CPU-only install
+
+Use this on a machine or partition without GPUs. It installs PyTorch 2.4.1 CPU wheels and no flash-attn. Its lock files live in `env/cpu/`, separate from the GPU ones in `env/`:
+
+```bash
+CPU_ONLY=1 sbatch --partition=EPYC --gres=none esmc_config.sh
+```
+
+To run the pipeline on it, see [CPU-only run](#cpu-only-run).
+
 ## 3. Test
 
 The tests use synthetic data in a temporary folder. They never read `data/` and never change `configs/`.
@@ -116,6 +126,15 @@ ls logs/uniprot logs/mmseqs logs/ESMC logs/scanpy
 ```
 
 A step that fails cancels the dependent steps (`afterok`). Fix the cause and resubmit from that step, e.g. `bash slurms/run_all.sh 03 supp_01 supp_02`.
+
+### CPU-only run
+
+```bash
+CPU_ONLY=1 DRY_RUN=1 bash slurms/run_all.sh
+CPU_ONLY=1 bash slurms/run_all.sh
+```
+
+`CPU_ONLY=1` reduces the run to `esmc_300m`, ignoring `extract_reps_biohub.models`. Steps 03 and supp_01 get arrays for 1 model, and step 03 runs on EPYC with `--gres=none`. The submitted jobs inherit `CPU_ONLY`, so 03 and supp_01 also restrict their models to `esmc_300m`. To submit a step by hand, set `CPU_ONLY=1` and override the resources in the same way, e.g. `CPU_ONLY=1 sbatch --partition=EPYC --gres=none --array=0-4%2 slurms/03_reps.sh`.
 
 Each step can also be submitted alone with `sbatch slurms/<step>.sh`. In that case the `#SBATCH --array` line in the script header is used, sized for 5 labels × 3 models.
 

@@ -27,10 +27,18 @@ mkdir -p logs tmp .cache
 export TMPDIR="$PWD/tmp"
 export PIP_CACHE_DIR="$PWD/.cache"
 ENV_PATH="$(realpath -m "${ENV_PREFIX:-.env}")"
-CONDA_LOCK="env/conda-explicit-linux-64.txt"
-PIP_LOCK="env/requirements.lock.txt"
+CPU_ONLY="${CPU_ONLY:-0}"
+LOCK_DIR="env"
+TORCH_INDEX="https://download.pytorch.org/whl/cu121"
+if [ "${CPU_ONLY}" = "1" ]; then
+  LOCK_DIR="env/cpu"
+  TORCH_INDEX="https://download.pytorch.org/whl/cpu"
+fi
+CONDA_LOCK="${LOCK_DIR}/conda-explicit-linux-64.txt"
+PIP_LOCK="${LOCK_DIR}/requirements.lock.txt"
 FLASH_ATTN_URL="https://github.com/Dao-AILab/flash-attention/releases/download/v2.6.3/flash_attn-2.6.3+cu123torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl"
 START_TIME=$(date +%s)
+echo "[SLURM-INFO] CPU_ONLY=${CPU_ONLY} (torch from ${TORCH_INDEX}, locks in ${LOCK_DIR}/)"
 
 ###################################### conda & conditional setup
 source ~/scratch/miniconda/etc/profile.d/conda.sh
@@ -44,42 +52,46 @@ elif [ -f "${CONDA_LOCK}" ] && [ -f "${PIP_LOCK}" ]; then
   conda activate "${ENV_PATH}"
   pip install --no-deps -r "${PIP_LOCK}" || exit 1
 else
-  echo "[SLURM-INFO] No lock files in env/: creating ${ENV_PATH} by resolution, then freezing it into env/"
+  echo "[SLURM-INFO] No lock files in ${LOCK_DIR}/: creating ${ENV_PATH} by resolution, then freezing it into ${LOCK_DIR}/"
   conda create -y -p "${ENV_PATH}" -c conda-forge -c bioconda python=3.10 mmseqs2 || exit 1
   conda activate "${ENV_PATH}"
 
   pip install --upgrade pip setuptools wheel packaging pyarrow fastparquet
 
   ###################################### torch
-  echo "[SLURM-INFO] Installing PyTorch 2.4.1 (cu121)..."
-  pip install torch==2.4.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+  echo "[SLURM-INFO] Installing PyTorch 2.4.1 from ${TORCH_INDEX}..."
+  pip install torch==2.4.1 torchvision torchaudio --index-url "${TORCH_INDEX}"
 
   ###################################### esmc
   echo "[SLURM-INFO] Installing ESMC + runtime deps..."
   pip install esm httpx accelerate ninja biopython scipy pandas matplotlib huggingface_hub
 
   ###################################### flash-attn
-  echo "[SLURM-INFO] Installing precompiled flash-attn 2.6.3..."
-  pip install "${FLASH_ATTN_URL}"
+  if [ "${CPU_ONLY}" = "1" ]; then
+    echo "[SLURM-INFO] CPU_ONLY=1: skipping flash-attn"
+  else
+    echo "[SLURM-INFO] Installing precompiled flash-attn 2.6.3..."
+    pip install "${FLASH_ATTN_URL}"
+  fi
 
   ###################################### analysis (uniprot / dimred / scanpy / tests)
   echo "[SLURM-INFO] Installing analysis and test deps..."
   pip install "numpy<2.3" pyyaml tqdm seaborn scikit-learn umap-learn pynndescent "scanpy>=1.10" anndata plotly ipywidgets anywidget hdbscan pyprojroot matplotlib-venn numba safetensors igraph pymupdf kaleido ipykernel pytest || exit 1
 
   ###################################### freeze
-  bash env/freeze_env.sh "${ENV_PATH}" || exit 1
-  echo "[SLURM-INFO] Lock files written to env/. Commit them: git add env/ && git commit -m 'env: lock'"
+  OUT_DIR="${LOCK_DIR}" TORCH_INDEX="${TORCH_INDEX}" bash env/freeze_env.sh "${ENV_PATH}" || exit 1
+  echo "[SLURM-INFO] Lock files written to ${LOCK_DIR}/. Commit them: git add env/ && git commit -m 'env: lock'"
 fi
 
 ###################################### verify
 echo "[SLURM-INFO] Comprehensive verification..."
-python -c "
-import torch, esm, httpx, accelerate, flash_attn, numpy, numba, scanpy, umap, sklearn, igraph, matplotlib_venn, pymupdf, pynndescent, kaleido, hdbscan, pytest
+CPU_ONLY="${CPU_ONLY}" python -c "
+import os, torch, esm, httpx, accelerate, numpy, numba, scanpy, umap, sklearn, igraph, matplotlib_venn, pymupdf, pynndescent, kaleido, hdbscan, pytest
 print(f'PyTorch Version : {torch.__version__}')
 print(f'CUDA Available  : {torch.cuda.is_available()} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"})')
 print(f'HTTPX Version   : {httpx.__version__}')
 print(f'Accelerate      : {accelerate.__version__}')
-print(f'Flash Attention : {flash_attn.__version__}')
+print(f'Flash Attention : {\"skipped (CPU_ONLY=1)\" if os.environ[\"CPU_ONLY\"] == \"1\" else __import__(\"flash_attn\").__version__}')
 print(f'NumPy / Numba   : {numpy.__version__} / {numba.__version__}')
 print(f'Scanpy          : {scanpy.__version__}')
 print(f'UMAP / sklearn  : {umap.__version__} / {sklearn.__version__}')

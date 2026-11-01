@@ -22,6 +22,7 @@ TSV_PATH=$(python3 -c "import yaml; print(yaml.safe_load(open('configs/param_con
 [ -f "$TSV_PATH" ] || { echo "[SLURM-INFO] Error: missing TSV $TSV_PATH." >&2; exit 1; }
 OUT_DIR=$(python3 -c "import yaml; print(yaml.safe_load(open('configs/param_configs.yaml')).get('npz_scanpy', {}).get('scanpy_dir', 'data/scanpy/'))")
 mapfile -t MODELS < <(python3 -c "import yaml; m = yaml.safe_load(open('configs/param_configs.yaml'))['extract_reps_biohub']['models']; print('\n'.join([m] if isinstance(m, str) else m))")
+[ "${CPU_ONLY:-0}" = "1" ] && MODELS=("${CPU_MODEL:-esmc_300m}") && echo "[SLURM-INFO] CPU_ONLY=1: models restricted to ${MODELS[*]}"
 TASK=${SLURM_ARRAY_TASK_ID:-0}
 [ "$TASK" -lt ${#MODELS[@]} ] || { echo "[SLURM-INFO] Task $TASK exceeds ${#MODELS[@]} models. Skipping."; exit 0; }
 MODEL=${MODELS[$TASK]}

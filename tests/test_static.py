@@ -68,17 +68,19 @@ def test_config_keys_are_script_options(section: str) -> None:
     assert (SRC / f"{section}.py").exists(), f"no script src/{section}.py for config section '{section}'"
     unknown = set(load_config()[section]) - script_options(section)
     assert not unknown, f"keys of '{section}' without a matching --option: {sorted(unknown)}"
-def test_run_all_dry_run_array_sizes() -> None:
-    """``DRY_RUN=1 run_all.sh`` submits every step, chained, with arrays sized from the labels and models."""
+@pytest.mark.parametrize("cpu_only", ["0", "1"])
+def test_run_all_dry_run_array_sizes(cpu_only: str) -> None:
+    """``DRY_RUN=1 run_all.sh`` submits every step, chained, with arrays sized from the labels and models; ``CPU_ONLY=1`` keeps only esmc_300m and moves step 03 to EPYC."""
     cfg = load_config()
     models = cfg.get("extract_reps_biohub", {}).get("models", ["esmc_6b"])
-    n_models = 1 if isinstance(models, str) else len(models)
+    n_models = 1 if isinstance(models, str) or cpu_only == "1" else len(models)
     table = pd.read_csv(REPO / cfg.get("dw_uniprot_seqs", {}).get("query_table", "configs/query_configs.tsv"), sep="\t", dtype=str)
     n = int(table["label"].notna().sum())
-    result = subprocess.run(["bash", "slurms/run_all.sh"], cwd=REPO, capture_output=True, text=True, env={**os.environ, "DRY_RUN": "1"})
+    result = subprocess.run(["bash", "slurms/run_all.sh"], cwd=REPO, capture_output=True, text=True, env={**os.environ, "DRY_RUN": "1", "CPU_ONLY": cpu_only})
     assert result.returncode == 0, result.stdout + result.stderr
     lines = [l for l in result.stdout.splitlines() if "sbatch" in l]
     expected = [f"--array=1-{n} slurms/01_dw_uniprot.sh", f"--array=1-{n}%3 slurms/02_mmseqs2.sh", f"--array=0-{n * n_models - 1}%2 slurms/03_reps.sh", f"--array=0-{n_models - 1} slurms/supp_01_scanpy.sh", "slurms/supp_02_scanpy_report.sh"]
     assert len(lines) == len(expected)
     for line, tail in zip(lines, expected): assert line.rstrip().endswith(tail), f"{line!r} does not end with {tail!r}"
     assert all("--dependency=afterok:" in l for l in lines[1:])
+    assert ("--partition=EPYC --gres=none" in lines[2]) == (cpu_only == "1")

@@ -7,6 +7,17 @@
 #SBATCH --mem=16G
 #SBATCH --time=01:00:00
 #SBATCH --output=logs/tests/tests_%j.log
+###################################### env
+module purge
+unset LD_LIBRARY_PATH
+export PATH=$(echo "$PATH" | tr ':' '\n' | grep -v 'fedora41' | paste -sd:)
+export CC=/usr/bin/gcc
+export CXX=/usr/bin/g++
+export PATH="/usr/bin:$PATH"
+export TMPDIR="$PWD/tmp"
+export TRITON_CACHE_DIR="$PWD/.triton_cache"
+mkdir -p logs/tests tmp "$TRITON_CACHE_DIR"
+echo "[SLURM-INFO] Forced CC=$CC CXX=$CXX"
 ###################################### conda
 source ~/scratch/miniconda/etc/profile.d/conda.sh
 conda activate ./.env
