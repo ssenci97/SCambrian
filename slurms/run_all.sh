@@ -17,7 +17,7 @@ print(f'N_MODELS={len(models)}')
 N=$(awk -F'\t' '{sub(/\r$/,"")} NR==1{for(i=1;i<=NF;i++)if($i=="label"){col=i;break};next} col&&$col!=""{n++} END{print n+0}' "${TSV_PATH}")
 [ "${N}" -eq 0 ] && echo "[SLURM-INFO] No labels in ${TSV_PATH}" && exit 1
 echo "[SLURM-INFO] ${N} labels x ${N_MODELS} models"
-mkdir -p logs logs/ESMC logs/scanpy
+mkdir -p logs/uniprot logs/mmseqs logs/ESMC logs/scanpy logs/tests
 ###################################### submit
 PREV=""
 submit() {

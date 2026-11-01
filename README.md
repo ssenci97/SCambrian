@@ -1,6 +1,20 @@
 # Protein Sequence Embedding & Clustering Pipeline
 Area Science Park -- Laboratory of Data Engineering
 
+## Quick start
+
+On ORFEO, from a fresh clone; the full guide is [docs/USAGE.md](docs/USAGE.md).
+
+```bash
+git clone https://github.com/ssenci97/SCambrian.git && cd SCambrian
+sbatch esmc_config.sh                  # creates ./.env (from env/ lock files when present); log: logs/setup_ESMC.log
+source ~/scratch/miniconda/etc/profile.d/conda.sh && conda activate ./.env
+python -m pytest -m static             # fast checks on the login node
+sbatch slurms/tests.sh                 # end-to-end tests on synthetic data (EPYC); log: logs/tests/
+DRY_RUN=1 bash slurms/run_all.sh       # show what will be submitted
+bash slurms/run_all.sh                 # run the pipeline
+```
+
 ## Overview
 
 The pipeline compares the proteomes of several species (currently *Ae. aegypti*, *Ae. albopictus*, *Ae. koreicus* and *Ae. japonicus*, plus `insecta_immune`, a reference set of Insecta proteins annotated to the immune system process, UniProtKB `(go:0006955) AND (taxonomy_id:50557)`) in ESMC embedding space. It finds groups of proteins whose share **differs across species**, and groups that are conserved. Each input is either a **target** (a compared set) or a **probe** (a functional reference, here immune proteins of all insects) that takes part in the clustering but not in the species statistics; it defines a second layer, the [functional focus](#input-roles-and-functional-focus), which flags, tests and re-projects the clusters that gather focus proteins. The analysis is a **paired comparison** of the same targets without and with the probe: see [Modes and paired runs](#modes-and-paired-runs). Every step is a SLURM script under `slurms/` that runs a Python script under `src/`. All parameters live in `configs/param_configs.yaml`, under one section per Python script.
@@ -270,12 +284,15 @@ The focus criteria are defined once, in `src/h5ad_scanpy.py`, after the species 
 
 ```
 configs/      param_configs.yaml, query_configs.tsv
-slurms/       01_dw_uniprot.sh, 02_mmseqs2.sh, 03_reps.sh, supp_01_scanpy.sh, supp_02_scanpy_report.sh, run_all.sh
+slurms/       01_dw_uniprot.sh, 02_mmseqs2.sh, 03_reps.sh, supp_01_scanpy.sh, supp_02_scanpy_report.sh, run_all.sh, tests.sh
 src/          dw_uniprot_seqs.py, dw_uniprot_features.py, dw_uniprot_focus.py, run_mmseqs2.py, extract_reps_biohub.py,
               npz_scanpy.py, h5ad_scanpy.py, h5ad_interactive.py, templates/h5ad_interactive.html
 nbs/          01_sequences.ipynb, 02_mmseqs_clusters.ipynb, 03_embeddings.ipynb, 04_scanpy_clusters.ipynb
 data/         sequences/, features/, dedup/, clusters/, esm-reps/ (git-ignored), scanpy/
-logs/         one folder per step (git-ignored)
+logs/         one folder per step (contents git-ignored)
+tests/        pytest suite (static, cpu, gpu markers), run by slurms/tests.sh
+docs/         USAGE.md, the install/test/run guide
+env/          lock files of ./.env and freeze_env.sh
 esmc_config.sh   creates ./.env
 ```
 

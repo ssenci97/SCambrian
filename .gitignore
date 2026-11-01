@@ -10,7 +10,9 @@ raw/data/
 analyses/*/runs/**
 !analyses/*/runs/**/
 !analyses/*/runs/**/ro-crate-metadata.json
-logs/
+logs/**
+!logs/**/
+!logs/**/.gitkeep
 tmp/
 CLAUDE.md
 __pycache__/
