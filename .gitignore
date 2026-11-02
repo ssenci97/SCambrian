@@ -6,13 +6,13 @@
 !.here
 
 data/esm-reps/
+data/preprocessed/
 analyses/
 logs/
-tmp/
 CLAUDE.md
 __pycache__/
-# Original downloads, re-fetched by raw/slurm_dw_proc.sh
-raw/raw/
+# Curated proteomes, separate curation repo cloned at repo root
+Aedes_japonicus_koreicus_curation/
 # TransDecoder checkpoints and intermediates (contain absolute HPC paths)
 *.transdecoder_dir/
 # Partial downloads

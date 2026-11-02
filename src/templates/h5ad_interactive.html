@@ -102,7 +102,7 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
     <div><div class="find"><input id="find" type="search" placeholder="Find protein ID…" aria-label="Find protein ID" autocomplete="off"><button id="exportIds" title="Download the IDs of the points shown">&#10515; IDs</button></div><div id="linfo" class="muted"></div><div class="muted">click toggles · double-click isolates · click a bar shows its cluster<br>2D: lasso filters points · double-click clears<br>← → pages · V view · C colouring · L log bars · / find</div><div id="found" class="found" hidden></div></div>
     <section class="sec" id="sec2d" hidden><div class="shead"><b>2D</b><span><button id="lassoClr" title="Clear the lasso selection" hidden>&#10005; lasso</button></span></div><div class="tog"><label class="switch" title="Drag lassoes points (on) or pans (off)"><input type="checkbox" id="lassoTog" aria-label="Lasso selection"><span class="lab on">Lasso</span></label><label class="switch" title="Write the cluster labels at the centre of every shown cluster"><input type="checkbox" id="labTog" aria-label="Cluster labels"><span class="lab on">Labels</span></label></div></section>
     <section class="sec" id="secSp"><div class="shead"><b>Species</b><span><button data-all="sp">All</button> <button data-none="sp">None</button></span></div><input class="q" id="qSp" placeholder="Filter species…" aria-label="Filter species"><div id="listSp"></div></section>
-    <section class="sec" id="secCl"><div class="shead"><b id="clTitle"></b><span><button id="selBtn" title="Tick only the joint clusters selected by the report (re-projected)">Sel</button> <button id="focusBtn" title="Tick only the functional focus clusters of the report">Focus</button> <button data-all="cl">All</button> <button data-none="cl">None</button></span></div><input class="q" id="qCl" placeholder="Filter clusters…" aria-label="Filter clusters"><div id="listCl"></div></section>
+    <section class="sec" id="secCl"><div class="shead"><b id="clTitle"></b><span><button id="selBtn" title="Tick only the joint clusters selected by the report (re-projected)">Sel</button> <button id="probeBtn" title="Tick only the joint clusters holding probe and target proteins (UPPER case)">Probe</button> <button data-all="cl">All</button> <button data-none="cl">None</button></span></div><input class="q" id="qCl" placeholder="Filter clusters…" aria-label="Filter clusters"><div id="listCl"></div></section>
   </aside>
   <div class="right">
     <div id="barsBox"><button id="logBtn" class="corner" title="Toggle log scale (L)">log</button><div id="bars"></div></div>
@@ -279,7 +279,7 @@ function tick(list) {
 }
 function defaults() {
   const p = P[S.page];
-  $("selBtn").hidden = !(p.selected || []).length; $("focusBtn").hidden = !(p.focus || []).length;
+  $("selBtn").hidden = !(p.selected || []).length; $("probeBtn").hidden = !(p.probe || []).length;
   tick(p.selected);
 }
 function unfilter(s) { (s ? [s] : ["sp", "cl"]).forEach(k => { S.hidden[k].clear(); S.q[k] = ""; $(k === "sp" ? "qSp" : "qCl").value = ""; }); }
@@ -326,7 +326,7 @@ $("lassoTog").checked = S.drag === "lasso"; $("labTog").checked = S.labels;
 $("lassoTog").onchange = e => { S.drag = e.target.checked ? "lasso" : "pan"; if (S.view === "2d") Plotly.relayout($("plot"), {dragmode: S.drag}); };
 $("labTog").onchange = e => { S.labels = e.target.checked; if (S.view === "2d") draw(); };
 $("selBtn").onclick = () => { defaults(); sync(); draw(); };
-$("focusBtn").onclick = () => { tick(P[S.page].focus); sync(); draw(); };
+$("probeBtn").onclick = () => { tick(P[S.page].probe); sync(); draw(); };
 $("reset").onclick = () => { S.rev++; S.cam = {}; draw(); };
 document.querySelectorAll("[data-all]").forEach(b => b.onclick = () => { shown(b.dataset.all).forEach(i => S.hidden[b.dataset.all].delete(i)); draw(); });
 document.querySelectorAll("[data-none]").forEach(b => b.onclick = () => { shown(b.dataset.none).forEach(i => S.hidden[b.dataset.none].add(i)); draw(); });

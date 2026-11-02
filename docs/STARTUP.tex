@@ -1,0 +1,291 @@
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+\PassOptionsToPackage{dvipsnames,svgnames,x11names}{xcolor}
+%
+\documentclass[
+  10pt,
+]{article}
+\usepackage{amsmath,amssymb}
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math} % this also loads fontspec
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\usepackage{lmodern}
+\ifPDFTeX\else
+  % xetex/luatex font selection
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{xcolor}
+\usepackage[margin=2cm]{geometry}
+\usepackage{color}
+\usepackage{fancyvrb}
+\newcommand{\VerbBar}{|}
+\newcommand{\VERB}{\Verb[commandchars=\\\{\}]}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\}}
+% Add ',fontsize=\small' for more characters per line
+\newenvironment{Shaded}{}{}
+\newcommand{\AlertTok}[1]{\textcolor[rgb]{1.00,0.00,0.00}{\textbf{#1}}}
+\newcommand{\AnnotationTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\AttributeTok}[1]{\textcolor[rgb]{0.49,0.56,0.16}{#1}}
+\newcommand{\BaseNTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\BuiltInTok}[1]{\textcolor[rgb]{0.00,0.50,0.00}{#1}}
+\newcommand{\CharTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\CommentTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textit{#1}}}
+\newcommand{\CommentVarTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\ConstantTok}[1]{\textcolor[rgb]{0.53,0.00,0.00}{#1}}
+\newcommand{\ControlFlowTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{\textbf{#1}}}
+\newcommand{\DataTypeTok}[1]{\textcolor[rgb]{0.56,0.13,0.00}{#1}}
+\newcommand{\DecValTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\DocumentationTok}[1]{\textcolor[rgb]{0.73,0.13,0.13}{\textit{#1}}}
+\newcommand{\ErrorTok}[1]{\textcolor[rgb]{1.00,0.00,0.00}{\textbf{#1}}}
+\newcommand{\ExtensionTok}[1]{#1}
+\newcommand{\FloatTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
+\newcommand{\FunctionTok}[1]{\textcolor[rgb]{0.02,0.16,0.49}{#1}}
+\newcommand{\ImportTok}[1]{\textcolor[rgb]{0.00,0.50,0.00}{\textbf{#1}}}
+\newcommand{\InformationTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\newcommand{\KeywordTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{\textbf{#1}}}
+\newcommand{\NormalTok}[1]{#1}
+\newcommand{\OperatorTok}[1]{\textcolor[rgb]{0.40,0.40,0.40}{#1}}
+\newcommand{\OtherTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{#1}}
+\newcommand{\PreprocessorTok}[1]{\textcolor[rgb]{0.74,0.48,0.00}{#1}}
+\newcommand{\RegionMarkerTok}[1]{#1}
+\newcommand{\SpecialCharTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\SpecialStringTok}[1]{\textcolor[rgb]{0.73,0.40,0.53}{#1}}
+\newcommand{\StringTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\VariableTok}[1]{\textcolor[rgb]{0.10,0.09,0.49}{#1}}
+\newcommand{\VerbatimStringTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+\newcommand{\WarningTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
+\usepackage{longtable,booktabs,array}
+\usepackage{calc} % for calculating minipage widths
+% Correct order of tables after \paragraph or \subparagraph
+\usepackage{etoolbox}
+\makeatletter
+\patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
+\makeatother
+% Allow footnotes in longtable head/foot
+\IfFileExists{footnotehyper.sty}{\usepackage{footnotehyper}}{\usepackage{footnote}}
+\makesavenoteenv{longtable}
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\setcounter{secnumdepth}{-\maxdimen} % remove section numbering
+\ifLuaTeX
+  \usepackage{selnolig}  % disable illegal ligatures
+\fi
+\IfFileExists{bookmark.sty}{\usepackage{bookmark}}{\usepackage{hyperref}}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\urlstyle{same}
+\hypersetup{
+  pdftitle={SCambrian -- startup guide},
+  colorlinks=true,
+  linkcolor={Maroon},
+  filecolor={Maroon},
+  citecolor={Blue},
+  urlcolor={Blue},
+  pdfcreator={LaTeX via pandoc}}
+
+\title{SCambrian -- startup guide}
+\usepackage{etoolbox}
+\makeatletter
+\providecommand{\subtitle}[1]{% add subtitle to \maketitle
+  \apptocmd{\@title}{\par {\large #1 \par}}{}{}
+}
+\makeatother
+\subtitle{From a clean clone on ORFEO to the first results (six-step
+pipeline, November 2026)}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{1. The picture}
+
+SCambrian takes protein FASTA sequences of several \textbf{samples}. It clusters them by \textbf{sequence} (MMseqs2) and by \textbf{representation} (ESMC embeddings projected with UMAP and t-SNE). Each clustering is run twice: on every target alone (\textbf{internal}) and on all samples together (\textbf{joint}). The result is \textbf{one summary table}: one row per sequence, one column per clustering.
+
+Each sample is a \textbf{target} (a proteome you study) or a \textbf{probe} (a set of known proteins, e.g.~Insecta immune proteins). A probe is clustered with the targets but never counts as a species: it only shows which target proteins co-cluster with it.
+
+Every command below is run from the repository root.
+
+\begin{verbatim}
+SCambrian/                     (git clone)
+  esmc_config.sh               builds ./.env once
+  configs/query_configs.tsv    WHAT to analyse (one row per sample)
+  configs/param_configs.yaml   HOW (one section per Python script)
+  slurms/run_all.sh            submits steps 01 -> 02 -> 03 -> 04 -> 05 -> 06
+  src/                         the Python code of each step
+  data/                        per-sample data, shared across analyses (not in git)
+  analyses/<analysis_name>/    one folder per analysis (not in git)
+  logs/<step>/                 one log per SLURM job
+\end{verbatim}
+
+\section{2. Install (once per cluster account)}
+
+\begin{verbatim}
+git clone https://github.com/ssenci97/SCambrian.git
+cd SCambrian
+sbatch esmc_config.sh
+tail -f logs/setup_ESMC.log
+\end{verbatim}
+
+The job builds the conda env \texttt{./.env} (Python 3.10, PyTorch 2.4.1 cu121, flash-attn, ESM, Scanpy, HDBSCAN). It succeeded when the log ends with \texttt{All pipeline dependencies successfully verified!}. Running it again never changes an existing \texttt{./.env}; it only re-checks it.
+
+MMseqs2 is \textbf{not} installed by the job: it must be on the \texttt{PATH}, or its path must be set in \texttt{preprocess\_sequences.mmseqs\_executable} and \texttt{run\_mmseqs2.mmseqs\_executable}.
+
+To use the env in a shell:
+
+\begin{verbatim}
+source ~/scratch/miniconda/etc/profile.d/conda.sh
+conda activate ./.env
+\end{verbatim}
+
+\section{3. Configure your analysis}
+
+\textbf{\texttt{configs/query\_configs.tsv}}: one tab-separated row per sample, with no comments.
+
+\begin{itemize}
+\tightlist
+\item \texttt{label}: short, \textbf{unique} name used in every file name, e.g.~\texttt{aegypti}
+\item \texttt{query}: a UniProtKB query, e.g.~\texttt{(organism\_id:7159)} (sequences and annotation table are downloaded), or the path of a local FASTA file ending in \texttt{.fa}, \texttt{.faa} or \texttt{.fasta} (copied)
+\item \texttt{taxonomic\_ref}: name shown in figures, e.g.~\texttt{Ae.\ aegypti}
+\item \texttt{input\_type}: \texttt{target} (the default) or \texttt{probe}
+\end{itemize}
+
+FASTA ids (the first word of each header) must be unique across samples; step 02 stops otherwise.
+
+\textbf{\texttt{configs/param\_configs.yaml}}: one section per Python script. The keys you will most often change:
+
+\begin{itemize}
+\tightlist
+\item \texttt{preprocess\_sequences.analysis\_name}: \texttt{null} names the analysis \texttt{\{YYYY-MM-DD\}\_SCambrian}
+\item \texttt{preprocess\_sequences.min\_length}, \texttt{dedup\_min\_identity}
+\item \texttt{run\_mmseqs2.cluster\_identity\_thresholds}
+\item \texttt{extract\_reps\_biohub.models}: \texttt{esmc\_300m} (default), \texttt{esmc\_600m}, \texttt{esmc\_6b}
+\item \texttt{npz\_scanpy.leiden\_resolution}, \texttt{knn\_neighbors}, \texttt{hdbscan\_min\_cluster\_size}
+\item \texttt{h5ad\_scanpy.report\_series} and its thresholds for the species report
+\end{itemize}
+
+\section{4. Run}
+
+\begin{verbatim}
+DRY_RUN=1 bash slurms/run_all.sh        # show what would be submitted
+bash slurms/run_all.sh                  # submit the whole chain
+bash slurms/run_all.sh 05 06            # only some steps
+ANALYSIS_NAME=test_SCambrian bash slurms/run_all.sh 02 03 04 05 06
+squeue -u $USER                         # follow the jobs; logs in logs/<step>/
+\end{verbatim}
+
+Run these on the login node, not with \texttt{sbatch}. Each step starts only if the previous one succeeded. The dry run is also the quickest check of the configs: it reads both files and prints the array sizes and the analysis name.
+
+The analysis name is fixed once and passed to every job. It is taken from \texttt{ANALYSIS\_NAME}, else from the YAML, else it is today's \texttt{\{YYYY-MM-DD\}\_SCambrian} when step 02 runs, or the newest \texttt{analyses/*\_SCambrian} folder for later steps.
+
+\begin{longtable}[]{@{}p{0.08\columnwidth}p{0.44\columnwidth}p{0.4\columnwidth}@{}}
+\toprule\noalign{}
+step & does & output \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+01 & UniProtKB download or local FASTA copy & \texttt{data/sequences/}, \texttt{data/features/} \\
+02 & validate, tag (\texttt{sc\_label=}, \texttt{sc\_type=}), drop probe copies of targets, dedup per sample & \texttt{data/preprocessed/}, \texttt{analyses/<A>/sc\_metadata.tsv} \\
+03 & MMseqs2 clusters at several identities, internal and joint & \texttt{data/clusters/}, \texttt{analyses/<A>/mmseqs\_joint/} \\
+04 & ESMC embeddings (GPU) & \texttt{data/esm-reps/<model>/} \\
+05 & UMAP and t-SNE (2D, 3D), internal and joint; Leiden and HDBSCAN on every layout & \texttt{analyses/<A>/<model>/projections.h5ad} \\
+06 & cluster names, summary, species report, 3D viewer, RO-Crate & \texttt{analyses/<A>/<model>/} \\
+\end{longtable}
+
+\section{5. Read the results}
+
+Every cluster has one name:
+
+\begin{verbatim}
+{analysis_name}_{u|t|s}_{i|j}_{stat}_{SERIAL}
+
+u / t / s   UMAP layout / t-SNE layout / sequence (MMseqs2)
+i / j       internal (one target alone) / joint (all samples together)
+stat        leiden2d, hdbscan3d, ... or the MMseqs2 identity id90, id50, ...
+SERIAL      internal: <label>_001, _002, ...   joint: a, b, ..., aa, ...
+            (by decreasing size; a joint cluster is UPPER case, A, B, ...,
+            when it holds probe and target proteins together)
+\end{verbatim}
+
+For example, \texttt{2026-11-02\_SCambrian\_u\_j\_leiden2d\_C} is the third-largest Leiden cluster of the joint 2D UMAP, and it holds probe proteins.
+
+In \texttt{analyses/<A>/<model>/}:
+
+\begin{itemize}
+\tightlist
+\item \texttt{sc\_summary.tsv}: \textbf{the main result}. The kept rows of \texttt{sc\_metadata.tsv}, plus one column per series; each cell holds the SERIAL.
+\item \texttt{sc\_joint\_clusters.tsv}: per joint cluster, its size and the count and percent of every sample, including the probe percent.
+\item \texttt{sc\_probe\_capture.tsv}: per target and joint series, the percent of its proteins inside probe (UPPER case) clusters.
+\item \texttt{sc\_*.png}: cluster composition, probe capture heatmap, clusters per series.
+\item \texttt{<model>\_scanpy.pdf}: species report of \texttt{h5ad\_scanpy.report\_series}.
+\item \texttt{interactive/views\_3d.html}: 3D viewer (open it in a browser).
+\end{itemize}
+
+\texttt{analyses/<A>/sc\_metadata.tsv} lists \textbf{every} input record with its \texttt{status}: \texttt{kept}, \texttt{invalid}, \texttt{probe\_overlap} or \texttt{duplicate}.
+
+The notebooks in \texttt{nbs/} load every stage; use \texttt{./.env} as the kernel and set \texttt{ANALYSIS\_NAME} and \texttt{MODEL} at the top.
+
+\section{6. Changes and reruns}
+
+\begin{itemize}
+\tightlist
+\item After changing a config, run \texttt{bash slurms/run\_all.sh} again: only missing or outdated outputs are rebuilt. To force a step, set \texttt{overwrite: true} in its section.
+\item Data in \texttt{data/} (downloads, dedup, embeddings) is reused by every analysis; a new analysis name only rebuilds the joint steps and the summary.
+\item Outputs of the previous layout (\texttt{data/dedup/}, \texttt{data/features/*\_focus\_ids.*}, \texttt{analyses/<labels>/}) are not deleted automatically; remove them by hand.
+\end{itemize}
+
+Full details are in \texttt{README.md}.
+
+\section{7. Coming next (not available yet): project folders}
+
+The plan separates the \textbf{tool}, installed once, from \textbf{projects}, one folder per study, anywhere on disk:
+
+\begin{verbatim}
+install once:   git clone ... && sbatch esmc_config.sh   (the tool + ./.env)
+new project:    scambrian init ~/scratch/projects/my-study
+first try:      scambrian init --demo ~/scratch/projects/demo
+run:            cd ~/scratch/projects/my-study && scambrian run --dry-run
+                scambrian run
+results:        ~/scratch/projects/my-study/analyses/<analysis_name>/
+\end{verbatim}
+
+A project folder holds only your inputs and results. The SLURM scripts stay inside the tool, so fixes reach every project.
+
+\begin{longtable}[]{@{}p{0.47\columnwidth}p{0.47\columnwidth}@{}}
+\toprule\noalign{}
+today & after the change \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+edit \texttt{configs/*} in the clone & edit \texttt{scambrian.yaml} and \texttt{query\_configs.tsv} in a project \\
+\texttt{bash slurms/run\_all.sh} & \texttt{scambrian run} \\
+one \texttt{analyses/<analysis\_name>/} per run, shared \texttt{data/} & the same, inside each project \\
+one clone serves one set of configs & many projects per install \\
+\end{longtable}
+
+\end{document}

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Deduplicates each label's sequences with MMseqs2 and clusters the deduplicated set at successively lower identity thresholds.
+"""Clusters the deduplicated sequences with MMseqs2 at successively lower identity thresholds, per target sample (internal) and for all samples together (joint).
 
-For every label of the query table (``dw_uniprot_seqs.query_table``, in row order), from ``<sequences_dir>/<label>_seqs.fasta``, easy-linclust at ``dedup_min_identity`` writes ``<dedup_dir>/<label>_dedup.fasta`` and a ``<label>_dedup.params`` sidecar holding its parameter tag. Each threshold of ``cluster_identity_thresholds`` then clusters the representatives of the previous threshold (cascade), and the member -> representative assignments are propagated back to every deduplicated sequence. MMseqs2 databases stay in a temporary run directory; only the assignment tables, representative FASTAs, metrics and summaries are copied to ``<clusters_dir>/<label>/``. The dedup is redone when its FASTA or sidecar is missing, the sidecar tag differs from the current parameters or the input FASTA is newer; the clustering is redone when any of its outputs is missing or older than the dedup FASTA; ``--overwrite`` forces both.
+Inputs are the ``<preprocessed_dir>/<label>_dedup.fasta`` files of preprocess_sequences.py. Internal mode (``--index``, 1-based row among the target samples of the query table, or every target when omitted) clusters one target; probes never get internal clusters. Joint mode (``--joint``) concatenates the dedup FASTA of every sample into ``<analysis_dir>/mmseqs_joint/joint_dedup.fasta`` and clusters it. Each threshold of ``cluster_identity_thresholds`` clusters the representatives of the previous threshold (cascade), and the member -> representative assignments are propagated back to every deduplicated sequence. MMseqs2 databases stay in a temporary run directory; only the assignment tables, representative FASTAs, metrics and summaries are copied to ``<clusters_dir>/<label>/`` (internal) or ``<analysis_dir>/mmseqs_joint/`` (joint). The clustering is redone when any of its outputs is missing or older than its input FASTA, or with ``--overwrite``. Cluster names are given later by compile_summary.py.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import argparse
@@ -20,35 +20,31 @@ CLUSTER_COVERAGE_MODE = 0
 CLUSTER_IDENTITY_THRESHOLDS = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2]
 CLUSTER_MIN_COVERAGE = 0.8
 CLUSTERS_DIR = "data/clusters"
-DEDUP_COVERAGE_MODE = 0
-DEDUP_DIR = "data/dedup"
-DEDUP_MIN_COVERAGE = 0.8
-DEDUP_MIN_IDENTITY = 0.95
+JOINT_LABEL = "joint"
+JOINT_SUBDIR = "mmseqs_joint"
 MMSEQS_EXECUTABLE = "mmseqs"
 OVERWRITE = False
+PREPROCESSED_DIR = "data/preprocessed"
 QUERY_TABLE = "configs/query_configs.tsv"
-SEQUENCES_DIR = "data/sequences"
 THREADS = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count() or 1))
 YAML_PATH = "configs/param_configs.yaml"
 ###################################### CONFIG_AND_PARSER
-parser = argparse.ArgumentParser(description="MMseqs2 deduplication and cascaded clustering")
-parser.add_argument("--index", type=int, default=None, help="1-based row of the label in the query table (SLURM array task); all labels when omitted")
-parser.add_argument("--sequences_dir", type=str, default=SEQUENCES_DIR, help="Folder of the <label>_seqs.fasta inputs")
-parser.add_argument("--dedup_dir", type=str, default=DEDUP_DIR, help="Folder of the deduplicated <label>_dedup.fasta outputs")
+parser = argparse.ArgumentParser(description="MMseqs2 cascaded clustering, internal and joint")
+parser.add_argument("--index", type=int, default=None, help="1-based row among the target samples (SLURM array task); every target when omitted")
+parser.add_argument("--joint", action="store_true", help="Cluster all samples together instead of one target")
+parser.add_argument("--analysis_dir", type=str, default=None, help="Analysis folder analyses/<analysis_name>/, required with --joint")
+parser.add_argument("--preprocessed_dir", type=str, default=PREPROCESSED_DIR, help="Folder of the <label>_dedup.fasta inputs (preprocess_sequences.py)")
 parser.add_argument("--clusters_dir", type=str, default=CLUSTERS_DIR, help="Folder of the per-label cluster outputs")
 parser.add_argument("--mmseqs_executable", type=str, default=MMSEQS_EXECUTABLE, help="MMseqs2 executable name or path")
-parser.add_argument("--dedup_min_identity", type=float, default=DEDUP_MIN_IDENTITY, help="Minimum sequence identity (0-1) of two sequences merged by the dedup")
-parser.add_argument("--dedup_min_coverage", type=float, default=DEDUP_MIN_COVERAGE, help="Minimum alignment coverage (0-1) of the dedup")
-parser.add_argument("--dedup_coverage_mode", type=int, default=DEDUP_COVERAGE_MODE, help="MMseqs2 --cov-mode of the dedup (0: query and target)")
 parser.add_argument("--cluster_min_coverage", type=float, default=CLUSTER_MIN_COVERAGE, help="Minimum alignment coverage (0-1) of every clustering threshold")
 parser.add_argument("--cluster_coverage_mode", type=int, default=CLUSTER_COVERAGE_MODE, help="MMseqs2 --cov-mode of the clustering")
 parser.add_argument("--cluster_identity_thresholds", type=float, nargs="+", default=CLUSTER_IDENTITY_THRESHOLDS, help="Decreasing identity thresholds (0-1) of the cascaded clustering")
-parser.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=OVERWRITE, help="Redo the dedup and clustering even when their outputs are fresh")
+parser.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=OVERWRITE, help="Redo the clustering even when its outputs are fresh")
 parser.add_argument("--yaml-in", nargs="?", const=YAML_PATH, default=YAML_PATH)
 parser.add_argument("--yaml-out", nargs="?", const=YAML_PATH, default=None)
 cli_preview, _ = parser.parse_known_args()
 script_key = "run_mmseqs2"
-params = dict(sequences_dir=SEQUENCES_DIR, dedup_dir=DEDUP_DIR, clusters_dir=CLUSTERS_DIR, mmseqs_executable=MMSEQS_EXECUTABLE, dedup_min_identity=DEDUP_MIN_IDENTITY, dedup_min_coverage=DEDUP_MIN_COVERAGE, dedup_coverage_mode=DEDUP_COVERAGE_MODE, cluster_min_coverage=CLUSTER_MIN_COVERAGE, cluster_coverage_mode=CLUSTER_COVERAGE_MODE, cluster_identity_thresholds=CLUSTER_IDENTITY_THRESHOLDS, overwrite=OVERWRITE)
+params = dict(preprocessed_dir=PREPROCESSED_DIR, clusters_dir=CLUSTERS_DIR, mmseqs_executable=MMSEQS_EXECUTABLE, cluster_min_coverage=CLUSTER_MIN_COVERAGE, cluster_coverage_mode=CLUSTER_COVERAGE_MODE, cluster_identity_thresholds=CLUSTER_IDENTITY_THRESHOLDS, overwrite=OVERWRITE)
 if cli_preview.yaml_in and Path(cli_preview.yaml_in).exists():
     config_data = yaml.safe_load(Path(cli_preview.yaml_in).read_text()) or {}
     if script_key in config_data: params.update(config_data[script_key])
@@ -60,15 +56,16 @@ if args.yaml_out:
     Path(args.yaml_out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.yaml_out).write_text(yaml.dump(config_data, sort_keys=False))
 ###################################### HELPER_FUNCTIONS
-def query_labels() -> list[str]:
-    """List the labels of the query table named in the dw_uniprot_seqs section of the YAML configuration.
+def query_samples() -> list[tuple[str, str]]:
+    """List the samples of the query table named in the dw_uniprot_seqs section of the YAML configuration.
 
     Returns:
-        list[str]: Non-empty labels in row order.
+        list[tuple[str, str]]: (label, input type) in row order.
     """
     config_data = (yaml.safe_load(Path(args.yaml_in).read_text()) or {}) if args.yaml_in and Path(args.yaml_in).exists() else {}
     df = pd.read_csv(config_data.get("dw_uniprot_seqs", {}).get("query_table", QUERY_TABLE), sep="\t", dtype=str)
-    return [str(lbl).strip() for lbl in df["label"] if pd.notna(lbl) and str(lbl).strip()]
+    types = df["input_type"] if "input_type" in df else pd.Series("target", index=df.index)
+    return [(str(lbl).strip(), str(t).strip() if pd.notna(t) and str(t).strip() else "target") for lbl, t in zip(df["label"], types) if pd.notna(lbl) and str(lbl).strip()]
 def mmseqs(*command: str | Path | float | int) -> None:
     """Run one MMseqs2 subcommand and fail on a non-zero exit.
 
@@ -76,20 +73,13 @@ def mmseqs(*command: str | Path | float | int) -> None:
         *command (str | Path | float | int): Subcommand and its arguments.
     """
     subprocess.run([args.mmseqs_executable, *map(str, command)], check=True)
-def dedup_tag() -> str:
-    """Return the parameter tag of the dedup.
-
-    Returns:
-        str: Tag such as ``dmin0.95_dcov0.8_dmode0``.
-    """
-    return f"dmin{args.dedup_min_identity}_dcov{args.dedup_min_coverage}_dmode{args.dedup_coverage_mode}"
 def cluster_tag() -> str:
-    """Return the parameter tag of the clustering outputs, which includes the dedup tag.
+    """Return the parameter tag of the clustering outputs.
 
     Returns:
-        str: Tag such as ``dmin0.95_dcov0.8_dmode0_ccov0.8_cmode0``.
+        str: Tag such as ``ccov0.8_cmode0``.
     """
-    return f"{dedup_tag()}_ccov{args.cluster_min_coverage}_cmode{args.cluster_coverage_mode}"
+    return f"ccov{args.cluster_min_coverage}_cmode{args.cluster_coverage_mode}"
 def threshold_tag(identity: float) -> str:
     """Write an identity threshold as a file-name fragment.
 
@@ -136,31 +126,6 @@ def read_assignments(path: Path) -> dict[str, str]:
     with open(path, encoding="utf-8") as f:
         return {fields[1]: fields[0] for fields in (line.rstrip("\n").split("\t") for line in f) if len(fields) >= 2}
 ###################################### PIPELINE_STEPS
-def dedup(label: str, in_fasta: Path) -> Path:
-    """Deduplicate the sequences of a label with easy-linclust, unless its fresh output already exists.
-
-    Args:
-        label (str): Label of the input FASTA.
-        in_fasta (Path): ``<label>_seqs.fasta`` input.
-
-    Returns:
-        Path: ``<dedup_dir>/<label>_dedup.fasta``.
-    """
-    dedup_dir = Path(args.dedup_dir)
-    out_fasta, sidecar = dedup_dir / f"{label}_dedup.fasta", dedup_dir / f"{label}_dedup.params"
-    if not args.overwrite and not is_stale([out_fasta, sidecar], [in_fasta]) and sidecar.read_text().strip() == dedup_tag():
-        print(f"[PYTHON-INFO] Dedup of '{label}' is fresh ({dedup_tag()}). Skipping.")
-        return out_fasta
-    prefix, work_dir = dedup_dir / f"{label}_tmp", dedup_dir / f"tmp_{label}"
-    work_dir.mkdir(parents=True, exist_ok=True)
-    mmseqs("easy-linclust", in_fasta, prefix, work_dir, "--min-seq-id", args.dedup_min_identity, "-c", args.dedup_min_coverage, "--cov-mode", args.dedup_coverage_mode, "--threads", THREADS)
-    Path(f"{prefix}_rep_seq.fasta").rename(out_fasta)
-    for p in dedup_dir.glob(f"{label}_tmp*"):
-        if p.is_file(): p.unlink()
-    shutil.rmtree(work_dir, ignore_errors=True)
-    sidecar.write_text(dedup_tag() + "\n")
-    print(f"[PYTHON-INFO][SAVE] {out_fasta} ({dedup_tag()})")
-    return out_fasta
 def cascade_clusters(label: str, dedup_fasta: Path, run_dir: Path) -> None:
     """Cluster the deduplicated sequences at every threshold, each on the representatives of the previous one, and write all outputs into the run directory.
 
@@ -199,34 +164,68 @@ def cascade_clusters(label: str, dedup_fasta: Path, run_dir: Path) -> None:
     metrics = pd.DataFrame(metric_rows, columns=["threshold", "clusters", "singleton_clusters", "max_cluster_size", "avg_cluster_size", "min_coverage"])
     metrics.to_csv(run_dir / f"{label}_cluster_metrics.tsv", sep="\t", index=False)
     pd.DataFrame({f"cluster_id_{threshold_tag(t)}": pd.Series(a) for t, a in assignments_by_threshold.items()}).rename_axis("sequence_id").sort_index().fillna("").to_csv(run_dir / f"{label}_all_clusters_summary.tsv", sep="\t")
-    summary = f"=== Clustering Summary for {label} ===\nTimestamp: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\nDedup: {dedup_tag()}\n\n--- Representative Sequences ---\nRepresentative sequences retained: {n_sequences}\n\n--- Clustering Metrics ---\n"
+    summary = f"=== Clustering Summary for {label} ===\nTimestamp: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\nClustering: {cluster_tag()}\n\n--- Representative Sequences ---\nRepresentative sequences retained: {n_sequences}\n\n--- Clustering Metrics ---\n"
     (run_dir / "clustering_summary.txt").write_text(summary + metrics.to_csv(sep="\t", index=False), encoding="utf-8")
+def run_label(label: str, in_fasta: Path, final_dir: Path) -> None:
+    """Cluster one input FASTA into its output folder, unless its outputs are fresh.
+
+    Args:
+        label (str): Sample label, or ``joint``.
+        in_fasta (Path): Deduplicated input FASTA.
+        final_dir (Path): Output folder.
+    """
+    run_dir = final_dir.parent / f"{final_dir.name}_tmp"
+    if not args.overwrite and not is_stale(cluster_outputs(label, final_dir), [in_fasta]):
+        print(f"[PYTHON-INFO] Clusters of '{label}' are fresh. Skipping.")
+        return
+    shutil.rmtree(run_dir, ignore_errors=True)
+    run_dir.mkdir(parents=True)
+    cascade_clusters(label, in_fasta, run_dir)
+    final_dir.mkdir(parents=True, exist_ok=True)
+    for kept in cluster_outputs(label, run_dir): shutil.copy(kept, final_dir / kept.name)
+    shutil.rmtree(run_dir, ignore_errors=True)
+    print(f"[PYTHON-INFO][SAVE] {final_dir} ({len(args.cluster_identity_thresholds)} thresholds, {cluster_tag()})")
+def joint_fasta(samples: list[tuple[str, str]], out_dir: Path) -> Path:
+    """Concatenate the dedup FASTA of every sample, rewriting the joint FASTA only when its content changes.
+
+    Args:
+        samples (list[tuple[str, str]]): (label, input type) of every sample.
+        out_dir (Path): Joint output folder.
+
+    Returns:
+        Path: ``joint_dedup.fasta``.
+    """
+    inputs = [Path(args.preprocessed_dir) / f"{label}_dedup.fasta" for label, _ in samples]
+    missing = [p for p in inputs if not p.exists()]
+    if missing: raise FileNotFoundError(f"[PYTHON-ERROR] Missing {missing}; run step 02 first.")
+    out = out_dir / f"{JOINT_LABEL}_dedup.fasta"
+    text = "".join(p.read_text(encoding="utf-8") for p in inputs)
+    if not out.exists() or out.read_text(encoding="utf-8") != text:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
+        print(f"[PYTHON-INFO][SAVE] {out} ({text.count('>'):,} sequences from {len(inputs)} samples)")
+    return out
 ###################################### MAIN
 def main() -> None:
-    """Deduplicate and cluster every label, or only the ``--index`` one."""
+    """Cluster every target, only the ``--index`` one, or all samples together with ``--joint``."""
     start_time = time.time()
     if not shutil.which(args.mmseqs_executable) and not Path(args.mmseqs_executable).exists():
         raise FileNotFoundError(f"[PYTHON-ERROR] MMseqs2 executable '{args.mmseqs_executable}' not found.")
-    for folder in (args.dedup_dir, args.clusters_dir): Path(folder).mkdir(parents=True, exist_ok=True)
-    labels = query_labels()
-    if args.index is not None: labels = labels[args.index - 1:args.index] if 1 <= args.index <= len(labels) else []
-    for label in tqdm(labels, desc="Labels"):
-        in_fasta = Path(args.sequences_dir) / f"{label}_seqs.fasta"
-        if not in_fasta.exists():
-            print(f"[PYTHON-WARNING] Missing {in_fasta}. Skipping '{label}'.")
-            continue
-        dedup_fasta = dedup(label, in_fasta)
-        final_dir, run_dir = Path(args.clusters_dir) / label, Path(args.clusters_dir) / f"{label}_tmp"
-        if not args.overwrite and not is_stale(cluster_outputs(label, final_dir), [dedup_fasta]):
-            print(f"[PYTHON-INFO] Clusters of '{label}' are fresh. Skipping.")
-            continue
-        shutil.rmtree(run_dir, ignore_errors=True)
-        run_dir.mkdir(parents=True)
-        cascade_clusters(label, dedup_fasta, run_dir)
-        final_dir.mkdir(parents=True, exist_ok=True)
-        for kept in cluster_outputs(label, run_dir): shutil.copy(kept, final_dir / kept.name)
-        shutil.rmtree(run_dir, ignore_errors=True)
-        print(f"[PYTHON-INFO][SAVE] {final_dir} ({len(args.cluster_identity_thresholds)} thresholds, {cluster_tag()})")
+    samples = query_samples()
+    if args.joint:
+        if not args.analysis_dir: raise ValueError("[PYTHON-ERROR] --joint requires --analysis_dir.")
+        out_dir = Path(args.analysis_dir) / JOINT_SUBDIR
+        run_label(JOINT_LABEL, joint_fasta(samples, out_dir), out_dir)
+    else:
+        labels = [label for label, sc_type in samples if sc_type == "target"]
+        if args.index is not None: labels = labels[args.index - 1:args.index] if 1 <= args.index <= len(labels) else []
+        Path(args.clusters_dir).mkdir(parents=True, exist_ok=True)
+        for label in tqdm(labels, desc="Targets"):
+            in_fasta = Path(args.preprocessed_dir) / f"{label}_dedup.fasta"
+            if not in_fasta.exists():
+                print(f"[PYTHON-WARNING] Missing {in_fasta}. Skipping '{label}'.")
+                continue
+            run_label(label, in_fasta, Path(args.clusters_dir) / label)
     max_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
     print(f"[PYTHON-INFO] {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {time.time() - start_time:.2f}s {max_mem:.2f}MB")
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ parser = argparse.ArgumentParser(description="Download UniProtKB annotation fiel
 parser.add_argument("--query", default=None, help="Single UniProtKB query; when omitted every row of the query table is downloaded")
 parser.add_argument("--label", default=None, help="Label of --query, or the only table row to download")
 parser.add_argument("--out_tsv", type=Path, default=None, help="Output TSV path (default <features_dir>/<label>_feats.tsv)")
-parser.add_argument("--query_table", type=str, default=QUERY_TABLE, help="TSV with label, query and exact_species columns")
+parser.add_argument("--query_table", type=str, default=QUERY_TABLE, help="TSV with label, query, taxonomic_ref and input_type columns")
 parser.add_argument("--features_dir", type=str, default=FEATURES_DIR, help="Output folder")
 parser.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=OVERWRITE, help="Download again labels whose output exists")
 parser.add_argument("--yaml-in", nargs="?", const=YAML_PATH, default=YAML_PATH)

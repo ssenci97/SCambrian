@@ -22,8 +22,8 @@ fi
 echo "[SLURM-INFO] Using CC=$CC CXX=$CXX"
 
 ###################################### paths
-mkdir -p logs tmp .cache
-export TMPDIR="$PWD/tmp"
+mkdir -p logs .tmp .cache
+export TMPDIR="$PWD/.tmp"
 export PIP_CACHE_DIR="$PWD/.cache"
 
 ###################################### conda & conditional setup

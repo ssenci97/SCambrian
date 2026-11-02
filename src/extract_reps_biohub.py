@@ -57,7 +57,7 @@ HF_ROOT_KEYS = {
     "lm_head.decoder.bias": "sequence_head.3.bias",
 }
 LOGITS_CONFIG = LogitsConfig(sequence=True, return_embeddings=True)
-MODELS = ["esmc_300m", "esmc_600m", "esmc_6b"]
+MODELS = ["esmc_300m"]
 OVERWRITE = False
 SEED = 42
 SEQUENCES_PER_CHUNK = 500
@@ -68,7 +68,7 @@ torch.manual_seed(SEED)
 ###################################### CONFIG_AND_PARSER
 parser = argparse.ArgumentParser(description="ESMC protein embeddings")
 input_group = parser.add_mutually_exclusive_group(required=False)
-input_group.add_argument("--fasta", type=str, default=None, help="Input FASTA, typically <dedup_dir>/<label>_dedup.fasta")
+input_group.add_argument("--fasta", type=str, default=None, help="Input FASTA, typically <preprocessed_dir>/<label>_dedup.fasta")
 input_group.add_argument("--seqs_tsv", type=str, default=None, help="Input TSV with a header and id, sequence columns")
 parser.add_argument("--models", type=str, nargs="+", default=MODELS, help="ESMC models to run (esmc_300m, esmc_600m, esmc_6b)")
 parser.add_argument("--embeddings_dir", type=str, default=EMBEDDINGS_DIR, help="Base output folder; outputs go to <embeddings_dir>/<model>/<label>_reps.npz")

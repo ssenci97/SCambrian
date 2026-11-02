@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-"""Writes one paged, self-contained 3D HTML viewer of the UMAP and t-SNE layouts saved by npz_scanpy.py, plus the HDBSCAN labels of the 3D UMAP.
+"""Writes one paged, self-contained 3D HTML viewer of the UMAP and t-SNE layouts of npz_scanpy.py, coloured by the cluster series of compile_summary.py.
 
-Per .h5ad a single HTML file is saved under ``<run>/interactive/`` with one page for the joint view and one per species (intra view), browsed with arrows, a page menu or the arrow keys. Every page has three views, switched in the header or with the V key: side-by-side 3D UMAP and t-SNE panels, a static 2D projection of the same 3D layouts (X and Y dimensions, azimuth and elevation, by default dimension 1 vs 2 with no rotation) and a full-size barplot, together with a species/cluster switch; the cluster labels are chosen among Leiden, intra-species and HDBSCAN fitted on the 3D UMAP for every min_cluster_size of ``--hdbscan_min_cluster_sizes``. Inter-species clusters (Leiden, joint HDBSCAN) are named by lowercase letters of their 0-based id (a, b, ..., aa) and intra-species clusters (intra Leiden, per-species HDBSCAN) by their 0-based id as a number string (0, 1, ...), HDBSCAN ids following decreasing size. The chi-square q-value of every significant inter-species cluster (chi-square and fold-change gates of h5ad_scanpy.py), read from its species_cluster_enrichment table, is shown as significance asterisks (* q<0.05, ** q<0.01, *** q<0.001, nothing otherwise) stacked vertically over each stacked bar of the joint view. A left sidebar holds a protein ID finder that rings the protein in both panels, an export of the IDs of the points shown, and species and cluster checklists, combined to select which points are drawn, with the significance asterisks and per-species counts of every inter-species cluster. Every page opens coloured by Leiden cluster with only the joint clusters selected by h5ad_scanpy.py (``selected`` column of the enrichment table, the clusters it re-projects) ticked, restored by the Sel button. The barplot view, with a linear/log switch, stacks the protein count of every inter-species cluster per species, and clicking a bar returns to the last scatter view with that cluster isolated. Points are drawn at alpha ALPHA and at the minimum MARKER_SIZE by default. The camera is kept across all changes until reset. The HDBSCAN labels of all views are also written to one TSV per .h5ad. An .h5ad whose outputs all exist and are newer than this script, its template, the .h5ad and the enrichment table is skipped unless ``--overwrite`` is set. Probe inputs (``input_type`` probe) are suffixed "(probe)", can be hidden in the species checklist and get no intra page; the ``focus selection`` label set colours the target proteins I (own focus annotation, red) and E (extended through probing: unannotated, inside a focus cluster of the focus_cluster_enrichment table, dark red), probe proteins left unassigned, and the Focus button ticks the functional focus clusters of the focus_cluster_enrichment table. Species colours follow the barplots of h5ad_scanpy.py (PALETTE_ALT by input position, targets first). In the 2D view a sidebar section switches the drag between lasso and pan, the lassoed points of either panel becoming the shown set of every view and of the ID export until cleared (✕ button or double-click), and toggles the cluster labels of the current label set (letters for inter-species, numbers for intra-species clusters) written at the median position of the shown points of every cluster.
+Per projections.h5ad a single ``<model>/interactive/views_3d.html`` is saved, with one page for the joint view and one per target (internal view), browsed with arrows, a page menu or the arrow keys. Every page has three views, switched in the header or with the V key: side-by-side 3D UMAP and t-SNE panels, a static 2D projection of the same 3D layouts and a full-size barplot, together with a species/cluster switch. The cluster label sets are the UMAP and t-SNE series of ``sc_summary.tsv`` (``{analysis}_{u|t}_{i|j}_{leiden|hdbscan}{2|3}d``), so every name in the viewer is the SERIAL of the summary: letters for joint clusters (UPPER case when the cluster holds probe and target proteins) and ``<label>_001`` for internal ones; MMseqs2 series are left out because their tens of thousands of clusters do not fit a checklist. The barplot and the Sel/Probe buttons use the report series (``h5ad_scanpy.report_series``): Sel ticks the joint clusters selected by h5ad_scanpy.py (``selected`` column of its enrichment table, whose significant clusters also get chi-square asterisks over their bars), Probe ticks the UPPER-case clusters. A left sidebar holds a protein ID finder, an export of the IDs of the points shown, and species and cluster checklists. Probe samples are suffixed "(probe)" and get no internal page. Species colours follow the barplots of h5ad_scanpy.py (PALETTE_ALT by sample position, targets first). In the 2D view a lasso selects the shown points and cluster labels can be toggled. An output newer than this script, its template, the .h5ad, the summary and the enrichment table is skipped unless ``--overwrite`` is set.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
 import argparse
 import base64
 import datetime
-import hdbscan
 from html import escape
 import json
 import numpy as np
-import os
 import pandas as pd
 from pathlib import Path
 from plotly.offline import get_plotlyjs
@@ -28,127 +26,67 @@ FONT_FAMILY = "DejaVu Sans"
 FONT_LEGEND = 15
 FONT_TICK = 12
 FONT_TITLE = 20
-HDBSCAN_MAX_CLUSTERS = 15
-HDBSCAN_MIN_CLUSTER_SIZES = [500, 800, 1600]
-HDBSCAN_MIN_SAMPLES = 10
-LABEL_SETS = {"species": "species", "cluster": "Leiden cluster", "intra_cluster": "intra-species cluster", "focus_selection": "focus selection"}
 MARKER_SIZE = 0.5
 MAX_POINTS_PER_VIEW = None
 METHODS = {"umap": "UMAP", "tsne": "t-SNE"}
-N_JOBS = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count() or 1))
+OUTPUT_FILE = "views_3d.html"
 OVERWRITE = False
 PALETTE = ["#7A5271", "#30767A", "#A66C58", "#8E81B9", "#899E64", "#DA919B", "#76BBE2", "#F1B584", "#93DEB6", "#ECDE90"]
 PALETTE_ALT = PALETTE[::2] + PALETTE[1::2]
+REPORT_SERIES = "u_j_leiden2d"
 SEED = 42
-SELECTION_COLORS = {"I": "#FF0000", "E": "#8B0000"}
 SIG_LEVELS = [(0.001, "***"), (0.01, "**"), (0.05, "*")]
+SPECIES_KEY = "species"
 SUBDIR = "interactive"
+SUMMARY_FILE = "sc_summary.tsv"
 TEMPLATE = Path(__file__).resolve().parent / "templates" / "h5ad_interactive.html"
 YAML_PATH = "configs/param_configs.yaml"
 ###################################### CONFIG_AND_PARSER
-parser = argparse.ArgumentParser(description="Interactive 3D UMAP/t-SNE and HDBSCAN HTML views")
-parser.add_argument("--h5ad", type=str, required=True, help="Comma-separated .h5ad files written by npz_scanpy.py")
+parser = argparse.ArgumentParser(description="Interactive 3D UMAP/t-SNE HTML views of the summary cluster series")
+parser.add_argument("--h5ad", type=str, required=True, help="Comma-separated projections.h5ad files of npz_scanpy.py, each with its sc_summary.tsv")
 parser.add_argument("--outdir", type=str, default=None, help="Base output directory; defaults to the folder of each .h5ad")
-parser.add_argument("--hdbscan_min_cluster_sizes", type=int, nargs="+", default=HDBSCAN_MIN_CLUSTER_SIZES, help="HDBSCAN min_cluster_size values of the slider")
-parser.add_argument("--hdbscan_min_samples", type=int, default=HDBSCAN_MIN_SAMPLES, help="HDBSCAN min_samples, capped at min_cluster_size")
-parser.add_argument("--hdbscan_max_clusters", type=int, default=HDBSCAN_MAX_CLUSTERS, help="Largest HDBSCAN clusters kept, the rest unassigned")
 parser.add_argument("--max_points_per_view", type=int, default=MAX_POINTS_PER_VIEW, help="Random subsample of plotted points per view (None plots all)")
-parser.add_argument("--n_jobs", type=int, default=N_JOBS, help="CPU threads")
 parser.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=OVERWRITE, help="Recompute outputs that already exist")
 parser.add_argument("--yaml-in", nargs="?", const=YAML_PATH, default=YAML_PATH)
 parser.add_argument("--yaml-out", nargs="?", const=YAML_PATH, default=None)
 cli_preview, _ = parser.parse_known_args()
 script_key = "h5ad_interactive"
-params = dict(hdbscan_min_cluster_sizes=HDBSCAN_MIN_CLUSTER_SIZES, hdbscan_min_samples=HDBSCAN_MIN_SAMPLES, hdbscan_max_clusters=HDBSCAN_MAX_CLUSTERS, max_points_per_view=MAX_POINTS_PER_VIEW, overwrite=OVERWRITE)
+params = dict(max_points_per_view=MAX_POINTS_PER_VIEW, overwrite=OVERWRITE)
+config_data = {}
 if cli_preview.yaml_in and Path(cli_preview.yaml_in).exists():
     config_data = yaml.safe_load(Path(cli_preview.yaml_in).read_text()) or {}
     if script_key in config_data: params.update(config_data[script_key])
 parser.set_defaults(**params)
 args = parser.parse_args()
 if args.yaml_out:
-    config_data = yaml.safe_load(Path(args.yaml_out).read_text()) if Path(args.yaml_out).exists() else {}
-    config_data[script_key] = {k: getattr(args, k) for k in params}
+    out_data = yaml.safe_load(Path(args.yaml_out).read_text()) if Path(args.yaml_out).exists() else {}
+    out_data[script_key] = {k: getattr(args, k) for k in params}
     Path(args.yaml_out).parent.mkdir(parents=True, exist_ok=True)
-    Path(args.yaml_out).write_text(yaml.dump(config_data, sort_keys=False))
+    Path(args.yaml_out).write_text(yaml.dump(out_data, sort_keys=False))
 ###################################### HELPER_FUNCTIONS
 def species_names() -> dict[str, str]:
-    """Map each label of the query configuration to its exact_species display name.
+    """Map each label of the query table to its taxonomic_ref display name.
 
     Returns:
-        dict[str, str]: Label -> display name (empty if the configuration is missing).
+        dict[str, str]: Label -> display name (empty if the table is missing).
     """
-    config_data = (yaml.safe_load(Path(args.yaml_in).read_text()) or {}) if args.yaml_in and Path(args.yaml_in).exists() else {}
     tsv = Path(config_data.get("dw_uniprot_seqs", {}).get("query_table", DEFAULT_QUERY_TSV))
     df = pd.read_csv(tsv, sep="\t", dtype=str) if tsv.exists() else pd.DataFrame(columns=["label"])
-    names = df["exact_species"] if "exact_species" in df else df["label"]
+    names = df["taxonomic_ref"] if "taxonomic_ref" in df else df["label"]
     return {lbl: (nm if pd.notna(nm) and str(nm).strip() else lbl) for lbl, nm in zip(df["label"], names) if pd.notna(lbl)}
-def letter(i: int) -> str:
-    """Name a 0-based inter-species cluster id by lowercase letters, spreadsheet-style (0 -> a, 26 -> aa).
-
-    Args:
-        i (int): 0-based cluster index.
-
-    Returns:
-        str: Letter name.
-    """
-    return (letter(i // 26 - 1) if i >= 26 else "") + chr(97 + i % 26)
-def list_views(obs: pd.DataFrame, keys: set[str]) -> list[str]:
-    """List the joint view and every species with 3D intra layouts of all methods.
-
-    Args:
-        obs (pd.DataFrame): Observations of the .h5ad.
-        keys (set[str]): ``obsm`` keys of the .h5ad.
-
-    Returns:
-        list[str]: ``joint`` followed by the species names.
-    """
-    views = ["joint"] if all(f"X_{m}_{DIM}d" in keys for m in METHODS) else []
-    if all(f"X_{m}_{DIM}d_intra" in keys for m in METHODS):
-        views += [sp for sp in obs["species"].astype(str).unique() if obs.loc[obs["species"].astype(str) == sp, "intra_cluster"].notna().any()]
-    return views
-def targets(target_dir: Path, param_tag: str) -> dict[str, Path]:
-    """Return every output path of one .h5ad.
-
-    Args:
-        target_dir (Path): Output folder of the run.
-        param_tag (str): Parameter tag of the .h5ad.
-
-    Returns:
-        dict[str, Path]: Output key -> path.
-    """
-    return {"tsv": target_dir / f"hdbscan_umap{DIM}d__{param_tag}.tsv", "html": target_dir / f"views_{DIM}d__{param_tag}.html"}
-def fit_hdbscan_auto(coords: np.ndarray, min_cluster_size: int) -> np.ndarray:
-    """Fit HDBSCAN and relabel the ``hdbscan_max_clusters`` largest clusters 1..n by decreasing size, the rest 0.
-
-    Args:
-        coords (np.ndarray): Layout coordinates.
-        min_cluster_size (int): HDBSCAN minimum cluster size.
-
-    Returns:
-        np.ndarray: Labels, 0 being unassigned.
-    """
-    mcs = int(min_cluster_size)
-    if len(coords) <= mcs: return np.zeros(len(coords), dtype=int)
-    raw = hdbscan.HDBSCAN(min_cluster_size=mcs, min_samples=min(args.hdbscan_min_samples, mcs), metric="euclidean", core_dist_n_jobs=args.n_jobs).fit_predict(coords)
-    unique, counts = np.unique(raw[raw >= 0], return_counts=True)
-    mapping = np.zeros(raw.max() + 2, dtype=int)
-    mapping[unique[np.argsort(-counts, kind="stable")][:args.hdbscan_max_clusters]] = np.arange(1, min(len(unique), args.hdbscan_max_clusters) + 1)
-    return mapping[raw]
-def categories(values: pd.Series, unassigned: str | None = None, colors: dict[str, str] | None = None) -> tuple[np.ndarray, list[tuple[str, str, int]]]:
+def categories(values: pd.Series, colors: dict[str, str] | None = None) -> tuple[np.ndarray, list[tuple[str, str, int]]]:
     """Encode labels as integer codes ordered by decreasing size, coloured by alternating PALETTE colours or by a fixed mapping.
 
     Args:
-        values (pd.Series): Labels per point (NaN allowed).
-        unassigned (str | None): Name of the missing or 0 label, drawn in COLOR_BG.
-        colors (dict[str, str] | None): Fixed label -> colour mapping (the species colours of the report); other labels take PALETTE_ALT by size.
+        values (pd.Series): Labels per point (NaN allowed, drawn as unassigned).
+        colors (dict[str, str] | None): Fixed label -> colour mapping; other labels take PALETTE_ALT by size.
 
     Returns:
         tuple[np.ndarray, list[tuple[str, str, int]]]: Codes per point and (name, colour, count) per code.
     """
     values = values.astype("object").where(values.notna(), None)
     counts = values.dropna().value_counts(sort=True)
-    names = [str(n) for n in counts.index]
-    cats = [(unassigned or "unassigned", COLOR_BG, int(values.isna().sum()))] + [(n, (colors or {}).get(n, PALETTE_ALT[i % len(PALETTE_ALT)]), int(c)) for i, (n, c) in enumerate(zip(names, counts.values))]
+    cats = [("unassigned", COLOR_BG, int(values.isna().sum()))] + [(str(n), (colors or {}).get(n, PALETTE_ALT[i % len(PALETTE_ALT)]), int(c)) for i, (n, c) in enumerate(zip(counts.index, counts.values))]
     lookup = {n: i + 1 for i, n in enumerate(counts.index)}
     return np.asarray([lookup.get(v, 0) for v in values], dtype=np.int32), cats
 def encode(values: np.ndarray, dtype: type) -> str:
@@ -162,20 +100,6 @@ def encode(values: np.ndarray, dtype: type) -> str:
         str: Base64 string.
     """
     return base64.b64encode(np.ascontiguousarray(values, dtype=dtype).tobytes()).decode()
-def write_views(pages: list[dict], title: str, out_path: Path) -> None:
-    """Write all pages into one self-contained paged HTML viewer.
-
-    Args:
-        pages (list[dict]): Page payloads (title, subtitle, slug, methods, coords, ids, sets, bars, selected).
-        title (str): Document title.
-        out_path (Path): Output HTML path.
-    """
-    config = dict(alpha=ALPHA, font_family=FONT_FAMILY, font_legend=FONT_LEGEND, font_tick=FONT_TICK, font_title=FONT_TITLE, marker_size=MARKER_SIZE)
-    used = {k for p in pages for k, s in p["sets"].items() if len(s["cats"]) > 1}
-    cluster_keys = [k for k in list(LABEL_SETS.values())[1:] if k in used] + [f"HDBSCAN mcs={mcs}" for mcs in args.hdbscan_min_cluster_sizes]
-    payload = json.dumps(dict(title=title, config=config, hover_keys=[k for k in LABEL_SETS.values() if k in used or k == LABEL_SETS["species"]], cluster_keys=cluster_keys, leiden_key=LABEL_SETS["cluster"], pages=pages), separators=(",", ":")).replace("</", "<\\/")
-    out_path.write_text(TEMPLATE.read_text().replace("__TITLE__", escape(title), 1).replace("__PLOTLYJS__", get_plotlyjs(), 1).replace("__DATA__", payload, 1), encoding="utf-8")
-###################################### REPORT
 def load_enrichment(enrichment_csv: Path) -> tuple[dict[str, str], set[str]]:
     """Read the significance asterisks and the selection of the joint clusters from the enrichment table of h5ad_scanpy.py.
 
@@ -186,119 +110,113 @@ def load_enrichment(enrichment_csv: Path) -> tuple[dict[str, str], set[str]]:
         tuple[dict[str, str], set[str]]: Significant cluster -> asterisks, and the selected clusters.
     """
     columns = ["cluster", "chi2_q", "significant", "selected"]
-    table = pd.read_csv(enrichment_csv).drop_duplicates("cluster") if enrichment_csv.exists() else pd.DataFrame()
-    table = table.astype({"cluster": str}) if set(columns) <= set(table.columns) else pd.DataFrame(columns=columns)
+    table = pd.read_csv(enrichment_csv, dtype={"cluster": str}).drop_duplicates("cluster") if enrichment_csv.exists() else pd.DataFrame(columns=columns)
+    if not set(columns) <= set(table.columns): table = pd.DataFrame(columns=columns)
     significant_rows = table[table["significant"].astype(bool)]
     stars = {c: next((st for cut, st in SIG_LEVELS if q < cut), "") for c, q in zip(significant_rows["cluster"], significant_rows["chi2_q"])}
     selected = set(table.loc[table["selected"].astype(bool), "cluster"])
     print(f"[PYTHON-INFO][SELECTION] {len(selected)} selected joint clusters from {enrichment_csv.name}: {', '.join(sorted(selected, key=lambda c: (len(c), c)))}")
     return stars, selected
-def load_focus(focus_csv: Path) -> set[str]:
-    """Read the functional focus clusters from the focus enrichment table of h5ad_scanpy.py.
-
-    Args:
-        focus_csv (Path): focus_cluster_enrichment table (may be missing).
-
-    Returns:
-        set[str]: Focus clusters.
-    """
-    table = pd.read_csv(focus_csv, dtype={"cluster": str}) if focus_csv.exists() else pd.DataFrame(columns=["cluster", "focus_cluster"])
-    focus = set(table.loc[table["focus_cluster"].astype(bool), "cluster"]) if "focus_cluster" in table else set()
-    print(f"[PYTHON-INFO][FOCUS] {len(focus)} focus clusters from {focus_csv.name}: {', '.join(sorted(focus, key=lambda c: (len(c), c)))}")
-    return focus
 def species_colors(obs: pd.DataFrame, names: dict[str, str]) -> dict[str, str]:
-    """Colour every input as the barplots of h5ad_scanpy.py do: PALETTE_ALT by position, targets first then probes, in input order.
+    """Colour every sample as the barplots of h5ad_scanpy.py do: PALETTE_ALT by position, targets first then probes.
 
     Args:
-        obs (pd.DataFrame): Observations with string ``species`` and optional ``input_type``.
+        obs (pd.DataFrame): Observations with ``sc_label`` and ``sc_type``.
         names (dict[str, str]): Label -> display name.
 
     Returns:
         dict[str, str]: Display name -> colour.
     """
-    inputs = list(obs["species"].unique())
-    is_target = {sp: ("input_type" not in obs) or (obs.loc[obs["species"] == sp, "input_type"].astype(str) == "target").all() for sp in inputs}
+    inputs = list(dict.fromkeys(obs["sc_label"]))
+    is_target = {sp: (obs.loc[obs["sc_label"] == sp, "sc_type"] == "target").all() for sp in inputs}
     ordered = [sp for sp in inputs if is_target[sp]] + [sp for sp in inputs if not is_target[sp]]
     return {names.get(sp, sp): PALETTE_ALT[i % len(PALETTE_ALT)] for i, sp in enumerate(ordered)}
-def build_page(adata: ad.AnnData, obs: pd.DataFrame, view: str, names: dict[str, str], stars: dict[str, str], selected: set[str], focus: set[str], sp_colors: dict[str, str], rng: np.random.Generator, run_name: str, param_tag: str) -> tuple[dict, pd.DataFrame]:
-    """Build the HTML page payload of one view and its HDBSCAN labels.
+###################################### VIEWER
+def build_page(adata: ad.AnnData, series: pd.DataFrame, bar_key: str, view: str, names: dict[str, str], stars: dict[str, str], selected: set[str], sp_colors: dict[str, str], rng: np.random.Generator, subtitle: str) -> dict:
+    """Build the HTML page payload of one view.
 
     Args:
-        adata (ad.AnnData): Saved clusters with 3D layouts.
-        obs (pd.DataFrame): Observations with string ``species``.
-        view (str): ``joint`` or a species label.
+        adata (ad.AnnData): Projections with 3D layouts.
+        series (pd.DataFrame): Summary SERIAL per protein (rows aligned with adata) and series column.
+        bar_key (str): Series column of the barplot and of the Sel/Probe buttons.
+        view (str): ``joint`` or a target label.
         names (dict[str, str]): Label -> display name.
         stars (dict[str, str]): Significant joint cluster -> asterisks.
         selected (set[str]): Selected joint clusters.
-        focus (set[str]): Functional focus clusters.
         sp_colors (dict[str, str]): Display name -> species colour shared with the report.
         rng (np.random.Generator): Generator of the point subsampling.
-        run_name (str): Run folder name.
-        param_tag (str): Parameter tag of the .h5ad.
+        subtitle (str): Run description shown under the title.
 
     Returns:
-        tuple[dict, pd.DataFrame]: Page payload and HDBSCAN labels per protein.
+        dict: Page payload.
     """
     joint = view == "joint"
-    mask = np.ones(adata.n_obs, dtype=bool) if joint else (obs["species"] == view).values
-    coords = {m: np.asarray(adata.obsm[f"X_{m}_{DIM}d{'' if joint else '_intra'}"][mask], dtype=np.float64) for m in METHODS}
-    view_obs = obs[mask].reset_index(drop=True)
-    view_obs["species"] = view_obs["species"].map(lambda s: names.get(s, s))
-    intra = view_obs["intra_cluster"].astype("object").map(lambda c: str(c) if pd.notna(c) else None)
-    intra = (view_obs["species"] + " · " + intra).where(intra.notna()) if joint else intra
-    hdbscan_name = (lambda x: letter(x - 1)) if joint else (lambda x: str(x - 1))
-    hdbscan_labels = {mcs: fit_hdbscan_auto(coords["umap"], mcs) for mcs in tqdm(args.hdbscan_min_cluster_sizes, desc=f"{view} HDBSCAN", leave=False)}
-    rows = pd.DataFrame({"protein_id": view_obs["protein_id"].astype(str), "species": view_obs["species"], "view": view} | {f"mcs_{mcs}": lab for mcs, lab in hdbscan_labels.items()})
+    mask = np.ones(adata.n_obs, dtype=bool) if joint else (adata.obs["sc_label"] == view).values
+    coords = {m: np.asarray(adata.obsm[f"X_{m}_{DIM}d_{'j' if joint else 'i'}"][mask], dtype=np.float64) for m in METHODS}
+    ids = adata.obs["record"].astype(str).values[mask]
+    species = adata.obs["sc_label"].astype(str)[mask].map(lambda s: names.get(s, s)).reset_index(drop=True)
+    view_series = series[mask].reset_index(drop=True)
     n_max = args.max_points_per_view
-    keep = np.sort(rng.choice(len(view_obs), n_max, replace=False)) if n_max and len(view_obs) > n_max else np.arange(len(view_obs))
-    cluster = view_obs["cluster"].map(lambda c: letter(int(c)))
-    sel = pd.Series(np.where(view_obs["focus_tier"].astype(str) == "annotated", "I", np.where(cluster.isin(focus), "E", None)), index=view_obs.index, dtype="object").where(view_obs["input_type"].astype(str) == "target") if "focus_tier" in view_obs else pd.Series(None, index=view_obs.index, dtype="object")
-    series = {"species": view_obs["species"], "cluster": cluster, "intra_cluster": intra, "focus_selection": sel}
-    sets = {LABEL_SETS[k]: categories(series[k], colors={"species": sp_colors, "focus_selection": SELECTION_COLORS}.get(k)) for k in LABEL_SETS} | {f"HDBSCAN mcs={mcs}": categories(pd.Series([hdbscan_name(int(x)) if x > 0 else None for x in lab], dtype="object")) for mcs, lab in hdbscan_labels.items()}
-    counts_by_cluster = pd.crosstab(series["cluster"], view_obs["species"])
-    counts_by_cluster = counts_by_cluster.loc[sorted(counts_by_cluster.index, key=lambda c: (len(c), c))]
-    species_order = [c[0] for c in sets["species"][1][1:] if c[0] in counts_by_cluster.columns]
-    bars = dict(clusters=list(counts_by_cluster.index), stars=[stars.get(c, "") if joint else "" for c in counts_by_cluster.index], species=species_order, counts=[counts_by_cluster[sp].astype(int).tolist() for sp in species_order])
-    selected_here = [c for c in counts_by_cluster.index if c in selected]
-    if joint and len(selected_here) < len(selected): print(f"[PYTHON-WARNING][SELECTION] Selected clusters missing from the Leiden labels: {', '.join(sorted(selected - set(selected_here)))}")
-    points = f"{len(keep):,}/{len(view_obs):,} points shown" if len(keep) < len(view_obs) else f"{len(view_obs):,} points"
-    page = dict(title="All species" if joint else names.get(view, view), subtitle=f"{run_name} · {param_tag} · {points}", slug=f"{view}_{param_tag}", methods=[[m, t] for m, t in METHODS.items()],
-                coords={m: encode(c[keep], np.float32) for m, c in coords.items()}, ids="\n".join(view_obs["protein_id"].astype(str).values[keep]),
-                sets={k: dict(codes=encode(codes[keep], np.uint16), cats=cats) for k, (codes, cats) in sets.items()}, bars=bars, selected=selected_here, focus=[c for c in counts_by_cluster.index if c in focus] if joint else [])
-    return page, rows
-def interactive(h5ad_path: Path) -> None:
-    """Write the paged HTML viewer of every view of one .h5ad, and the HDBSCAN TSV.
+    keep = np.sort(rng.choice(len(ids), n_max, replace=False)) if n_max and len(ids) > n_max else np.arange(len(ids))
+    sets = {SPECIES_KEY: categories(species, sp_colors)} | {col: categories(view_series[col]) for col in series.columns}
+    counts_by_cluster = pd.crosstab(view_series[bar_key], species)
+    counts_by_cluster = counts_by_cluster.loc[sorted(counts_by_cluster.index, key=lambda c: (len(c), c.lower()))]
+    species_order = [c[0] for c in sets[SPECIES_KEY][1][1:] if c[0] in counts_by_cluster.columns]
+    bars = dict(clusters=list(counts_by_cluster.index), stars=[stars.get(c, "") for c in counts_by_cluster.index], species=species_order, counts=[counts_by_cluster[sp].astype(int).tolist() for sp in species_order])
+    points = f"{len(keep):,}/{len(ids):,} points shown" if len(keep) < len(ids) else f"{len(ids):,} points"
+    return dict(title="All samples" if joint else names.get(view, view), subtitle=f"{subtitle} · {points}", slug=view, methods=[[m, t] for m, t in METHODS.items()],
+                coords={m: encode(c[keep], np.float32) for m, c in coords.items()}, ids="\n".join(ids[keep]),
+                sets={k: dict(codes=encode(codes[keep], np.uint16), cats=cats) for k, (codes, cats) in sets.items()}, bars=bars,
+                selected=[c for c in counts_by_cluster.index if c in selected], probe=[c for c in counts_by_cluster.index if c.isupper()])
+def write_views(pages: list[dict], series_keys: list[str], bar_key: str, title: str, out_path: Path) -> None:
+    """Write all pages into one self-contained paged HTML viewer.
 
     Args:
-        h5ad_path (Path): .h5ad written by npz_scanpy.py.
+        pages (list[dict]): Page payloads.
+        series_keys (list[str]): Cluster label sets, in menu order.
+        bar_key (str): Label set of the barplot and of the Sel/Probe buttons.
+        title (str): Document title.
+        out_path (Path): Output HTML path.
     """
-    head = ad.read_h5ad(h5ad_path, backed="r")
-    param_tag, views = head.uns["param_tag"], list_views(head.obs, set(head.obsm.keys()))
-    head.file.close()
-    target_dir = (Path(args.outdir) / h5ad_path.parent.name if args.outdir else h5ad_path.parent) / SUBDIR
-    out_paths = targets(target_dir, param_tag)
-    if not views:
-        print(f"[PYTHON-INFO] {h5ad_path.name}: no {DIM}D UMAP/t-SNE layouts. Skipping.")
+    config = dict(alpha=ALPHA, font_family=FONT_FAMILY, font_legend=FONT_LEGEND, font_tick=FONT_TICK, font_title=FONT_TITLE, marker_size=MARKER_SIZE)
+    payload = json.dumps(dict(title=title, config=config, hover_keys=[SPECIES_KEY, bar_key], cluster_keys=[bar_key] + [k for k in series_keys if k != bar_key], leiden_key=bar_key, pages=pages), separators=(",", ":")).replace("</", "<\\/")
+    out_path.write_text(TEMPLATE.read_text().replace("__TITLE__", escape(title), 1).replace("__PLOTLYJS__", get_plotlyjs(), 1).replace("__DATA__", payload, 1), encoding="utf-8")
+def interactive(h5ad_path: Path) -> None:
+    """Write the paged HTML viewer of the joint view and of every target of one .h5ad.
+
+    Args:
+        h5ad_path (Path): projections.h5ad of npz_scanpy.py.
+    """
+    run_dir = h5ad_path.parent
+    target_dir = (Path(args.outdir) / run_dir.name if args.outdir else run_dir) / SUBDIR
+    summary_path, out_path = run_dir / SUMMARY_FILE, target_dir / OUTPUT_FILE
+    report_series = config_data.get("h5ad_scanpy", {}).get("report_series", REPORT_SERIES)
+    enrichment_csv = target_dir.parent / f"species_cluster_enrichment__{report_series}.csv"
+    if not summary_path.exists(): raise FileNotFoundError(f"[PYTHON-ERROR] Missing {summary_path}; run compile_summary.py first.")
+    src_mtime = max(fp.stat().st_mtime for fp in (Path(__file__), TEMPLATE, h5ad_path, summary_path, enrichment_csv) if fp.exists())
+    if not args.overwrite and out_path.exists() and out_path.stat().st_mtime > src_mtime:
+        print(f"[PYTHON-INFO] {out_path} is newer than its inputs. Skipping.")
         return
-    enrichment_csv = target_dir.parent / f"species_cluster_enrichment__{param_tag}.csv"
-    focus_csv = target_dir.parent / f"focus_cluster_enrichment__{param_tag}.csv"
-    src_mtime = max(fp.stat().st_mtime for fp in (Path(__file__), TEMPLATE, h5ad_path, enrichment_csv, focus_csv) if fp.exists())
-    if not args.overwrite and all(p.exists() and p.stat().st_mtime > src_mtime for p in out_paths.values()):
-        print(f"[PYTHON-INFO] {h5ad_path.name}: all {len(out_paths)} outputs already exist in {target_dir} and are newer than their inputs. Skipping.")
-        return
-    target_dir.mkdir(parents=True, exist_ok=True)
     adata = ad.read_h5ad(h5ad_path)
-    obs, rng, names = adata.obs.astype({"species": str}), np.random.default_rng(SEED), species_names()
-    if "input_type" in obs: names |= {sp: f"{names.get(sp, sp)} (probe)" for sp in obs.loc[obs["input_type"].astype(str) == "probe", "species"].unique()}
+    if not all(f"X_{m}_{DIM}d_j" in adata.obsm for m in METHODS):
+        print(f"[PYTHON-INFO] {h5ad_path}: no {DIM}D UMAP/t-SNE layouts. Skipping.")
+        return
+    summary = pd.read_csv(summary_path, sep="\t", dtype=str).set_index("record")
+    series_keys = [c for c in summary.columns if any(f"_{m}_{s}_" in c for m in ("u", "t") for s in ("i", "j"))]
+    bar_key = next((c for c in series_keys if c.endswith(f"_{report_series}")), next(c for c in series_keys if "_u_j_" in c))
+    series = summary.loc[adata.obs["record"].astype(str), series_keys].reset_index(drop=True)
+    names = species_names()
+    names |= {sp: f"{names.get(sp, sp)} (probe)" for sp in adata.obs.loc[adata.obs["sc_type"] == "probe", "sc_label"].unique()}
     stars, selected = load_enrichment(enrichment_csv)
-    focus = load_focus(focus_csv)
-    sp_colors = species_colors(obs, names)
-    built = [build_page(adata, obs, view, names, stars, selected, focus, sp_colors, rng, h5ad_path.parent.name, param_tag) for view in tqdm(views, desc=f"{h5ad_path.parent.name} views")]
-    pages, rows = [p for p, _ in built], [r for _, r in built]
-    write_views(pages, f"{h5ad_path.parent.name} · {param_tag} · 3D views", out_paths["html"])
-    print(f"[PYTHON-INFO][SAVE] {out_paths['html']} ({len(pages)} pages, {out_paths['html'].stat().st_size / 1e6:.1f} MB)")
-    pd.concat(rows, ignore_index=True).to_csv(out_paths["tsv"], sep="\t", index=False)
-    print(f"[PYTHON-INFO][SAVE] {out_paths['tsv']}")
+    sp_colors = species_colors(adata.obs, names)
+    has_intra = all(f"X_{m}_{DIM}d_i" in adata.obsm for m in METHODS)
+    views = ["joint"] + [sp for sp in dict.fromkeys(adata.obs["sc_label"]) if has_intra and np.isfinite(adata.obsm[f"X_umap_{DIM}d_i"][(adata.obs["sc_label"] == sp).values]).all()]
+    rng = np.random.default_rng(SEED)
+    subtitle = f"{run_dir.parent.name} · {run_dir.name}"
+    pages = [build_page(adata, series, bar_key, view, names, stars, selected, sp_colors, rng, subtitle) for view in tqdm(views, desc=f"{run_dir.name} views")]
+    target_dir.mkdir(parents=True, exist_ok=True)
+    write_views(pages, series_keys, bar_key, f"{run_dir.parent.name} · {run_dir.name} · 3D views", out_path)
+    print(f"[PYTHON-INFO][SAVE] {out_path} ({len(pages)} pages, {len(series_keys)} series, {out_path.stat().st_size / 1e6:.1f} MB)")
 ###################################### MAIN
 def main() -> None:
     """Write the interactive views of every .h5ad passed on the command line."""
@@ -306,8 +224,6 @@ def main() -> None:
     for path in tqdm([Path(p.strip()) for p in args.h5ad.split(",") if p.strip()], desc="Interactive"):
         interactive(path)
     max_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
-    exec_time = time.time() - start_time
-    date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[PYTHON-INFO] {date_str} {exec_time:.2f}s {max_mem:.2f}MB")
+    print(f"[PYTHON-INFO] {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} {time.time() - start_time:.2f}s {max_mem:.2f}MB")
 if __name__ == "__main__":
     main()

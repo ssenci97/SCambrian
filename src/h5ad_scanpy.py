@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Reports the joint and intra-species clusters saved by npz_scanpy.py: tables, protein modules, cluster panels, intra-to-inter cluster flux diagrams and a merged PDF.
+"""Reports the species differences of one joint cluster series of compile_summary.py: tables, protein modules, cluster panels, internal-to-joint cluster flux diagrams and a merged PDF.
 
-Only the .h5ad is read, so no clustering or embedding is recomputed except the re-projection of the selected joint clusters. Joint (inter-species) clusters are always named by lowercase letters of their Leiden id (0 -> a, 25 -> z, 26 -> aa) and intra-species clusters by their Leiden id as a number string, in every figure, table and module file. Species differences are called with one set of criteria (lowercase names are keys of the h5ad_scanpy section of configs/param_configs.yaml), where c_ks is the number of proteins of species s in joint cluster k and n_s the proteins of s:
+The cluster names are read from ``sc_summary.tsv`` next to the .h5ad (compile_summary.py): ``report_series`` (default ``u_j_leiden2d``) gives the joint clusters and its internal counterpart (``u_i_leiden2d``) the internal clusters, so every label in the report is a SERIAL of the summary (letters for joint clusters, UPPER case when they hold probe proteins, ``<label>_001`` for internal ones). Only layouts stored in the .h5ad are drawn, except the re-projection of the selected joint clusters. Species differences are called on the ``target`` samples only (probes stay in the clusters but never count as a species), with one set of criteria (lowercase names are keys of the h5ad_scanpy section of configs/param_configs.yaml), where c_ks is the number of proteins of species s in joint cluster k and n_s the proteins of s:
     1. species-normalised share p_ks = c_ks / n_s, removing the proteome-size bias;
     2. specificity index S_ks = p_ks / sum_s' p_ks', uniform at 1/n_species;
     3. fold change FC_k = max_s p_ks / min_s p_ks (infinite when a species is absent), with min_s S_ks / max_s S_ks = 1 / FC_k;
@@ -10,16 +10,7 @@ Only the .h5ad is read, so no clustering or embedding is recomputed except the r
     6. selected for species s: significant, S_ks > 1/n_species and c_ks >= min_species_proteins, keeping the max_selected_per_species highest S_ks; the selection is the union over species;
     7. species module: significant, S_ks >= module_min_specificity_percent / 100 and c_ks >= min_module_proteins;
     8. balanced (conserved) cluster: FC_k <= 1 / balanced_min_share_ratio and min_s c_ks >= min_species_proteins, an effect-size call only.
-The selection drives every report element. The panels, each A4/4 wide, are drawn for every method in ``--layout_methods`` (UMAP and t-SNE, 2D layouts): (a) intra-species layouts with all clusters of at least min_intra_cluster_proteins proteins coloured by protein count, (b) joint layouts coloured by specificity index, labelling per species its selected clusters on top of the others, then once: (c) a re-projected UMAP of all proteins of the selected clusters from every species where present, optimised on the stored joint kNN graph restricted to them and coloured by cluster in every species facet, (d) intra-to-selected joint cluster fluxes on a square-root (semi-quantitative) scale, with joint cluster nodes and flows coloured by specificity index and outlined in black from module_min_specificity_percent, where intra clusters inherit a cluster colour only when a strict majority of their proteins flows into it, and (e) a per-species protein-count barplot of the selected clusters with chi-square significance asterisks stacked vertically over the bars. A report whose outputs all exist and are newer than both this script and the .h5ad is skipped unless ``--overwrite`` is set. All figures are saved as PNG and PDF, and the PDFs are merged into a final {dirname}_scanpy.pdf report.
-Inputs carry the ``input_type`` of the query table. Without probe inputs (comparative mode) the report is the species comparison alone; with at least one probe (focus mode) it adds the functional focus layer. the species criteria above use the ``target`` inputs only, while ``probe`` inputs (functional references) take part in the joint clusters and are summarised as a second layer, the functional focus. The focus set F is every probe protein plus every target protein whose own UniProt annotation matches the focus clause (``focus_tier`` annotated, dw_uniprot_focus.py), N is the number of proteins and n_k the size of joint cluster k:
-    9. focus count f_k (probe and annotated proteins in k), focus share f_k / |F|, focus fraction f_k / n_k and fold enrichment (f_k / n_k) / (|F| / N);
-    10. focus test: one-sided hypergeometric P(X >= f_k), BH-corrected across all joint clusters (focus_q);
-    11. focus cluster: focus_q < focus_max_q and f_k >= min_focus_proteins, keeping the max_focus_clusters highest focus shares;
-    12. capture: target proteins inside focus clusters, overall and per target, split into annotated (agreement with the annotation, reported but circular) and unannotated (candidate focus-like proteins); the report fails, after writing everything, when the overall capture is below min_capture_percent;
-    13. focus selection (``focus_selection``, target proteins only, probe proteins excluded): I for every target protein with its own focus annotation, E (extended through probing) for every other target protein inside a focus cluster, none otherwise;
-    14. gravity: median ``focus_similarity`` (cosine similarity to the focus centroid, computed by npz_scanpy.py) of the target proteins of every joint cluster, overall and per target, ranked; it is descriptive and does not take part in any selection.
-A focus run is also compared with its baseline run, the run of the same targets, model and parameters without probes (supp_01 builds both): on the target proteins shared by the two runs, the agreement of their joint clusters (adjusted Rand index, normalised mutual information), the protein flow from every baseline cluster to every focus-run cluster with its Jaccard index, and the fate of every selected cluster (best-matching cluster of the other run, Jaccard, still selected), written as paired_* files in the focus run folder.
-Focus outputs are separate files: focus_cluster_enrichment, focus_capture, focus_gravity and focus_selection tables, focus-modules/ protein lists (per focus cluster and per target selection), focus selection layouts with one facet per target coloured by ``focus_selection`` (I red, E dark red, none), focus cluster layouts with one facet per input, a re-projection of the focus clusters and a barplot with focus significance asterisks; in the focus cluster panels the UniProt-annotated target proteins (the special tier) are ringed in black. In focus mode the species panels (b), (c) and (e) also get one facet or bar group per probe, drawn for reference only: probes are coloured by selected cluster instead of specificity index and never enter the species criteria.
+The selection drives every report element. The panels, each A4/4 wide, are drawn for every method in ``--layout_methods`` (UMAP and t-SNE, 2D layouts): (a) internal layouts with all clusters of at least min_intra_cluster_proteins proteins coloured by protein count, (b) joint layouts coloured by specificity index, labelling per species its selected clusters on top of the others, with one facet per probe coloured by selected cluster for reference, then once: (c) a re-projected UMAP of all proteins of the selected clusters from every sample where present, optimised on the stored joint kNN graph restricted to them, (d) internal-to-selected joint cluster fluxes on a square-root (semi-quantitative) scale, coloured by specificity index and outlined in black from module_min_specificity_percent, and (e) a per-sample protein-count barplot of the selected clusters with chi-square significance asterisks. Output names end with ``__<report_series>``. A report whose outputs all exist and are newer than this script, the .h5ad and the summary is skipped unless ``--overwrite`` is set. All figures are saved as PNG and PDF, merged into ``<model>_scanpy.pdf``.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -36,8 +27,7 @@ import pandas as pd
 from pathlib import Path
 import pymupdf
 import resource
-from scipy.stats import chi2_contingency, false_discovery_control, hypergeom
-from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
+from scipy.stats import chi2_contingency, false_discovery_control
 import time
 from tqdm import tqdm
 from typing import NamedTuple
@@ -49,13 +39,10 @@ A4_WIDTH_INCHES = 11.69
 ALPHA_BG = 0.50
 ALPHA_MAX = 0.95
 ALPHA_MIN = 0.55
-ANNOTATED_LINEWIDTH = 0.3
-ANNOTATED_SIZE_SCALE = 4.0
 BALANCED_MIN_SHARE_RATIO = 0.6
 CBAR_LABEL = "Cluster Specificity Index ($S_{i}$)"
 CHI2_MAX_Q = 0.05
 COLORMAP_SPEC = LinearSegmentedColormap.from_list("scambrian", ["#76BBE2", "#7b2c6d"])
-COLOR_ANNOTATED = "#000000"
 COLOR_BG = "#BFC5CE"
 COLOR_FG = "#8A929E"
 FIG_EXTRA_HEIGHT = 1.0
@@ -66,7 +53,6 @@ FLUX_GAP_TOTAL = 0.15
 FLUX_MIN_NODE = 0.02
 FLUX_NODE_WIDTH = 0.04
 FLUX_SCALE_POWER = 0.5
-FOCUS_MAX_Q = 0.05
 FONT_FACET = 12
 FONT_LABEL = 10
 FONT_STAR = 14
@@ -76,12 +62,9 @@ LAYOUT_METHODS = ["umap", "tsne"]
 LEGEND_CHAR_INCHES = 0.08
 LEGEND_COL_INCHES = 0.4
 LEGEND_MARKER = 7
-MAX_FOCUS_CLUSTERS = 6
 MAX_SELECTED_PER_SPECIES = 6
 METHOD_NAMES = {"umap": "UMAP", "tsne": "t-SNE"}
-MIN_CAPTURE_PERCENT = 1.0
 MIN_EXPECTED = 5
-MIN_FOCUS_PROTEINS = 50
 MIN_FOLD_CHANGE = 2.0
 MIN_INTRA_CLUSTER_PROTEINS = 150
 MIN_MODULE_PROTEINS = 200
@@ -93,19 +76,19 @@ PALETTE_ALT = PALETTE[::2] + PALETTE[1::2]
 PANEL_DPI = 300
 PANEL_WIDTH_INCHES = A4_WIDTH_INCHES / 4
 PT_SIZE = 1.0
-REPORT_ORDER = ["umap_intra_species_top_clusters", "tsne_intra_species_top_clusters", "umap_joint_clusters_species_specificity", "tsne_joint_clusters_species_specificity", "umap_reprojected_top_clusters", "sankey_intra_to_inter_clusters", "barplot_umap_labelled_clusters_protein_counts", "umap_focus_tiers", "tsne_focus_tiers", "umap_focus_clusters", "tsne_focus_clusters", "umap_reprojected_focus_clusters", "barplot_focus_clusters_protein_counts"]
-RING_LABEL = "UniProt-annotated"
+REPORT_SERIES = "u_j_leiden2d"
+REPORT_ORDER = ["umap_intra_species_top_clusters", "tsne_intra_species_top_clusters", "umap_joint_clusters_species_specificity", "tsne_joint_clusters_species_specificity", "umap_reprojected_top_clusters", "sankey_intra_to_inter_clusters", "barplot_umap_labelled_clusters_protein_counts"]
 SANKEY_HEIGHT_SCALE = 3.0
 SEED = 42
-SELECTION_COLORS = {"none": COLOR_BG, "E": "#8B0000", "I": "#FF0000"}
-SELECTION_LABELS = {"none": "none", "E": "E: extended by probing", "I": "I: immune annotated"}
+SUMMARY_FILE = "sc_summary.tsv"
 SIG_LEVELS = [(0.001, "***"), (0.01, "**"), (0.05, "*")]
 STAR_HEADROOM = 0.35
 STAR_LINESPACING = 0.55
 YAML_PATH = "configs/param_configs.yaml"
 ###################################### CONFIG_AND_PARSER
 parser = argparse.ArgumentParser(description="ESMC Proteome Cluster Report")
-parser.add_argument("--h5ad", type=str, required=True, help="Comma-separated .h5ad files written by npz_scanpy.py")
+parser.add_argument("--h5ad", type=str, required=True, help="Comma-separated projections.h5ad files of npz_scanpy.py, each with its sc_summary.tsv")
+parser.add_argument("--report_series", type=str, default=REPORT_SERIES, help="Joint series of the summary reported, without the analysis prefix (u_j_leiden2d, t_j_hdbscan3d, s_j_id50, ...)")
 parser.add_argument("--outdir", type=str, default=None, help="Base output directory; defaults to the folder of each .h5ad")
 parser.add_argument("--layout_methods", type=str, nargs="+", default=LAYOUT_METHODS, help="Layouts to plot (umap, tsne)")
 parser.add_argument("--max_selected_per_species", type=int, default=MAX_SELECTED_PER_SPECIES, help="Top joint clusters labelled per species")
@@ -116,16 +99,12 @@ parser.add_argument("--min_module_proteins", type=int, default=MIN_MODULE_PROTEI
 parser.add_argument("--module_min_specificity_percent", type=float, default=MODULE_MIN_SPECIFICITY_PERCENT, help="Minimum specificity index (percent) of a species module and of an outlined flux node")
 parser.add_argument("--min_fold_change", type=float, default=MIN_FOLD_CHANGE, help="Minimum ratio of the largest to the smallest species-normalised share of a significant joint cluster")
 parser.add_argument("--chi2_max_q", type=float, default=CHI2_MAX_Q, help="BH-corrected chi-square q-value below which a joint cluster can be significant")
-parser.add_argument("--focus_max_q", type=float, default=FOCUS_MAX_Q, help="BH-corrected hypergeometric q-value below which a joint cluster can be a focus cluster")
-parser.add_argument("--min_focus_proteins", type=int, default=MIN_FOCUS_PROTEINS, help="Minimum focus proteins (probe and annotated) of a focus cluster")
-parser.add_argument("--max_focus_clusters", type=int, default=MAX_FOCUS_CLUSTERS, help="Focus clusters kept, by decreasing focus share")
-parser.add_argument("--min_capture_percent", type=float, default=MIN_CAPTURE_PERCENT, help="Minimum percent of target proteins inside focus clusters; below it the report fails")
 parser.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=OVERWRITE, help="Redraw a report whose outputs already exist")
 parser.add_argument("--yaml-in", nargs="?", const=YAML_PATH, default=YAML_PATH)
 parser.add_argument("--yaml-out", nargs="?", const=YAML_PATH, default=None)
 cli_preview, _ = parser.parse_known_args()
 script_key = "h5ad_scanpy"
-params = dict(layout_methods=LAYOUT_METHODS, max_selected_per_species=MAX_SELECTED_PER_SPECIES, min_species_proteins=MIN_SPECIES_PROTEINS, min_intra_cluster_proteins=MIN_INTRA_CLUSTER_PROTEINS, balanced_min_share_ratio=BALANCED_MIN_SHARE_RATIO, min_module_proteins=MIN_MODULE_PROTEINS, module_min_specificity_percent=MODULE_MIN_SPECIFICITY_PERCENT, chi2_max_q=CHI2_MAX_Q, min_fold_change=MIN_FOLD_CHANGE, focus_max_q=FOCUS_MAX_Q, min_focus_proteins=MIN_FOCUS_PROTEINS, max_focus_clusters=MAX_FOCUS_CLUSTERS, min_capture_percent=MIN_CAPTURE_PERCENT, overwrite=OVERWRITE)
+params = dict(report_series=REPORT_SERIES, layout_methods=LAYOUT_METHODS, max_selected_per_species=MAX_SELECTED_PER_SPECIES, min_species_proteins=MIN_SPECIES_PROTEINS, min_intra_cluster_proteins=MIN_INTRA_CLUSTER_PROTEINS, balanced_min_share_ratio=BALANCED_MIN_SHARE_RATIO, min_module_proteins=MIN_MODULE_PROTEINS, module_min_specificity_percent=MODULE_MIN_SPECIFICITY_PERCENT, chi2_max_q=CHI2_MAX_Q, min_fold_change=MIN_FOLD_CHANGE, overwrite=OVERWRITE)
 if cli_preview.yaml_in and Path(cli_preview.yaml_in).exists():
     config_data = yaml.safe_load(Path(cli_preview.yaml_in).read_text()) or {}
     if script_key in config_data: params.update(config_data[script_key])
@@ -173,16 +152,6 @@ def row_figure(n_cols: int, title: str, height_scale: float = 1.0, strip: bool =
     fig = plt.figure(figsize=(width, height * height_scale), dpi=PANEL_DPI, layout="constrained")
     fig.suptitle(title, fontsize=FONT_TITLE * font_scale, fontweight="bold")
     return fig, fig.add_gridspec(2, n_cols, height_ratios=[1, 0.04 / height_scale]) if strip else fig.add_gridspec(1, n_cols)
-def letter(i: int) -> str:
-    """Name a 0-based joint cluster id by lowercase letters, spreadsheet-style (0 -> a, 26 -> aa).
-
-    Args:
-        i (int): 0-based Leiden cluster id.
-
-    Returns:
-        str: Letter name.
-    """
-    return (letter(i // 26 - 1) if i >= 26 else "") + chr(97 + i % 26)
 def sig_stars(q: float) -> str:
     """Convert a chi-square q-value into significance asterisks.
 
@@ -255,8 +224,8 @@ def facet_title(obs: pd.DataFrame, is_sp: np.ndarray, sp: str) -> str:
     """
     probe = "input_type" in obs and (obs["input_type"].astype(str).values[is_sp] == "probe").any()
     return f"{sp}{' (probe)' if probe else ''} (n={is_sp.sum():,})"
-def draw_facet(ax: plt.Axes, coords: np.ndarray, obs: pd.DataFrame, sp: str, colors: dict[str, str], labelled: list[str], sp_counts: pd.Series, axis_name: str, spec: pd.Series | None = None, annotated: np.ndarray | None = None) -> None:
-    """Draw one species facet coloured by joint cluster, or by specificity index of all its proteins when ``spec`` is given, with labelled clusters on top, the annotated proteins ringed when ``annotated`` is given and the cluster letters at the centroids of the facet species' proteins.
+def draw_facet(ax: plt.Axes, coords: np.ndarray, obs: pd.DataFrame, sp: str, colors: dict[str, str], labelled: list[str], sp_counts: pd.Series, axis_name: str, spec: pd.Series | None = None) -> None:
+    """Draw one species facet coloured by joint cluster, or by specificity index of all its proteins when ``spec`` is given, with labelled clusters on top and the cluster names at the centroids of the facet species' proteins.
 
     Args:
         ax (plt.Axes): Target axes.
@@ -268,7 +237,6 @@ def draw_facet(ax: plt.Axes, coords: np.ndarray, obs: pd.DataFrame, sp: str, col
         sp_counts (pd.Series): Proteins of ``sp`` per cluster.
         axis_name (str): Layout name used in the axis labels.
         spec (pd.Series | None): Specificity index of ``sp`` per cluster; when None clusters are coloured by ``colors``.
-        annotated (np.ndarray | None): Boolean mask of the UniProt-annotated focus proteins, ringed in black.
     """
     is_sp = (obs["species"] == sp).values
     cluster_labels = obs["cluster"].astype(str)
@@ -284,9 +252,6 @@ def draw_facet(ax: plt.Axes, coords: np.ndarray, obs: pd.DataFrame, sp: str, col
         ax.scatter(coords[is_sp & ~in_facet, 0], coords[is_sp & ~in_facet, 1], c=COLOR_FG, s=PT_SIZE, alpha=ALPHA_BG, rasterized=True, linewidths=0)
         fg = is_sp & in_facet
         ax.scatter(coords[fg, 0], coords[fg, 1], c=cluster_labels.map(colors).values[fg], s=PT_SIZE, alpha=ALPHA_MAX, rasterized=True, linewidths=0)
-    if annotated is not None:
-        ring = is_sp & annotated
-        ax.scatter(coords[ring, 0], coords[ring, 1], s=PT_SIZE * ANNOTATED_SIZE_SCALE, facecolors="none", edgecolors=COLOR_ANNOTATED, linewidths=ANNOTATED_LINEWIDTH, rasterized=True)
     max_cnt_sp = max((sp_counts[cl] for cl in labelled), default=1)
     for cl in labelled:
         cl_pts = coords[(cluster_labels == cl).values & is_sp]
@@ -295,7 +260,7 @@ def draw_facet(ax: plt.Axes, coords: np.ndarray, obs: pd.DataFrame, sp: str, col
         txt = ax.text(cl_pts[:, 0].mean() + 1.0, cl_pts[:, 1].mean(), cl, fontsize=f_size, ha="center", va="center", fontweight="bold", color="black")
         txt.set_path_effects([path_effects.withStroke(linewidth=2.0, foreground="white")])
     style_axes(ax, facet_title(obs, is_sp, sp), axis_name)
-def add_bottom_legend(fig: plt.Figure, colors: dict[str, str], title: str, marker: str = "o", font_scale: float = 1.0, ring_label: str | None = None) -> None:
+def add_bottom_legend(fig: plt.Figure, colors: dict[str, str], title: str, marker: str = "o", font_scale: float = 1.0) -> None:
     """Add a label -> colour legend below the panels, with as many columns as fit the figure width.
 
     Args:
@@ -304,11 +269,9 @@ def add_bottom_legend(fig: plt.Figure, colors: dict[str, str], title: str, marke
         title (str): Legend title.
         marker (str): Marker of the legend handles.
         font_scale (float): Multiplier applied to the legend font sizes.
-        ring_label (str | None): Label of an extra black-ringed handle marking the annotated proteins.
     """
     if not colors: return
     handles = [Line2D([], [], ls="", marker=marker, color=c, markersize=LEGEND_MARKER * font_scale, label=lab) for lab, c in colors.items()]
-    if ring_label: handles.append(Line2D([], [], ls="", marker="o", markerfacecolor="none", markeredgecolor=COLOR_ANNOTATED, markersize=LEGEND_MARKER * font_scale, label=ring_label))
     ncol = max(1, min(len(handles), int(fig.get_figwidth() / ((LEGEND_COL_INCHES + LEGEND_CHAR_INCHES * max(len(h.get_label()) for h in handles)) * font_scale))))
     fig.legend(handles=handles, loc="outside lower center", ncol=ncol, frameon=False, fontsize=FONT_TICK * font_scale, title=title, title_fontsize=FONT_LABEL * font_scale)
 def add_colorbar(cax: plt.Axes, norm: Normalize, label: str) -> None:
@@ -420,7 +383,7 @@ def reproject(adata: ad.AnnData, keep: np.ndarray) -> np.ndarray:
     """Optimise a 2D UMAP layout of a subset of proteins on the stored joint kNN graph restricted to them, without reclustering.
 
     Args:
-        adata (ad.AnnData): Saved clusters carrying ``obsp["connectivities"]`` and ``obsm["X_umap_2d"]``.
+        adata (ad.AnnData): Saved clusters carrying ``obsp["connectivities"]`` and ``obsm["X_umap_2d_j"]``.
         keep (np.ndarray): Boolean mask of the proteins to re-project.
 
     Returns:
@@ -428,7 +391,7 @@ def reproject(adata: ad.AnnData, keep: np.ndarray) -> np.ndarray:
     """
     sub = adata[keep]
     a, b = find_ab_params(1.0, float(adata.uns["params"]["umap_min_dist"]))
-    coords, _ = simplicial_set_embedding(data=np.asarray(sub.obsm["X_umap_2d"]), graph=sub.obsp["connectivities"].tocoo(), n_components=2, initial_alpha=1.0, a=a, b=b, gamma=1.0, negative_sample_rate=5, n_epochs=None, init="spectral", random_state=np.random.RandomState(SEED), metric="euclidean", metric_kwds={}, densmap=False, densmap_kwds={}, output_dens=False)
+    coords, _ = simplicial_set_embedding(data=np.asarray(sub.obsm["X_umap_2d_j"]), graph=sub.obsp["connectivities"].tocoo(), n_components=2, initial_alpha=1.0, a=a, b=b, gamma=1.0, negative_sample_rate=5, n_epochs=None, init="spectral", random_state=np.random.RandomState(SEED), metric="euclidean", metric_kwds={}, densmap=False, densmap_kwds={}, output_dens=False)
     return coords
 ###################################### REPORT
 class JointStats(NamedTuple):
@@ -444,17 +407,15 @@ class JointStats(NamedTuple):
     selected: list[str]
     colors: dict[str, str]
 def joint_stats(obs: pd.DataFrame, species_list: list[str]) -> JointStats:
-    """Rename joint clusters by letters in place and compute their counts, specificity, fold change, chi-square q-values and selection.
+    """Compute the counts, specificity, fold change, chi-square q-values and selection of the joint clusters.
 
     Args:
-        obs (pd.DataFrame): Observation table with ``species`` and integer ``cluster`` columns, modified in place.
+        obs (pd.DataFrame): Observation table with ``species`` and ``cluster`` (SERIAL) columns.
         species_list (list[str]): Species in column order.
 
     Returns:
         JointStats: Statistics and selection of every joint cluster.
     """
-    ids = obs["cluster"].astype(int)
-    obs["cluster"] = pd.Categorical(ids.map(letter), categories=[letter(i) for i in sorted(ids.unique())])
     counts_df = pd.crosstab(obs["cluster"], obs["species"])[species_list]
     counts_df.index = counts_df.index.astype(str)
     counts_df = counts_df[counts_df.sum(axis=1) > 0]
@@ -472,7 +433,7 @@ def joint_stats(obs: pd.DataFrame, species_list: list[str]) -> JointStats:
     print(f"[PYTHON-INFO][SELECTION] {len(selected)} selected joint clusters: {', '.join(selected)}")
     return JointStats(counts_df, spec_df, fold_change, chi2_q, valid, significant, balanced, ranked, selected, {cl: PALETTE_ALT[i % len(PALETTE_ALT)] for i, cl in enumerate(selected)})
 def write_tables(adata: ad.AnnData, js: JointStats, target_dir: Path, modules_dir: Path, param_tag: str) -> None:
-    """Write the metrics, top-cluster, metadata, enrichment and channel tables and the protein lists of every species module.
+    """Write the top-cluster and enrichment tables and the protein lists of every species module.
 
     Args:
         adata (ad.AnnData): Saved clusters with letter-named joint clusters.
@@ -482,18 +443,11 @@ def write_tables(adata: ad.AnnData, js: JointStats, target_dir: Path, modules_di
         param_tag (str): Parameter tag of the clustering.
     """
     obs = adata.obs
-    with open(target_dir / f"clustering_metrics__{param_tag}.txt", "w") as f:
-        f.writelines(f"{k}: {v}\n" for k, v in adata.uns["metrics"].items())
     top_rows = [(sp, cl, rk + 1, js.counts.loc[cl, sp], js.spec.loc[cl, sp], js.chi2_q[cl], js.fold_change[cl]) for sp, cls in js.ranked.items() for rk, cl in enumerate(cls)]
     pd.DataFrame(top_rows, columns=["species", "cluster", "rank", "protein_count", "specificity", "chi2_q", "fold_change"]).to_csv(target_dir / f"species_top_clusters__{param_tag}.csv", index=False)
-    obs[[c for c in ("protein_id", "species", "input_type", "focus_tier", "focus_selection", "focus_similarity", "cluster", "intra_cluster") if c in obs]].to_csv(target_dir / f"protein_clusters_metadata__{param_tag}.csv", index=False)
     stats = pd.DataFrame({"chi2_q": js.chi2_q, "chi2_valid": js.valid, "fold_change": js.fold_change, "significant": js.significant, "balanced": js.balanced, "selected": js.counts.index.isin(js.selected)}, index=js.counts.index)
     enrichment = pd.concat({"protein_count": js.counts.stack(), "specificity": js.spec.stack()}, axis=1).rename_axis(["cluster", "species"]).reset_index().join(stats, on="cluster")
     enrichment.to_csv(target_dir / f"species_cluster_enrichment__{param_tag}.csv", index=False)
-    markers = adata.uns["markers"].astype({"cluster": str})
-    inter = markers["analysis"] == "inter_group"
-    markers.loc[inter, "cluster"] = markers.loc[inter, "cluster"].astype(int).map(letter)
-    markers.to_csv(target_dir / f"channel_importance_rankings__{param_tag}.csv", index=False)
     cluster_labels, species_labels = obs["cluster"].astype(str), obs["species"].astype(str)
     for sp in js.counts.columns:
         for cl in js.counts.index[js.significant & (js.spec[sp] >= args.module_min_specificity_percent / 100) & (js.counts[sp] >= args.min_module_proteins)]:
@@ -514,17 +468,17 @@ def intra_summary(obs: pd.DataFrame, species_list: list[str], modules_dir: Path,
     for sp in species_list:
         is_sp = (obs["species"] == sp).values
         if obs.loc[is_sp, "intra_cluster"].isna().all(): continue
-        counts_intra = intra_labels[is_sp].value_counts()
+        counts_intra = intra_labels[is_sp & obs["intra_cluster"].notna().values].value_counts()
         intra[sp] = (is_sp, counts_intra.size, counts_intra[counts_intra >= args.min_intra_cluster_proteins])
         for cl, cnt in counts_intra.items():
             if cnt >= args.min_module_proteins:
-                obs.loc[is_sp & (intra_labels == cl).values, "protein_id"].to_csv(modules_dir / f"intra_{sp}_{cnt:07d}_clust{cl}_{param_tag}.txt", index=False, header=False)
+                obs.loc[is_sp & (intra_labels == cl).values, "protein_id"].to_csv(modules_dir / f"intra_{cnt:07d}_clust{cl}_{param_tag}.txt", index=False, header=False)
     return intra
 def plot_intra_panel(adata: ad.AnnData, intra: dict[str, tuple[np.ndarray, int, pd.Series]], method: str, name: str, path: Path) -> None:
     """Draw the intra-species layouts of one method with the large intra clusters coloured by protein count.
 
     Args:
-        adata (ad.AnnData): Saved clusters carrying ``obsm["X_<method>_2d_intra"]``.
+        adata (ad.AnnData): Saved clusters carrying ``obsm["X_<method>_2d_i"]``.
         intra (dict[str, tuple[np.ndarray, int, pd.Series]]): Output of intra_summary.
         method (str): Layout method key.
         name (str): Display name of the method.
@@ -536,13 +490,13 @@ def plot_intra_panel(adata: ad.AnnData, intra: dict[str, tuple[np.ndarray, int, 
     fig, gs = row_figure(len(intra), f"Intra-species ({name})")
     for idx, (sp, (is_sp, _, top)) in enumerate(intra.items()):
         ax = fig.add_subplot(gs[0, idx])
-        coords, intra_cls = adata.obsm[f"X_{method}_2d_intra"][is_sp], intra_labels.values[is_sp]
+        coords, intra_cls = adata.obsm[f"X_{method}_2d_i"][is_sp], intra_labels.values[is_sp]
         is_shown = np.isin(intra_cls, list(top.index))
         ax.scatter(coords[~is_shown, 0], coords[~is_shown, 1], c=COLOR_BG, s=PT_SIZE, alpha=ALPHA_BG, rasterized=True, linewidths=0, zorder=1)
         for cl, cnt in top.items():
             cl_pts = coords[intra_cls == cl]
             ax.scatter(cl_pts[:, 0], cl_pts[:, 1], c=gradient_hex(cnt, norm_size), s=PT_SIZE, alpha=ALPHA_MAX, rasterized=True, linewidths=0, zorder=3)
-            txt = ax.text(np.median(cl_pts[:, 0]), np.median(cl_pts[:, 1]), cl, fontsize=FONT_LABEL, ha="center", va="center", fontweight="bold", color="black", zorder=6)
+            txt = ax.text(np.median(cl_pts[:, 0]), np.median(cl_pts[:, 1]), cl.rsplit("_", 1)[-1], fontsize=FONT_LABEL, ha="center", va="center", fontweight="bold", color="black", zorder=6)
             txt.set_path_effects([path_effects.withStroke(linewidth=1.25, foreground="white")])
         style_axes(ax, f"{sp} (n={is_sp.sum():,})", name)
     add_colorbar(fig.add_subplot(gs[-1, :]), norm_size, "Proteins per highlighted cluster")
@@ -562,18 +516,18 @@ def plot_layout_panels(adata: ad.AnnData, js: JointStats, counts: pd.DataFrame, 
     """
     facets = list(counts.columns)
     for m in tqdm(args.layout_methods, desc="Layout panels"):
-        if f"X_{m}_2d" not in adata.obsm:
-            print(f"[PYTHON-INFO][PANELS] Skipping {m}: X_{m}_2d not in the .h5ad")
+        if f"X_{m}_2d_j" not in adata.obsm:
+            print(f"[PYTHON-INFO][PANELS] Skipping {m}: X_{m}_2d_j not in the .h5ad")
             continue
         name = METHOD_NAMES.get(m, m)
         fig, gs = row_figure(len(facets), f"Inter-species ({name})")
         for idx, sp in enumerate(facets):
-            if sp in js.spec: draw_facet(fig.add_subplot(gs[0, idx]), adata.obsm[f"X_{m}_2d"], adata.obs, sp, js.colors, js.ranked[sp], counts[sp], name, js.spec[sp])
-            else: draw_facet(fig.add_subplot(gs[0, idx]), adata.obsm[f"X_{m}_2d"], adata.obs, sp, js.colors, js.selected, counts[sp], name)
+            if sp in js.spec: draw_facet(fig.add_subplot(gs[0, idx]), adata.obsm[f"X_{m}_2d_j"], adata.obs, sp, js.colors, js.ranked[sp], counts[sp], name, js.spec[sp])
+            else: draw_facet(fig.add_subplot(gs[0, idx]), adata.obsm[f"X_{m}_2d_j"], adata.obs, sp, js.colors, js.selected, counts[sp], name)
         add_colorbar(fig.add_subplot(gs[-1, :]), Normalize(0, 1), CBAR_LABEL)
         save_fig(fig, target_dir / f"{m}_joint_clusters_species_specificity__{param_tag}.png")
         plt.close(fig)
-        if intra: plot_intra_panel(adata, intra, m, name, intra_dir / f"{m}_intra_species_top_clusters__{param_tag}.png")
+        if intra and f"X_{m}_2d_i" in adata.obsm: plot_intra_panel(adata, intra, m, name, intra_dir / f"{m}_intra_species_top_clusters__{param_tag}.png")
 def plot_flux(obs: pd.DataFrame, js: JointStats, intra: dict[str, tuple[np.ndarray, int, pd.Series]], path: Path) -> None:
     """Draw per species the fluxes from its intra clusters to its selected joint clusters, coloured by specificity index.
 
@@ -606,307 +560,95 @@ def plot_flux(obs: pd.DataFrame, js: JointStats, intra: dict[str, tuple[np.ndarr
     add_colorbar(fig.add_subplot(gs[-1, :]), norm_spec, f"{CBAR_LABEL}; black border: $S_{{i}} \\geq$ {spec_cut:.2f}")
     save_fig(fig, path)
     plt.close(fig)
-def plot_reprojection(adata: ad.AnnData, clusters: list[str], colors: dict[str, str], counts: pd.DataFrame, title: str, path: Path, ring_annotated: bool = False) -> None:
+def plot_reprojection(adata: ad.AnnData, clusters: list[str], colors: dict[str, str], counts: pd.DataFrame, title: str, path: Path) -> None:
     """Re-project the proteins of a list of joint clusters and draw them per input, coloured by cluster.
 
     Args:
         adata (ad.AnnData): Saved clusters with letter-named joint clusters.
-        clusters (list[str]): Joint clusters to re-project (selected or focus clusters).
+        clusters (list[str]): Joint clusters to re-project.
         colors (dict[str, str]): Mapping cluster -> colour.
         counts (pd.DataFrame): Protein counts per cluster (rows) and input (columns); its columns are the facets.
         title (str): Figure title.
         path (Path): Output PNG path.
-        ring_annotated (bool): Whether to ring the UniProt-annotated focus proteins in black.
     """
     keep = adata.obs["cluster"].astype(str).isin(clusters).values
-    if "X_umap_2d" not in adata.obsm or keep.sum() <= 2: return
+    if "X_umap_2d_j" not in adata.obsm or keep.sum() <= 2: return
     obs_selected = adata.obs[keep]
     print(f"[PYTHON-INFO][SELECTION] Re-projecting {keep.sum():,} proteins of {len(clusters)} joint clusters from all inputs: {', '.join(clusters)}")
     coords_selected = reproject(adata, keep)
     species_selected = [sp for sp in counts.columns if (obs_selected["species"] == sp).any()]
     fig, gs = row_figure(len(species_selected), title, strip=False)
-    annotated = (obs_selected["focus_tier"].astype(str) == "annotated").values if ring_annotated and "focus_tier" in obs_selected else None
     for idx, sp in enumerate(species_selected):
-        draw_facet(fig.add_subplot(gs[0, idx]), coords_selected, obs_selected, sp, colors, clusters, counts[sp].reindex(clusters, fill_value=0), "UMAP", annotated=annotated)
-    add_bottom_legend(fig, colors, "Joint cluster", ring_label=RING_LABEL if annotated is not None else None)
+        draw_facet(fig.add_subplot(gs[0, idx]), coords_selected, obs_selected, sp, colors, clusters, counts[sp].reindex(clusters, fill_value=0), "UMAP")
+    add_bottom_legend(fig, colors, "Joint cluster")
     save_fig(fig, path)
     plt.close(fig)
-def report(h5ad_path: Path) -> str | None:
-    """Write tables, modules, panels, fluxes and the merged PDF of one saved clustering.
+def load_report_data(h5ad_path: Path, summary_path: Path) -> tuple[ad.AnnData, str]:
+    """Load the layouts and attach the joint and internal SERIALs of the report series from the summary.
 
     Args:
-        h5ad_path (Path): .h5ad written by npz_scanpy.py.
+        h5ad_path (Path): projections.h5ad of npz_scanpy.py.
+        summary_path (Path): sc_summary.tsv of compile_summary.py.
 
     Returns:
-        str | None: Failure message when the focus capture is below min_capture_percent, else None.
+        tuple[ad.AnnData, str]: Layouts with ``protein_id``, ``species``, ``input_type``, ``cluster`` and ``intra_cluster`` observations, and the joint summary column.
     """
-    head = ad.read_h5ad(h5ad_path, backed="r")
-    param_tag = head.uns["param_tag"]
-    head.file.close()
-    target_dir = Path(args.outdir) / h5ad_path.parent.name if args.outdir else h5ad_path.parent
-    done = [target_dir / f"protein_clusters_metadata__{param_tag}.csv", target_dir / f"{target_dir.name}_scanpy.pdf"] + [target_dir / f"{m}_joint_clusters_species_specificity__{param_tag}.pdf" for m in args.layout_methods]
-    src_mtime = max(Path(__file__).stat().st_mtime, h5ad_path.stat().st_mtime)
-    if not args.overwrite and all(p.exists() and p.stat().st_mtime > src_mtime for p in done):
-        print(f"[PYTHON-INFO] Report of {h5ad_path.name} already exists in {target_dir} and is newer than the script. Skipping.")
-        return None
+    summary = pd.read_csv(summary_path, sep="\t", dtype=str).set_index("record")
+    joint_col = next((c for c in summary.columns if c.endswith(f"_{args.report_series}")), None)
+    if joint_col is None or "_j_" not in f"_{args.report_series}": raise ValueError(f"[PYTHON-ERROR] Joint series '{args.report_series}' not in {summary_path}.")
+    intra_col = joint_col[: -len(args.report_series)] + args.report_series.replace("_j_", "_i_", 1)
     adata = ad.read_h5ad(h5ad_path)
+    obs = adata.obs
+    obs["protein_id"], obs["species"], obs["input_type"] = obs["record"].astype(str), obs["sc_label"].astype(str), obs["sc_type"].astype(str)
+    obs["cluster"] = obs["protein_id"].map(summary[joint_col])
+    obs["intra_cluster"] = obs["protein_id"].map(summary[intra_col]) if intra_col in summary else np.nan
+    print(f"[PYTHON-INFO][SERIES] joint {joint_col}, internal {intra_col if intra_col in summary else 'none'}; {obs['cluster'].isna().sum():,} proteins unassigned")
+    return adata, joint_col
+def report(h5ad_path: Path) -> None:
+    """Write tables, modules, panels, fluxes and the merged PDF of the report series of one model.
+
+    Args:
+        h5ad_path (Path): projections.h5ad of npz_scanpy.py.
+    """
+    summary_path, param_tag = h5ad_path.parent / SUMMARY_FILE, args.report_series
+    if not summary_path.exists(): raise FileNotFoundError(f"[PYTHON-ERROR] Missing {summary_path}; run compile_summary.py first.")
+    target_dir = Path(args.outdir) / h5ad_path.parent.name if args.outdir else h5ad_path.parent
+    out = target_dir / f"{target_dir.name}_scanpy.pdf"
+    done = [target_dir / f"species_cluster_enrichment__{param_tag}.csv", out] + [target_dir / f"{m}_joint_clusters_species_specificity__{param_tag}.pdf" for m in args.layout_methods]
+    src_mtime = max(Path(__file__).stat().st_mtime, h5ad_path.stat().st_mtime, summary_path.stat().st_mtime)
+    if not args.overwrite and all(p.exists() and p.stat().st_mtime > src_mtime for p in done):
+        print(f"[PYTHON-INFO] Report of {h5ad_path} for {param_tag} already exists and is newer than its inputs. Skipping.")
+        return
+    adata, joint_col = load_report_data(h5ad_path, summary_path)
     modules_dir, intra_dir = target_dir / "protein-modules", target_dir / "intra_group"
     for d in (modules_dir, intra_dir): d.mkdir(parents=True, exist_ok=True)
-    if "input_type" not in adata.obs: adata.obs["input_type"] = "target"
-    inputs = list(adata.obs["species"].unique())
+    inputs = list(dict.fromkeys(adata.obs["species"]))
     species_list = [sp for sp in inputs if (adata.obs.loc[adata.obs["species"] == sp, "input_type"] == "target").all()]
     probes = [sp for sp in inputs if sp not in species_list]
-    print(f"[PYTHON-INFO][DATA-SHAPE] {h5ad_path.name}: {adata.n_obs:,} proteins, {len(species_list)} targets ({', '.join(species_list)}), {len(probes)} probes ({', '.join(probes) or 'none'}), obsm: {', '.join(adata.obsm.keys())}")
+    print(f"[PYTHON-INFO][DATA-SHAPE] {h5ad_path}: {adata.n_obs:,} proteins, {len(species_list)} targets ({', '.join(species_list)}), {len(probes)} probes ({', '.join(probes) or 'none'})")
     js = joint_stats(adata.obs, species_list)
     counts = pd.crosstab(adata.obs["cluster"].astype(str), adata.obs["species"]).reindex(columns=species_list + probes, fill_value=0)
-    fs = focus_stats(adata.obs, species_list, species_list + probes)
-    if fs is not None: adata.obs["focus_selection"] = focus_selection(adata.obs, fs.clusters, species_list)
     write_tables(adata, js, target_dir, modules_dir, param_tag)
-    if fs is not None: write_focus_tables(adata.obs, fs, species_list, target_dir, param_tag)
     intra = intra_summary(adata.obs, species_list, modules_dir, param_tag)
     plot_layout_panels(adata, js, counts, intra, target_dir, intra_dir, param_tag)
     if intra: plot_flux(adata.obs, js, intra, target_dir / f"sankey_intra_to_inter_clusters__{param_tag}.png")
-    plot_reprojection(adata, js.selected, js.colors, counts, "Selected inter-species clusters (re-projected)", target_dir / f"umap_reprojected_top_clusters__{param_tag}.png")
+    plot_reprojection(adata, js.selected, js.colors, counts, f"Selected joint clusters of {joint_col} (re-projected)", target_dir / f"umap_reprojected_top_clusters__{param_tag}.png")
     if js.selected:
         top_counts = counts.loc[js.selected]
         top_counts = top_counts.loc[top_counts[species_list].sum(axis=1).sort_values(ascending=False, kind="stable").index]
-        plot_counts_bar(top_counts, list(counts.columns), js.chi2_q.loc[js.selected].map(sig_stars), "Protein per cluster (number by species)", target_dir / f"barplot_umap_labelled_clusters_protein_counts__{param_tag}.png", legend_title="Input" if probes else "Species")
-    if fs is not None: plot_focus_panels(adata, fs, species_list, target_dir, param_tag)
-    out = target_dir / f"{target_dir.name}_scanpy.pdf"
+        plot_counts_bar(top_counts, list(counts.columns), js.chi2_q.loc[js.selected].map(sig_stars), "Proteins per cluster (number by sample)", target_dir / f"barplot_umap_labelled_clusters_protein_counts__{param_tag}.png", legend_title="Sample")
     pdfs = sorted((p for p in target_dir.rglob(f"*__{param_tag}.pdf") if p != out), key=lambda p: next((i for i, s in enumerate(REPORT_ORDER) if p.stem.startswith(s)), len(REPORT_ORDER)))
     merge_pdfs(pdfs, out)
     print(f"[PYTHON-INFO][REPORT] Merged {len(pdfs)} PDFs into {out}")
-    if fs is not None and fs.capture.iloc[0]["capture_percent"] < args.min_capture_percent:
-        return f"{h5ad_path.name}: focus capture {fs.capture.iloc[0]['capture_percent']:.2f}% of target proteins is below min_capture_percent={args.min_capture_percent}% (see focus_capture__{param_tag}.csv)"
-    return None
-###################################### FOCUS
-class FocusStats(NamedTuple):
-    """Per joint cluster statistics of the functional focus and its capture of the target proteins."""
-    table: pd.DataFrame
-    clusters: list[str]
-    colors: dict[str, str]
-    counts: pd.DataFrame
-    capture: pd.DataFrame
-    gravity: pd.DataFrame
-def focus_stats(obs: pd.DataFrame, targets: list[str], inputs: list[str]) -> FocusStats | None:
-    """Test every joint cluster for enrichment in focus proteins, select the focus clusters and measure the capture of target proteins and the gravity.
-
-    Args:
-        obs (pd.DataFrame): Observation table with letter-named ``cluster``, ``species``, ``input_type``, ``focus_tier`` and ``focus_similarity``.
-        targets (list[str]): Target inputs.
-        inputs (list[str]): All inputs (targets then probes), the columns of the count table.
-
-    Returns:
-        FocusStats | None: Focus statistics, or None in comparative mode (no probe input) or without focus proteins.
-    """
-    if "focus_tier" not in obs or not (obs["input_type"] == "probe").any(): return None
-    cluster_labels, tier = obs["cluster"].astype(str), obs["focus_tier"].astype(str)
-    is_focus, is_target = tier.isin(["probe", "annotated"]).values, (obs["input_type"] == "target").values
-    if not is_focus.any(): return None
-    n_all, n_focus = len(obs), int(is_focus.sum())
-    size = cluster_labels.value_counts()
-    tiers = pd.crosstab(cluster_labels, tier).reindex(index=size.index, columns=["probe", "annotated", "none"], fill_value=0)
-    table = pd.DataFrame({"cluster_size": size, "probe_count": tiers["probe"], "annotated_count": tiers["annotated"]})
-    table["focus_count"] = table["probe_count"] + table["annotated_count"]
-    table["focus_share"] = table["focus_count"] / n_focus
-    table["focus_fraction"] = table["focus_count"] / table["cluster_size"]
-    table["fold_enrichment"] = table["focus_fraction"] / (n_focus / n_all)
-    table["focus_q"] = false_discovery_control(hypergeom.sf(table["focus_count"].to_numpy() - 1, n_all, n_focus, table["cluster_size"].to_numpy()))
-    eligible = table[(table["focus_q"] < args.focus_max_q) & (table["focus_count"] >= args.min_focus_proteins)]
-    clusters = eligible["focus_share"].sort_values(ascending=False, kind="stable").head(args.max_focus_clusters).index.tolist()
-    table["focus_cluster"] = table.index.isin(clusters)
-    table = table.sort_values(["focus_cluster", "focus_share"], ascending=False, kind="stable").rename_axis("cluster")
-    counts = pd.crosstab(cluster_labels, obs["species"]).reindex(columns=inputs, fill_value=0)
-    in_focus = cluster_labels.isin(clusters).values
-    rows = []
-    for name, mask in [("all_targets", is_target)] + [(sp, (obs["species"] == sp).values) for sp in targets]:
-        annotated = mask & (tier == "annotated").values
-        n_ann, cap, cap_ann = int(annotated.sum()), int((mask & in_focus).sum()), int((annotated & in_focus).sum())
-        rows.append({"target": name, "proteins": int(mask.sum()), "captured": cap, "capture_percent": 100 * cap / max(int(mask.sum()), 1), "annotated": n_ann, "captured_annotated": cap_ann, "annotated_recall_percent": 100 * cap_ann / n_ann if n_ann else np.nan, "captured_unannotated": cap - cap_ann})
-    capture = pd.DataFrame(rows)
-    sim = obs["focus_similarity"].astype(float) if "focus_similarity" in obs else pd.Series(np.nan, index=obs.index)
-    grav = [pd.DataFrame({"cluster": cluster_labels[m].values, "target": name, "sim": sim[m].values}) for name, m in [("all_targets", is_target)] + [(sp, (obs["species"] == sp).values) for sp in targets]]
-    gravity = pd.concat(grav).groupby(["target", "cluster"])["sim"].agg(proteins="size", median_similarity="median").reset_index()
-    gravity["rank"] = gravity.groupby("target")["median_similarity"].rank(ascending=False, method="min").astype(int)
-    gravity["focus_cluster"] = gravity["cluster"].isin(clusters)
-    gravity = gravity.sort_values(["target", "rank"], kind="stable")
-    print(f"[PYTHON-INFO][FOCUS] {n_focus:,} focus proteins ({int(tiers['probe'].sum()):,} probe, {int(tiers['annotated'].sum()):,} annotated); {len(eligible)} enriched clusters, {len(clusters)} kept: {', '.join(clusters)}")
-    print(f"[PYTHON-INFO][FOCUS] Capture: {capture.iloc[0]['captured']:,}/{capture.iloc[0]['proteins']:,} target proteins ({capture.iloc[0]['capture_percent']:.2f}%)")
-    return FocusStats(table, clusters, {cl: PALETTE_ALT[i % len(PALETTE_ALT)] for i, cl in enumerate(clusters)}, counts, capture, gravity)
-def focus_selection(obs: pd.DataFrame, clusters: list[str], targets: list[str]) -> pd.Series:
-    """Label every target protein I (own focus annotation), E (extended through probing: unannotated, inside a focus cluster) or none; probe proteins get no label.
-
-    Args:
-        obs (pd.DataFrame): Observation table with letter-named ``cluster``, ``species``, ``input_type`` and ``focus_tier``.
-        clusters (list[str]): Focus clusters.
-        targets (list[str]): Target inputs.
-
-    Returns:
-        pd.Series: Focus selection per protein (NaN for probe proteins).
-    """
-    annotated, in_focus = (obs["focus_tier"].astype(str) == "annotated").values, obs["cluster"].astype(str).isin(clusters).values
-    sel = np.where(annotated, "I", np.where(in_focus, "E", "none")).astype(object)
-    sel[(obs["input_type"] != "target").values] = None
-    sel = pd.Series(pd.Categorical(sel, categories=list(SELECTION_COLORS)[::-1]), index=obs.index)
-    for sp in targets:
-        is_sp = (obs["species"] == sp).values
-        print(f"[PYTHON-INFO][FOCUS] Selection {sp}: {int((sel[is_sp] == 'I').sum()):,} I, {int((sel[is_sp] == 'E').sum()):,} E of {int(is_sp.sum()):,} proteins")
-    return sel
-def write_focus_tables(obs: pd.DataFrame, fs: FocusStats, targets: list[str], target_dir: Path, param_tag: str) -> None:
-    """Write the focus enrichment, capture, gravity and selection tables, the target protein lists of every focus cluster and the selection list of every target.
-
-    Args:
-        obs (pd.DataFrame): Observation table with letter-named joint clusters.
-        fs (FocusStats): Focus statistics.
-        targets (list[str]): Target inputs.
-        target_dir (Path): Report folder.
-        param_tag (str): Parameter tag of the clustering.
-    """
-    fs.table.join(fs.counts.add_prefix("n_")).to_csv(target_dir / f"focus_cluster_enrichment__{param_tag}.csv")
-    fs.capture.to_csv(target_dir / f"focus_capture__{param_tag}.csv", index=False)
-    fs.gravity.to_csv(target_dir / f"focus_gravity__{param_tag}.csv", index=False)
-    focus_dir = target_dir / "focus-modules"
-    focus_dir.mkdir(parents=True, exist_ok=True)
-    cluster_labels, species_labels = obs["cluster"].astype(str), obs["species"].astype(str)
-    for cl in fs.clusters:
-        for sp in targets:
-            mask = (species_labels == sp).values & (cluster_labels == cl).values
-            if mask.any(): obs.loc[mask, "protein_id"].to_csv(focus_dir / f"{sp}_{mask.sum():07d}_clust{cl}_{param_tag}.txt", index=False, header=False)
-    sel = obs[obs["focus_selection"].isin(["I", "E"])]
-    sel[[c for c in ("protein_id", "species", "cluster", "focus_selection", "focus_similarity") if c in sel]].sort_values(["species", "focus_selection", "focus_similarity"], ascending=[True, True, False], kind="stable").to_csv(target_dir / f"focus_selection__{param_tag}.csv", index=False)
-    for sp in targets:
-        ids = sel.loc[(sel["species"] == sp).values, "protein_id"]
-        if len(ids): ids.to_csv(focus_dir / f"{sp}_{len(ids):07d}_focus_selection_{param_tag}.txt", index=False, header=False)
-def plot_focus_tiers(adata: ad.AnnData, targets: list[str], target_dir: Path, param_tag: str) -> None:
-    """Draw for every layout method one facet per target coloured by focus selection, I on top of E on top of the rest.
-
-    Args:
-        adata (ad.AnnData): Saved clusters with ``focus_selection``.
-        targets (list[str]): Target inputs in facet order.
-        target_dir (Path): Report folder.
-        param_tag (str): Parameter tag of the clustering.
-    """
-    sel = adata.obs["focus_selection"].astype(str).values
-    for m in args.layout_methods:
-        if f"X_{m}_2d" not in adata.obsm: continue
-        name, coords = METHOD_NAMES.get(m, m), adata.obsm[f"X_{m}_2d"]
-        fig, gs = row_figure(len(targets), f"Functional focus selection ({name})", strip=False)
-        for idx, sp in enumerate(targets):
-            ax, is_sp = fig.add_subplot(gs[0, idx]), (adata.obs["species"] == sp).values
-            for t, c in SELECTION_COLORS.items():
-                pts = is_sp & (sel == t)
-                ax.scatter(coords[pts, 0], coords[pts, 1], c=c, s=PT_SIZE if t == "none" else 2 * PT_SIZE, alpha=ALPHA_BG if t == "none" else ALPHA_MAX, rasterized=True, linewidths=0)
-            style_axes(ax, facet_title(adata.obs, is_sp, sp), name)
-        add_bottom_legend(fig, {f"{SELECTION_LABELS[t]} ({(sel == t).sum():,})": c for t, c in reversed(SELECTION_COLORS.items())}, "Focus selection")
-        save_fig(fig, target_dir / f"{m}_focus_tiers__{param_tag}.png")
-        plt.close(fig)
-def plot_focus_panels(adata: ad.AnnData, fs: FocusStats, targets: list[str], target_dir: Path, param_tag: str) -> None:
-    """Draw the focus selection layouts, then for every layout method one facet per input with the focus clusters coloured and the annotated proteins ringed, plus the re-projection and barplot of the focus clusters.
-
-    Args:
-        adata (ad.AnnData): Saved clusters with letter-named joint clusters.
-        fs (FocusStats): Focus statistics.
-        targets (list[str]): Target inputs.
-        target_dir (Path): Report folder.
-        param_tag (str): Parameter tag of the clustering.
-    """
-    inputs = list(fs.counts.columns)
-    plot_focus_tiers(adata, targets, target_dir, param_tag)
-    if not fs.clusters: return
-    annotated = (adata.obs["focus_tier"].astype(str) == "annotated").values
-    for m in args.layout_methods:
-        if f"X_{m}_2d" not in adata.obsm: continue
-        name = METHOD_NAMES.get(m, m)
-        fig, gs = row_figure(len(inputs), f"Functional focus clusters ({name})", strip=False)
-        for idx, sp in enumerate(inputs):
-            draw_facet(fig.add_subplot(gs[0, idx]), adata.obsm[f"X_{m}_2d"], adata.obs, sp, fs.colors, fs.clusters, fs.counts[sp], name, annotated=annotated)
-        add_bottom_legend(fig, fs.colors, "Focus cluster", ring_label=RING_LABEL)
-        save_fig(fig, target_dir / f"{m}_focus_clusters__{param_tag}.png")
-        plt.close(fig)
-    plot_reprojection(adata, fs.clusters, fs.colors, fs.counts, "Functional focus clusters (re-projected)", target_dir / f"umap_reprojected_focus_clusters__{param_tag}.png", ring_annotated=True)
-    top_counts = fs.counts.loc[fs.clusters, inputs]
-    plot_counts_bar(top_counts, inputs, fs.table.loc[fs.clusters, "focus_q"].map(sig_stars), "Proteins per focus cluster (number by input)", target_dir / f"barplot_focus_clusters_protein_counts__{param_tag}.png", "Focus cluster\nhypergeometric focus enrichment, BH: * q<0.05, ** q<0.01, *** q<0.001", "Input")
-###################################### PAIRED
-def baseline_path(h5ad_path: Path, obs: pd.DataFrame) -> Path:
-    """Locate the baseline .h5ad of a focus run: same targets, model and parameters, without probes.
-
-    Args:
-        h5ad_path (Path): .h5ad of the focus run.
-        obs (pd.DataFrame): Its observations with ``species`` and ``input_type``.
-
-    Returns:
-        Path: Expected .h5ad of the baseline run.
-    """
-    targets = [sp for sp in obs["species"].astype(str).unique() if (obs.loc[obs["species"].astype(str) == sp, "input_type"].astype(str) == "target").all()]
-    run, model = h5ad_path.parent.name, h5ad_path.parent.name.rsplit("__", 1)[1]
-    base_run = "_".join(targets) + f"__{model}"
-    return h5ad_path.parent.parent / base_run / (base_run + h5ad_path.name[len(run):])
-def best_match(flow: pd.DataFrame, cluster: str, axis: int) -> tuple[str, int, float]:
-    """Find the cluster of the other run that shares most proteins with a cluster, and their Jaccard index.
-
-    Args:
-        flow (pd.DataFrame): Shared proteins, baseline clusters as rows and focus-run clusters as columns.
-        cluster (str): Cluster to match (a row when axis is 0, a column when axis is 1).
-        axis (int): 0 for a baseline cluster, 1 for a focus-run cluster.
-
-    Returns:
-        tuple[str, int, float]: Best-matching cluster, shared proteins and Jaccard index.
-    """
-    line = flow.loc[cluster] if axis == 0 else flow[cluster]
-    other = line.idxmax()
-    shared = int(line[other])
-    other_size = int(flow[other].sum() if axis == 0 else flow.loc[other].sum())
-    return str(other), shared, shared / (int(line.sum()) + other_size - shared)
-def compare_pair(h5ad_path: Path) -> None:
-    """Compare a focus run with its baseline run on their shared target proteins and write the paired tables.
-
-    Args:
-        h5ad_path (Path): .h5ad of a run; runs without probes are skipped.
-    """
-    head = ad.read_h5ad(h5ad_path, backed="r")
-    focus_obs, param_tag = head.obs.copy(), head.uns["param_tag"]
-    head.file.close()
-    if "input_type" not in focus_obs or not (focus_obs["input_type"].astype(str) == "probe").any(): return
-    base = baseline_path(h5ad_path, focus_obs)
-    if not base.exists():
-        print(f"[PYTHON-INFO][PAIRED] No baseline run {base} for {h5ad_path.name}. Skipping the paired comparison.")
-        return
-    head = ad.read_h5ad(base, backed="r")
-    base_obs = head.obs.copy()
-    head.file.close()
-    common = focus_obs.index[(focus_obs["input_type"].astype(str) == "target").values].intersection(base_obs.index)
-    f_cl, b_cl = focus_obs.loc[common, "cluster"].astype(int).map(letter), base_obs.loc[common, "cluster"].astype(int).map(letter)
-    flow = pd.crosstab(b_cl.rename("baseline_cluster"), f_cl.rename("focus_run_cluster"))
-    focus_dir = Path(args.outdir) / h5ad_path.parent.name if args.outdir else h5ad_path.parent
-    base_dir = Path(args.outdir) / base.parent.name if args.outdir else base.parent
-    long = flow.stack().rename("proteins").reset_index().query("proteins > 0")
-    long["jaccard"] = long["proteins"] / (long["baseline_cluster"].map(flow.sum(axis=1)) + long["focus_run_cluster"].map(flow.sum(axis=0)) - long["proteins"])
-    focus_csv = focus_dir / f"focus_cluster_enrichment__{param_tag}.csv"
-    focus_clusters = set(pd.read_csv(focus_csv, dtype={"cluster": str}).query("focus_cluster")["cluster"]) if focus_csv.exists() else set()
-    long["focus_cluster"] = long["focus_run_cluster"].isin(focus_clusters)
-    long.sort_values(["focus_run_cluster", "proteins"], ascending=[True, False], kind="stable").to_csv(focus_dir / f"paired_cluster_flow__{param_tag}.csv", index=False)
-    selected = {run: (set(pd.read_csv(d / f"species_cluster_enrichment__{param_tag}.csv", dtype={"cluster": str}).query("selected")["cluster"]) if (d / f"species_cluster_enrichment__{param_tag}.csv").exists() else set()) for run, d in (("baseline", base_dir), ("focus_run", focus_dir))}
-    rows = []
-    for run, axis, other in (("baseline", 0, "focus_run"), ("focus_run", 1, "baseline")):
-        for cl in sorted(selected[run], key=lambda c: (len(c), c)):
-            if cl not in (flow.index if axis == 0 else flow.columns): continue
-            match, shared, jac = best_match(flow, cl, axis)
-            rows.append({"run": run, "cluster": cl, "best_match": match, "shared_proteins": shared, "jaccard": jac, "match_selected": match in selected[other]})
-    pd.DataFrame(rows, columns=["run", "cluster", "best_match", "shared_proteins", "jaccard", "match_selected"]).to_csv(focus_dir / f"paired_selection__{param_tag}.csv", index=False)
-    summary = {"baseline_h5ad": base.name, "focus_run_h5ad": h5ad_path.name, "shared_target_proteins": len(common), "baseline_clusters": int(flow.shape[0]), "focus_run_clusters": int(flow.shape[1]), "adjusted_rand_index": adjusted_rand_score(b_cl, f_cl), "normalized_mutual_info": normalized_mutual_info_score(b_cl, f_cl), "baseline_selected": len(selected["baseline"]), "focus_run_selected": len(selected["focus_run"])}
-    (focus_dir / f"paired_summary__{param_tag}.txt").write_text("".join(f"{k}: {v}\n" for k, v in summary.items()))
-    print(f"[PYTHON-INFO][PAIRED] {h5ad_path.parent.name} vs {base.parent.name}: {len(common):,} shared targets, ARI {summary['adjusted_rand_index']:.3f}, NMI {summary['normalized_mutual_info']:.3f}")
 ###################################### MAIN
 def main() -> None:
     """Report every .h5ad passed on the command line."""
     start_time = time.time()
     paths = [Path(p.strip()) for p in args.h5ad.split(",") if p.strip()]
-    failures = [msg for path in tqdm(paths, desc="Reports") if (msg := report(path))]
-    for path in paths: compare_pair(path)
+    for path in tqdm(paths, desc="Reports"): report(path)
     max_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
     exec_time = time.time() - start_time
     date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[PYTHON-INFO] {date_str} {exec_time:.2f}s {max_mem:.2f}MB")
-    if failures: raise RuntimeError("[PYTHON-ERROR] " + "; ".join(failures))
 if __name__ == "__main__":
     main()

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Writes an RO-Crate 1.1 JSON-LD description (``ro-crate-metadata.json``) of one analysis folder.
 
-The analysis folder ``analyses/<analysis>/`` holds the runs of npz_scanpy.py and the reports of h5ad_scanpy.py and h5ad_interactive.py. The query table and the parameter YAML in use are copied to ``<analysis>/configs/`` so that the crate is self-contained. The root Dataset lists every file of the folder with its format, size and modification date, and every run folder (``<labels>__<model>/``) is a Dataset produced by a CreateAction whose instrument is the pipeline at the current git commit and whose objects are the copied configs. The crate is rewritten at every call, and a copy of it and of ``configs/`` goes to ``<metadata_dir>/<analysis>/``, which is tracked by git while ``analyses/`` is not.
+The analysis folder ``analyses/<analysis_name>/`` holds sc_metadata.tsv, the joint MMseqs2 clusters and one folder per model with the projections, the summary and the reports. The query table and the parameter YAML in use are copied to ``<analysis>/configs/`` so that the crate is self-contained. The root Dataset lists every file of the folder with its format, size and modification date, and every subfolder (``mmseqs_joint/``, ``<model>/``) is a Dataset produced by a CreateAction whose instrument is the pipeline at the current git commit and whose objects are the copied configs. The crate is rewritten at every call, and a copy of it and of ``configs/`` goes to ``<metadata_dir>/<analysis>/``, which is tracked by git while ``analyses/`` is not.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import argparse
@@ -98,7 +98,7 @@ def describe_inputs(query_table: Path) -> str:
     """
     if not query_table.exists(): return "query table not found"
     table = pd.read_csv(query_table, sep="\t", dtype=str).fillna("")
-    return "; ".join(f"{r.get('label', '')} ({r.get('exact_species', '')}, {r.get('input_type', '') or 'target'})" for r in table.to_dict("records"))
+    return "; ".join(f"{r.get('label', '')} ({r.get('taxonomic_ref', '')}, {r.get('input_type', '') or 'target'})" for r in table.to_dict("records"))
 ###################################### MAIN
 def main() -> None:
     """Write ``ro-crate-metadata.json`` in the analysis folder."""

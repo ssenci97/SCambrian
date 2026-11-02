@@ -8,7 +8,7 @@
 #SBATCH --time=04:00:00
 #SBATCH --job-name=ESMC
 #SBATCH --output=logs/ESMC/ESMC_%A_%a.log
-#SBATCH --array=0-14%2
+#SBATCH --array=0-4%2
 #SBATCH --open-mode=append
 ###################################### env
 module purge
@@ -17,10 +17,10 @@ export PATH=$(echo "$PATH" | tr ':' '\n' | grep -v 'fedora41' | paste -sd:)
 export CC=/usr/bin/gcc
 export CXX=/usr/bin/g++
 export PATH="/usr/bin:$PATH"
-export TMPDIR="$PWD/tmp"
+export TMPDIR="$PWD/.tmp"
 export PIP_CACHE_DIR="$PWD/.cache"
 export TRITON_CACHE_DIR="$PWD/.triton_cache"
-mkdir -p logs tmp .cache "$TRITON_CACHE_DIR"
+mkdir -p logs .tmp .cache "$TRITON_CACHE_DIR"
 echo "[SLURM-INFO] Forced CC=$CC CXX=$CXX"
 ###################################### conda
 source ~/scratch/miniconda/etc/profile.d/conda.sh
@@ -32,9 +32,9 @@ eval "$(python3 -c '
 import yaml
 with open("configs/param_configs.yaml") as f:
     d = yaml.safe_load(f)
-dedup = d.get("run_mmseqs2", {}).get("dedup_dir", "data/dedup")
+dedup = d.get("preprocess_sequences", {}).get("preprocessed_dir", "data/preprocessed")
 reps_dir = d.get("extract_reps_biohub", {}).get("embeddings_dir", "data/esm-reps")
-models = d.get("extract_reps_biohub", {}).get("models", "esmc_6b")
+models = d.get("extract_reps_biohub", {}).get("models", "esmc_300m")
 models = [models] if isinstance(models, str) else models
 print("MODELS=(" + " ".join(models) + ")")
 print(f"FASTA_DIR={dedup}")

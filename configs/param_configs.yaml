@@ -1,11 +1,3 @@
-extract_reps_biohub:
-  models:
-  - esmc_300m
-  - esmc_600m
-  - esmc_6b
-  sequences_per_chunk: 500
-  embeddings_dir: data/esm-reps
-  overwrite: false
 dw_uniprot_seqs:
   query_table: configs/query_configs.tsv
   sequences_dir: data/sequences
@@ -14,20 +6,60 @@ dw_uniprot_features:
   query_table: configs/query_configs.tsv
   features_dir: data/features
   overwrite: false
+preprocess_sequences:
+  analysis_name: null
+  analyses_dir: analyses
+  sequences_dir: data/sequences
+  preprocessed_dir: data/preprocessed
+  min_length: 30
+  max_length: null
+  mmseqs_executable: mmseqs
+  dedup_min_identity: 0.95
+  dedup_min_coverage: 0.8
+  dedup_coverage_mode: 0
+  overwrite: false
+run_mmseqs2:
+  preprocessed_dir: data/preprocessed
+  clusters_dir: data/clusters
+  mmseqs_executable: mmseqs
+  cluster_min_coverage: 0.8
+  cluster_coverage_mode: 0
+  cluster_identity_thresholds:
+  - 0.9
+  - 0.8
+  - 0.7
+  - 0.6
+  - 0.5
+  - 0.4
+  - 0.3
+  - 0.2
+  overwrite: false
+extract_reps_biohub:
+  models:
+  - esmc_300m
+  sequences_per_chunk: 500
+  embeddings_dir: data/esm-reps
+  overwrite: false
 npz_scanpy:
   seed: 42
-  leiden_resolution: 1.0
-  knn_neighbors: 15
   pca_components: null
+  knn_neighbors: 15
+  leiden_resolution: 1.0
+  hdbscan_min_cluster_size: 500
+  hdbscan_min_samples: 10
   layout_dimensions:
   - 2
   - 3
   umap_min_dist: 0.5
   tsne_perplexity: 30.0
   tsne_iterations: 1000
-  scanpy_dir: analyses/
+  overwrite: false
+compile_summary:
+  primary_series: u_j_leiden2d
+  max_bars: 30
   overwrite: false
 h5ad_scanpy:
+  report_series: u_j_leiden2d
   layout_methods:
   - umap
   - tsne
@@ -41,12 +73,6 @@ h5ad_scanpy:
   min_fold_change: 2.0
   overwrite: false
 h5ad_interactive:
-  hdbscan_min_cluster_sizes:
-  - 500
-  - 800
-  - 1600
-  hdbscan_min_samples: 10
-  hdbscan_max_clusters: 15
   max_points_per_view: null
   overwrite: false
 ro_crate:

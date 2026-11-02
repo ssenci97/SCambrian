@@ -30,7 +30,7 @@ parser.add_argument("--label", default=None, help="Label of --query, or the only
 parser.add_argument("--out_tsv", type=Path, default=None, help="Output TSV path (default <sequences_dir>/<label>_seqs.tsv)")
 parser.add_argument("--out_fasta", type=Path, default=None, help="Output FASTA path (default <sequences_dir>/<label>_seqs.fasta)")
 parser.add_argument("--out_ids", type=Path, default=None, help="Output accession list path (default <sequences_dir>/<label>_ids.txt)")
-parser.add_argument("--query_table", type=str, default=QUERY_TABLE, help="TSV with label, query and exact_species columns")
+parser.add_argument("--query_table", type=str, default=QUERY_TABLE, help="TSV with label, query, taxonomic_ref and input_type columns")
 parser.add_argument("--sequences_dir", type=str, default=SEQUENCES_DIR, help="Output folder")
 parser.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=OVERWRITE, help="Download again labels whose outputs exist")
 parser.add_argument("--yaml-in", nargs="?", const=YAML_PATH, default=YAML_PATH)
