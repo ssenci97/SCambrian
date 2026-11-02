@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Projects the ESMC embeddings of one model into UMAP and t-SNE spaces, jointly (all samples) and internally (each target alone), and clusters every layout with Leiden and HDBSCAN.
+"""Projects the ESMC embeddings of one model into UMAP and t-SNE spaces, jointly (all samples) and internally (each target alone), and clusters every layout with Leiden.
 
-The kept sequences of ``<analysis_dir>/sc_metadata.tsv`` (preprocess_sequences.py) are read from ``<embeddings_dir>/<model>/<label>_reps.npz``. Embeddings are L2-normalised (and optionally reduced to ``pca_components`` PCs). For the joint scope (every sample, probes included) and for each target alone (internal scope; probes get none), a cosine kNN graph of ``knn_neighbors`` neighbours feeds the UMAPs of every dimension in ``layout_dimensions``, and one cosine kNN per scope feeds the t-SNEs. Every layout is then clustered on its own coordinates: Leiden (``leiden_resolution``) on a Euclidean kNN graph of the layout, and HDBSCAN (``hdbscan_min_cluster_size``, ``hdbscan_min_samples``; -1 is noise). Raw integer cluster ids are stored per series key ``{u|t}_{j|i}_{leiden|hdbscan}{2|3}d`` in ``obs`` (NaN where the series does not apply), layouts as ``obsm["X_{umap|tsne}_{n}d_{j|i}"]``, and the joint embedding kNN graph in ``obsp`` for the re-projections of h5ad_scanpy.py. The output is ``<analysis_dir>/<model>/projections.h5ad``; compile_summary.py turns the raw ids into cluster names. The .h5ad is recomputed when it is older than an input .npz or the metadata, was built with different parameters, or with ``--overwrite``.
+The kept sequences of ``<analysis_dir>/sc_metadata.tsv`` (preprocess_sequences.py) are read from ``<embeddings_dir>/<model>/<label>_reps.npz``. Embeddings are L2-normalised (and optionally reduced to ``pca_components`` PCs). For the joint scope (every sample, probes included) and for each target alone (internal scope; probes get none), a cosine kNN graph of ``knn_neighbors`` neighbours feeds the UMAPs of every dimension in ``layout_dimensions``, and one cosine kNN per scope feeds the t-SNEs. Every layout is then clustered on its own coordinates with Leiden (``leiden_resolution``) on a Euclidean kNN graph of the layout. Raw integer cluster ids are stored per series key ``{u|t}_{j|i}_leiden{2|3}d`` in ``obs`` (NaN where the series does not apply), layouts as ``obsm["X_{umap|tsne}_{n}d_{j|i}"]``, and the joint embedding kNN graph in ``obsp`` for the re-projections of h5ad_scanpy.py. The output is ``<analysis_dir>/<model>/projections.h5ad``; compile_summary.py turns the raw ids into cluster names. The .h5ad is recomputed when it is older than an input .npz or the metadata, was built with different parameters, or with ``--overwrite``.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
 import argparse
 import datetime
-import hdbscan
 import numpy as np
 import os
 import pandas as pd
@@ -27,8 +26,6 @@ if not hasattr(csr_array, "getnnz"):
     csr_array.getnnz = csr_array._getnnz
 EARLY_EXAGGERATION = 12.0
 EMBEDDINGS_DIR = "data/esm-reps"
-HDBSCAN_MIN_CLUSTER_SIZE = 500
-HDBSCAN_MIN_SAMPLES = 10
 KNN_NEIGHBORS = 15
 LAYOUT_DIMENSIONS = [2, 3]
 LEIDEN_RESOLUTION = 1.0
@@ -45,14 +42,12 @@ TSNE_PERPLEXITY = 30.0
 UMAP_MIN_DIST = 0.5
 YAML_PATH = "configs/param_configs.yaml"
 ###################################### CONFIG_AND_PARSER
-parser = argparse.ArgumentParser(description="Joint and internal UMAP/t-SNE projections of ESMC embeddings, clustered with Leiden and HDBSCAN")
+parser = argparse.ArgumentParser(description="Joint and internal UMAP/t-SNE projections of ESMC embeddings, clustered with Leiden")
 parser.add_argument("--analysis_dir", type=str, required=True, help="Analysis folder analyses/<analysis_name>/ holding sc_metadata.tsv")
 parser.add_argument("--model", type=str, required=True, help="ESMC model whose embeddings are projected (folder name under the embeddings_dir)")
 parser.add_argument("--pca_components", type=int, default=PCA_COMPONENTS, help="PCs used for the kNN graphs (None or 0: full embedding space)")
 parser.add_argument("--knn_neighbors", type=int, default=KNN_NEIGHBORS, help="Neighbours of the embedding kNN graph (UMAP) and of the layout kNN graphs (Leiden)")
 parser.add_argument("--leiden_resolution", type=float, default=LEIDEN_RESOLUTION, help="Leiden resolution (higher: more, smaller clusters)")
-parser.add_argument("--hdbscan_min_cluster_size", type=int, default=HDBSCAN_MIN_CLUSTER_SIZE, help="HDBSCAN min_cluster_size")
-parser.add_argument("--hdbscan_min_samples", type=int, default=HDBSCAN_MIN_SAMPLES, help="HDBSCAN min_samples, capped at min_cluster_size")
 parser.add_argument("--layout_dimensions", type=int, nargs="+", default=LAYOUT_DIMENSIONS, help="Dimensions of the UMAP and t-SNE layouts")
 parser.add_argument("--umap_min_dist", type=float, default=UMAP_MIN_DIST, help="UMAP minimum distance between embedded points")
 parser.add_argument("--tsne_perplexity", type=float, default=TSNE_PERPLEXITY, help="t-SNE perplexity")
@@ -63,7 +58,7 @@ parser.add_argument("--yaml-in", nargs="?", const=YAML_PATH, default=YAML_PATH)
 parser.add_argument("--yaml-out", nargs="?", const=YAML_PATH, default=None)
 cli_preview, _ = parser.parse_known_args()
 script_key = "npz_scanpy"
-params = dict(seed=SEED, pca_components=PCA_COMPONENTS, knn_neighbors=KNN_NEIGHBORS, leiden_resolution=LEIDEN_RESOLUTION, hdbscan_min_cluster_size=HDBSCAN_MIN_CLUSTER_SIZE, hdbscan_min_samples=HDBSCAN_MIN_SAMPLES, layout_dimensions=LAYOUT_DIMENSIONS, umap_min_dist=UMAP_MIN_DIST, tsne_perplexity=TSNE_PERPLEXITY, tsne_iterations=TSNE_ITERATIONS, overwrite=OVERWRITE)
+params = dict(seed=SEED, pca_components=PCA_COMPONENTS, knn_neighbors=KNN_NEIGHBORS, leiden_resolution=LEIDEN_RESOLUTION, layout_dimensions=LAYOUT_DIMENSIONS, umap_min_dist=UMAP_MIN_DIST, tsne_perplexity=TSNE_PERPLEXITY, tsne_iterations=TSNE_ITERATIONS, overwrite=OVERWRITE)
 config_data = {}
 if cli_preview.yaml_in and Path(cli_preview.yaml_in).exists():
     config_data = yaml.safe_load(Path(cli_preview.yaml_in).read_text()) or {}
@@ -154,21 +149,18 @@ def run_tsne(rep: np.ndarray) -> dict[int, np.ndarray]:
     tsne_kw = dict(perplexity=min(args.tsne_perplexity, (k - 2) / 3), max_iter=args.tsne_iterations, early_exaggeration=EARLY_EXAGGERATION, learning_rate="auto", metric="precomputed", random_state=SEED, n_jobs=args.n_jobs)
     return {nc: TSNE(n_components=nc, init=pcs[:, :nc], **tsne_kw).fit_transform(graph).astype(np.float32) for nc in args.layout_dimensions}
 def cluster_layout(coords: np.ndarray) -> dict[str, np.ndarray]:
-    """Cluster one layout on its own coordinates with Leiden (Euclidean kNN graph of the layout) and HDBSCAN.
+    """Cluster one layout on its own coordinates with Leiden on a Euclidean kNN graph of the layout.
 
     Args:
         coords (np.ndarray): Layout coordinates.
 
     Returns:
-        dict[str, np.ndarray]: Integer labels per method (``leiden``, ``hdbscan``; -1 is HDBSCAN noise).
+        dict[str, np.ndarray]: Integer labels per method (``leiden``).
     """
     tmp = ad.AnnData(obsm={"L": coords}, obs=pd.DataFrame(index=np.arange(len(coords)).astype(str)))
     sc.pp.neighbors(tmp, n_neighbors=min(args.knn_neighbors, len(coords) - 1), use_rep="L", metric="euclidean", random_state=SEED)
     sc.tl.leiden(tmp, resolution=args.leiden_resolution, flavor="igraph", n_iterations=2, directed=False, random_state=SEED)
-    mcs = args.hdbscan_min_cluster_size
-    noise = len(coords) <= mcs
-    hdb = np.full(len(coords), -1) if noise else hdbscan.HDBSCAN(min_cluster_size=mcs, min_samples=min(args.hdbscan_min_samples, mcs), metric="euclidean", core_dist_n_jobs=args.n_jobs).fit_predict(coords)
-    return {"leiden": tmp.obs["leiden"].astype(int).to_numpy(), "hdbscan": np.asarray(hdb, dtype=int)}
+    return {"leiden": tmp.obs["leiden"].astype(int).to_numpy()}
 def project(adata: ad.AnnData, scope: str, desc: str) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
     """Build the UMAP and t-SNE layouts of one scope and cluster every layout.
 

@@ -6,7 +6,7 @@
 | Target | `ssenci97/SCambrian@8a28649` (`main`); a `dev` branch exists at `8a45c8e` |
 | Release goal | v1.0.0, GitHub tag + Zenodo DOI (code and data) |
 | References | ISO/IEC 25010 (product quality), ISO/IEC 5230 OpenChain (licence compliance), ISO/IEC 5962 SPDX, ISO 8601 (dates), ISO 15489 (record integrity), FAIR4RS, RO-Crate 1.1, CFF 1.2, Zenodo metadata |
-| Status | Audit only. Updated 2026-10-28: A3 corrected, A5 and B12 resolved |
+| Status | Audit only. Updated 2026-10-28: A3 corrected, A5 and B12 resolved. Updated 2026-11-02: D23–D28 (selection robustness) |
 
 ## Inventory
 
@@ -106,6 +106,17 @@ Conventions worth keeping and documenting:
 
     Completeness and redundancy differ by source and can confound species-share tests. State this explicitly, ideally with a BUSCO completeness per proteome.
 
+### Robustness of the species selection (added 2026-11-02, numbered after E–F to keep earlier references)
+
+Scope: criteria 1–8 of `src/h5ad_scanpy.py` on `report_series` (`u_j_leiden2d`). Verdict: the criteria are sound and internally consistent. The species-normalised share removes the proteome-size bias, the fold-change and minimum-count gates provide effect size, and probes never enter the target statistics. The risks below are about how stable the result is, not about the formulas.
+
+23. **Single-partition dependence.** The selection comes from one Leiden run (resolution 1.0, seed 42) on the coordinates of one 2D UMAP. Boundaries in a 2D layout move with the projection, so a selected cluster may split or merge in another series. Suggested check (not implemented): for every selected cluster, its best Jaccard match in `u_j_leiden3d`, `t_j_leiden2d` and `t_j_leiden3d` (already in `sc_summary.tsv`), and whether that match is significant for the same species. A seed or resolution sweep would be the stronger version.
+24. **The q-value does little selecting.** With about 10^5 proteins, almost every large joint cluster reaches q ≈ 0, so `min_fold_change` and `min_species_proteins` decide the selection, and the chi-square acts mostly as a validity gate. This is consistent with D14 (post-selection inference: clusters are data-derived), but the report should say that the effect-size gates carry the call.
+25. **Probes change the joint graph.** Probe proteins are excluded from the counts, but they are part of the kNN graph and the layout, so the target clusters (and the selection) differ with and without a probe. A run on the same targets without probes is the control, the paired run of the previous version.
+26. **The caps and the specificity gate are conventions.** `max_selected_per_species` (6) is arbitrary, and `S_ks > 1/n_species` is weak with 2–4 targets (0.5–0.25). This is acceptable, but should be stated as a reporting choice, not a test.
+27. **`n_s` depends on proteome quality** (see D15): completeness and redundancy, partly mitigated by the per-sample dedup at 95% identity.
+28. *Resolved 2026-11-02:* HDBSCAN was removed. Leiden assigns every protein, so `n_s` is now always the full kept proteome; HDBSCAN noise no longer shrinks it unevenly across species. Probe clusters now have their own selection (criteria 9–11: hypergeometric enrichment, BH, fold enrichment, minimum probe proteins, cap), so a cluster with a single probe protein is still UPPER case but no longer counts as a probe hit.
+
 ## E. Hygiene (P2)
 
 16. **`.gitignore`**: add `**/*.transdecoder_dir/`, `*.ok`, `*.cmds` and `*.part`. Decided: `raw/` (processed curation) is preserved; **`raw/raw/` (original downloads, re-fetched by `raw/slurm_dw_proc.sh`) is excluded** from the deposit. Add it to `.gitignore` and `git rm -r --cached raw/raw` (not done yet).
@@ -170,7 +181,7 @@ To decide before writing it: whether the v1.1 renames (section C) happen first, 
 | priority | items |
 |---|---|
 | P0 before tagging | A1–A4, A6 (A5 resolved) |
-| P1 before the data DOI | B7–B11, D13–D15 (B12 resolved) |
+| P1 before the data DOI | B7–B11, D13–D15, D23–D27 (B12 resolved) |
 | P1 documentation | C (document now, rename in v1.1) |
 | P2 | E16–E22 |
 | next session | G (metadata tooling) |

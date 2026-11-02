@@ -171,7 +171,7 @@ None. All data are public and come from non-human organisms.
   \item SCambrian uses the filtered (complete ORFs only) proteomes.
   \end{itemize}
 \item The proteomes differ in origin (predicted ORFs, gene models, UniProtKB entries). Two steps limit the bias: deduplication at 95\% identity, and normalisation of cluster counts by proteome size.
-\item Software: Python 3.10, PyTorch 2.4.1 (CUDA 12.1), flash-attn 2.6.3, \code{esm} 3.2.1.post1, Scanpy $\geq$ 1.10, igraph, umap-learn, scikit-learn, hdbscan, MMseqs2 (commit \hash{8cc5ce367b5638c4306c2d7cfc652dd099a4643f}), TransDecoder 6.0.0, gffread \tbd{gffread version}. The environment is built by \code{esmc_config.sh}.
+\item Software: Python 3.10, PyTorch 2.4.1 (CUDA 12.1), flash-attn 2.6.3, \code{esm} 3.2.1.post1, Scanpy $\geq$ 1.10, igraph, umap-learn, scikit-learn, MMseqs2 (commit \hash{8cc5ce367b5638c4306c2d7cfc652dd099a4643f}), TransDecoder 6.0.0, gffread \tbd{gffread version}. The environment is built by \code{esmc_config.sh}.
 \end{itemize}
 
 \subsection{Reusable}
@@ -185,7 +185,7 @@ NCBI TSA & NCBI policy: no restrictions; submitters may claim rights & Cite the 
 ESMC weights and \code{esm} code & MIT (\textcopyright{} 2026 Chan Zuckerberg Biohub) and Biohub Acceptable Use Policy (27 May 2026) & Keep the licence notice; follow the policy; cite ESMC \\
 MMseqs2, gffread & MIT & Cite \\
 TransDecoder & BSD-style (Broad Institute) & Cite \\
-PyTorch, flash-attn, Scanpy, umap-learn, scikit-learn, hdbscan & BSD-3-Clause & Cite \\
+PyTorch, flash-attn, Scanpy, umap-learn, scikit-learn & BSD-3-Clause & Cite \\
 python-igraph & GPL-2.0 & Used as a library, not redistributed \\
 Tectonic & MIT & Used to build this document \\
 \end{dtable}
@@ -237,7 +237,6 @@ Tectonic & MIT & Used to build this document \\
 \item Wolf FA et al. \emph{Genome Biology} 2018;19:15. \doi{10.1186/s13059-017-1382-0} (Scanpy).
 \item Traag VA et al. \emph{Scientific Reports} 2019;9:5233. \doi{10.1038/s41598-019-41695-z} (Leiden).
 \item McInnes L et al. UMAP. arXiv:1802.03426, 2018.
-\item McInnes L et al. \emph{JOSS} 2017;2(11):205. \doi{10.21105/joss.00205} (HDBSCAN).
 \item Benjamini Y, Hochberg Y. \emph{J R Stat Soc B} 1995;57:289--300.
 \item The Tectonic Project. Tectonic typesetting system, v0.15.0. \url{https://tectonic-typesetting.github.io} (builds this document: \code{tectonic DMP.tex}).
 \item SCambrian, \url{https://github.com/ssenci97/SCambrian}, release v1.0.0. doi:\tbd{code DOI}.
@@ -259,7 +258,7 @@ Step & Script & Tool and settings & Slurm resources & Output \\ \midrule
 4. Clustering & \code{slurms/02_mmseqs2.sh} & MMseqs2: dedup at 0.95 identity, then clusters at 0.9 $\rightarrow$ 0.2; coverage 0.8 & THIN, 16 CPU, 20 GB, 4 h & \code{data/dedup/}, \code{data/clusters/} \\
 5. Embeddings & \code{slurms/03_reps.sh} & ESMC 300M, 600M, 6B; mean over residues & DGX, 1 A100, 100 GB, 4 h per label $\times$ model & \code{data/esm-reps/} \\
 6. Embedding clusters (baseline and focus runs) & \code{slurms/supp_01_scanpy.sh} & L2 norm, cosine kNN ($k = 15$), Leiden (res.\ 1.0), UMAP, t-SNE & EPYC, 16 CPU, 32 GB, 16 h & \code{.h5ad} \\
-7. Report & \code{slurms/supp_02_scanpy_report.sh} & Targets: chi-square with BH ($q < 0.05$), fold change $\geq 2$; focus: hypergeometric with BH, capture $\geq 1\%$; HDBSCAN viewer & EPYC, 4 CPU, 16 GB, 1 h & PDF, CSV, PNG, HTML \\
+7. Report & \code{slurms/supp_02_scanpy_report.sh} & Targets: chi-square with BH ($q < 0.05$), fold change $\geq 2$; probes: hypergeometric with BH, fold enrichment $\geq 2$, $\geq 10$ probe proteins; 3D viewer & EPYC, 4 CPU, 16 GB, 1 h & PDF, CSV, PNG, HTML \\
 \end{dtable}
 
 \code{bash slurms/run_all.sh} chains steps 3--7.

@@ -45,8 +45,6 @@ npz_scanpy:
   pca_components: null
   knn_neighbors: 15
   leiden_resolution: 1.0
-  hdbscan_min_cluster_size: 500
-  hdbscan_min_samples: 10
   layout_dimensions:
   - 2
   - 3
@@ -71,6 +69,9 @@ h5ad_scanpy:
   module_min_specificity_percent: 80
   chi2_max_q: 0.05
   min_fold_change: 2.0
+  probe_max_q: 0.05
+  min_probe_proteins: 10
+  max_probe_clusters: 6
   overwrite: false
 h5ad_interactive:
   max_points_per_view: null

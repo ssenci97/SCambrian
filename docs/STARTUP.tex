@@ -150,7 +150,7 @@ sbatch esmc_config.sh
 tail -f logs/setup_ESMC.log
 \end{verbatim}
 
-The job builds the conda env \texttt{./.env} (Python 3.10, PyTorch 2.4.1 cu121, flash-attn, ESM, Scanpy, HDBSCAN). It succeeded when the log ends with \texttt{All pipeline dependencies successfully verified!}. Running it again never changes an existing \texttt{./.env}; it only re-checks it.
+The job builds the conda env \texttt{./.env} (Python 3.10, PyTorch 2.4.1 cu121, flash-attn, ESM, Scanpy). It succeeded when the log ends with \texttt{All pipeline dependencies successfully verified!}. Running it again never changes an existing \texttt{./.env}; it only re-checks it.
 
 MMseqs2 is \textbf{not} installed by the job: it must be on the \texttt{PATH}, or its path must be set in \texttt{preprocess\_sequences.mmseqs\_executable} and \texttt{run\_mmseqs2.mmseqs\_executable}.
 
@@ -183,8 +183,8 @@ FASTA ids (the first word of each header) must be unique across samples; step 02
 \item \texttt{preprocess\_sequences.min\_length}, \texttt{dedup\_min\_identity}
 \item \texttt{run\_mmseqs2.cluster\_identity\_thresholds}
 \item \texttt{extract\_reps\_biohub.models}: \texttt{esmc\_300m} (default), \texttt{esmc\_600m}, \texttt{esmc\_6b}
-\item \texttt{npz\_scanpy.leiden\_resolution}, \texttt{knn\_neighbors}, \texttt{hdbscan\_min\_cluster\_size}
-\item \texttt{h5ad\_scanpy.report\_series} and its thresholds for the species report
+\item \texttt{npz\_scanpy.leiden\_resolution}, \texttt{knn\_neighbors}
+\item \texttt{h5ad\_scanpy.report\_series} and its thresholds for the species and probe report
 \end{itemize}
 
 \section{4. Run}
@@ -212,7 +212,7 @@ step & does & output \\
 02 & validate, tag (\texttt{sc\_label=}, \texttt{sc\_type=}), drop probe copies of targets, dedup per sample & \texttt{data/preprocessed/}, \texttt{analyses/<A>/sc\_metadata.tsv} \\
 03 & MMseqs2 clusters at several identities, internal and joint & \texttt{data/clusters/}, \texttt{analyses/<A>/mmseqs\_joint/} \\
 04 & ESMC embeddings (GPU) & \texttt{data/esm-reps/<model>/} \\
-05 & UMAP and t-SNE (2D, 3D), internal and joint; Leiden and HDBSCAN on every layout & \texttt{analyses/<A>/<model>/projections.h5ad} \\
+05 & UMAP and t-SNE (2D, 3D), internal and joint; Leiden on every layout & \texttt{analyses/<A>/<model>/projections.h5ad} \\
 06 & cluster names, summary, species report, 3D viewer, RO-Crate & \texttt{analyses/<A>/<model>/} \\
 \end{longtable}
 
@@ -225,7 +225,7 @@ Every cluster has one name:
 
 u / t / s   UMAP layout / t-SNE layout / sequence (MMseqs2)
 i / j       internal (one target alone) / joint (all samples together)
-stat        leiden2d, hdbscan3d, ... or the MMseqs2 identity id90, id50, ...
+stat        leiden2d, leiden3d, or the MMseqs2 identity id90, id50, ...
 SERIAL      internal: <label>_001, _002, ...   joint: a, b, ..., aa, ...
             (by decreasing size; a joint cluster is UPPER case, A, B, ...,
             when it holds probe and target proteins together)
@@ -239,9 +239,9 @@ In \texttt{analyses/<A>/<model>/}:
 \tightlist
 \item \texttt{sc\_summary.tsv}: \textbf{the main result}. The kept rows of \texttt{sc\_metadata.tsv}, plus one column per series; each cell holds the SERIAL.
 \item \texttt{sc\_joint\_clusters.tsv}: per joint cluster, its size and the count and percent of every sample, including the probe percent.
-\item \texttt{sc\_probe\_capture.tsv}: per target and joint series, the percent of its proteins inside probe (UPPER case) clusters.
-\item \texttt{sc\_*.png}: cluster composition, probe capture heatmap, clusters per series.
+\item \texttt{sc\_*.png}: cluster composition, clusters per series.
 \item \texttt{<model>\_scanpy.pdf}: species report of \texttt{h5ad\_scanpy.report\_series}.
+\item \texttt{probe\_cluster\_enrichment\_\_<series>.csv}, \texttt{probe\_capture\_\_<series>.csv}: the probe clusters (UPPER-case clusters significantly enriched in a probe) and the percent of every target inside them.
 \item \texttt{interactive/views\_3d.html}: 3D viewer (open it in a browser).
 \end{itemize}
 

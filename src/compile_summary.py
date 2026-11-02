@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """Names every cluster of an analysis and compiles the final summary: the kept rows of sc_metadata.tsv with one column per cluster series.
 
-A series is one clustering, named ``{analysis}_{u|t|s}_{i|j}_{stat}``: ``u``/``t`` for UMAP/t-SNE layouts (npz_scanpy.py, stat ``leiden2d``, ``hdbscan3d``, ...), ``s`` for MMseqs2 sequence clustering (run_mmseqs2.py, stat ``id90`` for 90% identity, ...); ``i`` for internal clusters (each target alone) and ``j`` for joint clusters (all samples together). A cluster is ``{series}_{SERIAL}``. Within each series clusters are ranked by decreasing size (ties by first appearance); internal SERIALs are ``{label}_001``, ``{label}_002``, ... and joint SERIALs are spreadsheet letters ``a, b, ..., z, aa, ...``, written in UPPER case when the cluster holds at least one probe and at least one target protein. HDBSCAN noise and series that do not apply (internal series of a probe) are left blank. Outputs, in ``<analysis_dir>/<model>/``:
+A series is one clustering, named ``{analysis}_{u|t|s}_{i|j}_{stat}``: ``u``/``t`` for UMAP/t-SNE layouts (npz_scanpy.py, stat ``leiden2d``, ``leiden3d``), ``s`` for MMseqs2 sequence clustering (run_mmseqs2.py, stat ``id90`` for 90% identity, ...); ``i`` for internal clusters (each target alone) and ``j`` for joint clusters (all samples together). A cluster is ``{series}_{SERIAL}``. Within each series clusters are ranked by decreasing size (ties by first appearance); internal SERIALs are ``{label}_001``, ``{label}_002``, ... and joint SERIALs are spreadsheet letters ``a, b, ..., z, aa, ...``, written in UPPER case when the cluster holds at least one probe and at least one target protein. Series that do not apply (internal series of a probe) are left blank. Outputs, in ``<analysis_dir>/<model>/``:
     - ``sc_summary.tsv``: one row per kept sequence (columns of sc_metadata.tsv), one column per series, the SERIAL in each cell;
     - ``sc_joint_clusters.tsv``: per joint series and cluster, its size, ``n_<sample>`` and ``pct_<sample>`` (percent of the cluster), ``pct_probe`` and ``probe_cluster``;
-    - ``sc_probe_capture.tsv``: per target and joint series, the target proteins inside probe clusters (UPPER case) and their percent;
-    - ``sc_joint_composition__<primary_series>.png``, ``sc_probe_capture.png`` and ``sc_series_cluster_counts.png``.
+    - ``sc_joint_composition__<primary_series>.png`` and ``sc_series_cluster_counts.png``.
+Which probe clusters are relevant is decided by h5ad_scanpy.py (probe enrichment), not here.
 The summary is rebuilt when an output is older than this script, the metadata, the .h5ad or an MMseqs2 table, or with ``--overwrite``.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
 import argparse
 import datetime
-from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
 import numpy as np
@@ -23,7 +22,6 @@ import time
 from tqdm import tqdm
 import yaml
 CLUSTERS_DIR = "data/clusters"
-COLORMAP = LinearSegmentedColormap.from_list("scambrian", ["#76BBE2", "#7b2c6d"])
 DPI = 300
 FONT_LABEL = 14
 FONT_TICK = 12
@@ -163,7 +161,7 @@ def collect_series(kept: pd.DataFrame, analysis_dir: Path, h5ad_path: Path) -> t
     obs = adata.obs.copy()
     adata.file.close()
     inputs.append(h5ad_path)
-    raw |= {key: obs[key].reindex(kept.index).where(lambda s: s >= 0) for key in obs.columns if key[:2] in ("u_", "t_")}
+    raw |= {key: obs[key].reindex(kept.index) for key in obs.columns if key[:2] in ("u_", "t_")}
     return raw, inputs
 ###################################### OUTPUTS
 def joint_table(summary: pd.DataFrame, columns: dict[str, str], samples: list[str], probes: list[str]) -> pd.DataFrame:
@@ -188,24 +186,6 @@ def joint_table(summary: pd.DataFrame, columns: dict[str, str], samples: list[st
         table["probe_cluster"] = counts.index.str.isupper()
         rows.append(table.sort_values("size", ascending=False, kind="stable"))
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
-def capture_table(summary: pd.DataFrame, columns: dict[str, str], targets: list[str]) -> pd.DataFrame:
-    """Count per target and joint series the proteins inside probe (UPPER case) clusters.
-
-    Args:
-        summary (pd.DataFrame): Summary table.
-        columns (dict[str, str]): Series key -> summary column of the joint series.
-        targets (list[str]): Target labels.
-
-    Returns:
-        pd.DataFrame: target, series, n_target, n_in_probe_clusters and pct_in_probe_clusters.
-    """
-    rows = []
-    for col in columns.values():
-        upper = summary[col].fillna("").astype(str).str.isupper()
-        for lbl in targets:
-            is_t = summary["sc_label"] == lbl
-            rows.append(dict(target=lbl, series=col, n_target=int(is_t.sum()), n_in_probe_clusters=int((is_t & upper).sum()), pct_in_probe_clusters=round(100 * (is_t & upper).sum() / max(is_t.sum(), 1), 2)))
-    return pd.DataFrame(rows)
 def bottom_legend(fig: plt.Figure, handles: list) -> None:
     """Place a legend below the axes with as many columns as fit the figure width.
 
@@ -241,26 +221,6 @@ def plot_composition(clusters: pd.DataFrame, column: str, samples: list[str], pr
     ax.spines[["top", "right"]].set_visible(False)
     ax.set_title(f"{args.primary_series}: the {len(table)} largest joint clusters", fontsize=FONT_TITLE, fontweight="bold")
     bottom_legend(fig, [Patch(facecolor=colors[s], hatch="//" if s in probes else None, label=f"{s} (probe)" if s in probes else s) for s in samples])
-    fig.savefig(path, facecolor="white")
-    plt.close(fig)
-def plot_capture(capture: pd.DataFrame, analysis: str, path: Path) -> None:
-    """Draw the heatmap of target proteins inside probe clusters, per target and joint series.
-
-    Args:
-        capture (pd.DataFrame): Output of capture_table.
-        analysis (str): Analysis name, stripped from the series labels.
-        path (Path): Output PNG.
-    """
-    if capture.empty: return
-    grid = capture.pivot(index="target", columns="series", values="pct_in_probe_clusters")
-    grid = grid.loc[list(dict.fromkeys(capture["target"])), list(dict.fromkeys(capture["series"]))]
-    fig, ax = plt.subplots(figsize=(max(8, 0.6 * grid.shape[1] + 3), max(4, 0.6 * grid.shape[0] + 3)), dpi=DPI, layout="constrained")
-    im = ax.imshow(grid.to_numpy(), cmap=COLORMAP, aspect="auto", vmin=0)
-    for (i, j), v in np.ndenumerate(grid.to_numpy()): ax.text(j, i, f"{v:.1f}", ha="center", va="center", fontsize=FONT_TICK - 2, color="white" if v > np.nanmax(grid.to_numpy()) / 2 else "black")
-    ax.set_xticks(range(grid.shape[1]), [c.removeprefix(f"{analysis}_") for c in grid.columns], rotation=60, ha="right", fontsize=FONT_TICK)
-    ax.set_yticks(range(grid.shape[0]), grid.index, fontsize=FONT_TICK)
-    ax.set_title("Target proteins in probe clusters (%)", fontsize=FONT_TITLE, fontweight="bold")
-    fig.colorbar(im, ax=ax, location="bottom", shrink=0.5, label="% of the target's proteins")
     fig.savefig(path, facecolor="white")
     plt.close(fig)
 def plot_counts(summary: pd.DataFrame, columns: list[str], analysis: str, path: Path) -> None:
@@ -299,9 +259,8 @@ def main() -> None:
     kept = metadata[metadata["status"] == "kept"].set_index("record", drop=False)
     samples = list(dict.fromkeys(metadata["sc_label"]))
     probes = [s for s in samples if (metadata.loc[metadata["sc_label"] == s, "sc_type"] == "probe").all()]
-    targets = [s for s in samples if s not in probes]
     raw, inputs = collect_series(kept, analysis_dir, h5ad_path)
-    outputs = {k: out_dir / f for k, f in (("summary", "sc_summary.tsv"), ("joint", "sc_joint_clusters.tsv"), ("capture", "sc_probe_capture.tsv"), ("counts", "sc_series_cluster_counts.png"))}
+    outputs = {k: out_dir / f for k, f in (("summary", "sc_summary.tsv"), ("joint", "sc_joint_clusters.tsv"), ("counts", "sc_series_cluster_counts.png"))}
     if not args.overwrite and all(p.exists() for p in outputs.values()) and min(p.stat().st_mtime for p in outputs.values()) > max(p.stat().st_mtime for p in [Path(__file__), metadata_path, *inputs]):
         print(f"[PYTHON-INFO] Summary of {out_dir} is newer than its inputs. Skipping.")
         return
@@ -319,11 +278,8 @@ def main() -> None:
     summary.to_csv(outputs["summary"], sep="\t", index=False)
     clusters = joint_table(summary, joint_columns, samples, probes)
     clusters.to_csv(outputs["joint"], sep="\t", index=False)
-    capture = capture_table(summary, joint_columns, targets)
-    capture.to_csv(outputs["capture"], sep="\t", index=False)
-    for k in ("summary", "joint", "capture"): print(f"[PYTHON-INFO][SAVE] {outputs[k]}")
+    for k in ("summary", "joint"): print(f"[PYTHON-INFO][SAVE] {outputs[k]}")
     plot_composition(clusters, f"{analysis}_{args.primary_series}", samples, probes, out_dir / f"sc_joint_composition__{args.primary_series}.png")
-    plot_capture(capture, analysis, out_dir / "sc_probe_capture.png")
     plot_counts(summary, [f"{analysis}_{k}" for k in order], analysis, outputs["counts"])
     print(f"[PYTHON-INFO][SAVE] Figures in {out_dir}")
     max_mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024

@@ -22,7 +22,7 @@ configs/query_configs.tsv + configs/param_configs.yaml
                 internal (each target) + joint (all samples)                -> data/clusters/<label>/, analyses/<A>/mmseqs_joint/
 04 reps         ESMC embeddings (default esmc_300m)                         -> data/esm-reps/<model>/<label>_reps.npz
 05 project      UMAP + t-SNE (2D, 3D), internal and joint;
-                Leiden and HDBSCAN on every layout                          -> analyses/<A>/<model>/projections.h5ad
+                Leiden on every layout                                      -> analyses/<A>/<model>/projections.h5ad
 06 summary      cluster names + summary, species report, 3D viewer, RO-Crate -> analyses/<A>/<model>/
 ```
 
@@ -51,16 +51,16 @@ Each step is a SLURM script in `slurms/` that runs a Python script in `src/`. Al
 |---|---|
 | `u \| t \| s` | `u` = UMAP layout, `t` = t-SNE layout, `s` = sequence (MMseqs2) |
 | `i \| j` | `i` = internal (one target alone), `j` = joint (all samples together) |
-| `stat` | the method and the dimension (`leiden2d`, `leiden3d`, `hdbscan2d`, `hdbscan3d`), or the MMseqs2 identity (`id90`, `id50`, …) |
+| `stat` | the method and the dimension (`leiden2d`, `leiden3d`), or the MMseqs2 identity (`id90`, `id50`, …) |
 | `SERIAL` | internal: `{label}_001`, `{label}_002`, … Joint: `a`, `b`, …, `z`, `aa`, … In both, clusters are ranked by decreasing size. A joint cluster is written in **UPPER case** (`A`, `B`, …) when it holds at least one probe protein and at least one target protein |
 
 Examples:
 
 - `2026-11-02_SCambrian_u_j_leiden2d_C`: third-largest Leiden cluster of the joint 2D UMAP. It holds probe and target proteins.
-- `2026-11-02_SCambrian_t_i_hdbscan3d_aegypti_004`: fourth-largest HDBSCAN cluster of the 3D t-SNE of *aegypti* alone.
+- `2026-11-02_SCambrian_t_i_leiden3d_aegypti_004`: fourth-largest Leiden cluster of the 3D t-SNE of *aegypti* alone.
 - `2026-11-02_SCambrian_s_j_id50_b`: second-largest MMseqs2 cluster at 50% identity, all samples together.
 
-Leiden and HDBSCAN both run **on the layout coordinates**: Leiden on a kNN graph of the layout, HDBSCAN directly on it. A `u` or `t` series is therefore always "the clusters of that space". HDBSCAN noise is left blank. Names are given in one place only, `src/compile_summary.py`.
+Leiden runs **on the layout coordinates**, on a kNN graph of the layout. A `u` or `t` series is therefore always "the clusters of that space". Names are given in one place only, `src/compile_summary.py`. UPPER case is a naming rule only: which probe clusters matter is decided by the probe criteria of the species report.
 
 ## The summary (the main result)
 
@@ -70,9 +70,7 @@ The files below are written to `analyses/<A>/<model>/` by step 06.
 |---|---|
 | `sc_summary.tsv` | The kept rows of `sc_metadata.tsv`, plus one column per series named `{analysis}_{u\|t\|s}_{i\|j}_{stat}`. Each cell holds the SERIAL. Filter or group by any column for post-hoc analysis |
 | `sc_joint_clusters.tsv` | One row per joint series and cluster: `size`, `n_<sample>` and `pct_<sample>` (share of the cluster), `pct_probe`, `probe_cluster` |
-| `sc_probe_capture.tsv` | One row per target and joint series: the target proteins inside UPPER-case clusters, as a count and a percent. This is the probe readout |
 | `sc_joint_composition__<primary_series>.png` | sample composition of the largest joint clusters; probes are hatched |
-| `sc_probe_capture.png` | heatmap of the percent of each target in probe clusters, per joint series |
 | `sc_series_cluster_counts.png` | number of clusters per series |
 
 ### `sc_metadata.tsv` keeps the score
@@ -149,9 +147,9 @@ Each script reads its own section with `--yaml-in` (the default) and writes its 
 | `preprocess_sequences` | `analysis_name` (null: by date), `analyses_dir`, `preprocessed_dir`, `min_length` (30), `max_length` (null), `dedup_min_identity` (0.95), `dedup_min_coverage` (0.8), `dedup_coverage_mode` (0) |
 | `run_mmseqs2` | `clusters_dir`, `cluster_identity_thresholds` (0.9 → 0.2, cascaded: each threshold clusters the representatives of the previous one), `cluster_min_coverage`, `cluster_coverage_mode` |
 | `extract_reps_biohub` | `models` (`[esmc_300m]`; `esmc_600m` and `esmc_6b` are also supported), `embeddings_dir`, `sequences_per_chunk` |
-| `npz_scanpy` | `pca_components` (null: full L2-normalised embedding), `knn_neighbors` (15), `leiden_resolution` (1.0), `hdbscan_min_cluster_size` (500), `hdbscan_min_samples` (10), `layout_dimensions` ([2, 3]), `umap_min_dist`, `tsne_perplexity`, `tsne_iterations` |
+| `npz_scanpy` | `pca_components` (null: full L2-normalised embedding), `knn_neighbors` (15), `leiden_resolution` (1.0), `layout_dimensions` ([2, 3]), `umap_min_dist`, `tsne_perplexity`, `tsne_iterations` |
 | `compile_summary` | `primary_series` (`u_j_leiden2d`, the series drawn in the composition plot), `max_bars` |
-| `h5ad_scanpy` | `report_series` (`u_j_leiden2d`), plus the species-call thresholds below |
+| `h5ad_scanpy` | `report_series` (`u_j_leiden2d`), plus the species and probe thresholds below |
 | `h5ad_interactive` | `max_points_per_view` |
 | `ro_crate` | `repo_url`, `metadata_dir`, `license` |
 
@@ -168,14 +166,21 @@ Each script reads its own section with `--yaml-in` (the default) and writes its 
 7. **Species module**: significant, `S_ks ≥ module_min_specificity_percent/100` and `c_ks ≥ min_module_proteins`.
 8. **Balanced**: `FC_k ≤ 1/balanced_min_share_ratio` and `min_s c_ks ≥ min_species_proteins`.
 
+Probe clusters are called per probe `P` on the same series. Every cluster that holds a probe protein is UPPER case, even with a single probe protein, so the probe readout uses only the clusters where the probe is enriched. Notation: `c_kP` is the number of proteins of `P` in joint cluster `k`, `n_k` the proteins of `k` (all samples), `n_P` the proteins of `P` and `N` all proteins.
+
+9. **Probe share**: `p_kP = c_kP / n_P`. **Fold enrichment**: `E_kP = (c_kP / n_k) / (n_P / N)`.
+10. **Probe test**: one-sided hypergeometric `P(X ≥ c_kP)`, BH-corrected across all joint clusters (`probe_q`).
+11. **Probe cluster of P**: at least one target protein, `probe_q < probe_max_q`, `E_kP ≥ min_fold_change` and `c_kP ≥ min_probe_proteins`. At most `max_probe_clusters` clusters are kept, with the highest `p_kP`.
+
 Outputs, all ending in `__<report_series>`:
 
-- `species_cluster_enrichment` and `species_top_clusters` (CSV);
-- `protein-modules/`;
-- UMAP and t-SNE panels: internal and joint layouts, the re-projected selected clusters, the internal-to-joint flux diagram and the count barplot;
+- `species_cluster_enrichment` and `species_top_clusters` (CSV); the enrichment table also flags the probe clusters (`probe_selected`);
+- `probe_cluster_enrichment` (one row per probe and joint cluster) and `probe_capture` (per target and probe, the target proteins inside the probe clusters, as a count and a percent; this is the probe readout);
+- `protein-modules/`: species modules, and the target proteins of every probe cluster (`<probe>_<n>_clust<cluster>_…`);
+- UMAP and t-SNE panels: internal and joint layouts (probe facets coloured by their probe clusters), the re-projected selected clusters, the internal-to-joint flux diagram and the count barplot;
 - `<model>_scanpy.pdf`, which merges them.
 
-`interactive/views_3d.html` shows the 3D/2D UMAP and t-SNE layouts, coloured by any `u`/`t` series of the summary. Its **Sel** button ticks the selected clusters, and its **Probe** button ticks the UPPER-case clusters. `analyses/<A>/ro-crate-metadata.json` (RO-Crate 1.1) describes the analysis folder. A copy of it and of the configs is kept in the tracked `metadata/<A>/`.
+`interactive/views_3d.html` shows the 3D/2D UMAP and t-SNE layouts, coloured by any `u`/`t` series of the summary. Its **Sel** button ticks the selected clusters, and its **Probe** button ticks the probe clusters. `analyses/<A>/ro-crate-metadata.json` (RO-Crate 1.1) describes the analysis folder. A copy of it and of the configs is kept in the tracked `metadata/<A>/`.
 
 ## Notebooks
 
@@ -186,7 +191,7 @@ Outputs, all ending in `__<report_series>`:
 | `01_sequences.ipynb` | query table, sequences, UniProt tables, `sc_metadata.tsv` |
 | `02_mmseqs_clusters.ipynb` | dedup ids, internal and joint MMseqs2 metrics and assignments |
 | `03_embeddings.ipynb` | the ESMC embeddings of one model |
-| `04_scanpy_clusters.ipynb` | `sc_summary.tsv`, `sc_joint_clusters.tsv`, `sc_probe_capture.tsv`, `projections.h5ad`, species report tables |
+| `04_scanpy_clusters.ipynb` | `sc_summary.tsv`, `sc_joint_clusters.tsv`, `projections.h5ad`, species and probe report tables |
 
 ## Directory layout
 

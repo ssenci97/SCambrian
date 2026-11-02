@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Writes one paged, self-contained 3D HTML viewer of the UMAP and t-SNE layouts of npz_scanpy.py, coloured by the cluster series of compile_summary.py.
 
-Per projections.h5ad a single ``<model>/interactive/views_3d.html`` is saved, with one page for the joint view and one per target (internal view), browsed with arrows, a page menu or the arrow keys. Every page has three views, switched in the header or with the V key: side-by-side 3D UMAP and t-SNE panels, a static 2D projection of the same 3D layouts and a full-size barplot, together with a species/cluster switch. The cluster label sets are the UMAP and t-SNE series of ``sc_summary.tsv`` (``{analysis}_{u|t}_{i|j}_{leiden|hdbscan}{2|3}d``), so every name in the viewer is the SERIAL of the summary: letters for joint clusters (UPPER case when the cluster holds probe and target proteins) and ``<label>_001`` for internal ones; MMseqs2 series are left out because their tens of thousands of clusters do not fit a checklist. The barplot and the Sel/Probe buttons use the report series (``h5ad_scanpy.report_series``): Sel ticks the joint clusters selected by h5ad_scanpy.py (``selected`` column of its enrichment table, whose significant clusters also get chi-square asterisks over their bars), Probe ticks the UPPER-case clusters. A left sidebar holds a protein ID finder, an export of the IDs of the points shown, and species and cluster checklists. Probe samples are suffixed "(probe)" and get no internal page. Species colours follow the barplots of h5ad_scanpy.py (PALETTE_ALT by sample position, targets first). In the 2D view a lasso selects the shown points and cluster labels can be toggled. An output newer than this script, its template, the .h5ad, the summary and the enrichment table is skipped unless ``--overwrite`` is set.
+Per projections.h5ad a single ``<model>/interactive/views_3d.html`` is saved, with one page for the joint view and one per target (internal view), browsed with arrows, a page menu or the arrow keys. Every page has three views, switched in the header or with the V key: side-by-side 3D UMAP and t-SNE panels, a static 2D projection of the same 3D layouts and a full-size barplot, together with a species/cluster switch. The cluster label sets are the UMAP and t-SNE series of ``sc_summary.tsv`` (``{analysis}_{u|t}_{i|j}_leiden{2|3}d``), so every name in the viewer is the SERIAL of the summary: letters for joint clusters (UPPER case when the cluster holds probe and target proteins) and ``<label>_001`` for internal ones; MMseqs2 series are left out because their tens of thousands of clusters do not fit a checklist. The barplot and the Sel/Probe buttons use the report series (``h5ad_scanpy.report_series``): Sel ticks the joint clusters selected by h5ad_scanpy.py (``selected`` column of its enrichment table, whose significant clusters also get chi-square asterisks over their bars), Probe ticks the probe clusters selected by h5ad_scanpy.py (``probe_selected`` column, probe enrichment), a subset of the UPPER-case clusters. A left sidebar holds a protein ID finder, an export of the IDs of the points shown, and species and cluster checklists. Probe samples are suffixed "(probe)" and get no internal page. Species colours follow the barplots of h5ad_scanpy.py (PALETTE_ALT by sample position, targets first). In the 2D view a lasso selects the shown points and cluster labels can be toggled. An output newer than this script, its template, the .h5ad, the summary and the enrichment table is skipped unless ``--overwrite`` is set.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -100,23 +100,24 @@ def encode(values: np.ndarray, dtype: type) -> str:
         str: Base64 string.
     """
     return base64.b64encode(np.ascontiguousarray(values, dtype=dtype).tobytes()).decode()
-def load_enrichment(enrichment_csv: Path) -> tuple[dict[str, str], set[str]]:
-    """Read the significance asterisks and the selection of the joint clusters from the enrichment table of h5ad_scanpy.py.
+def load_enrichment(enrichment_csv: Path) -> tuple[dict[str, str], set[str], set[str]]:
+    """Read the significance asterisks, the selection and the probe clusters of the joint clusters from the enrichment table of h5ad_scanpy.py.
 
     Args:
         enrichment_csv (Path): species_cluster_enrichment table (may be missing).
 
     Returns:
-        tuple[dict[str, str], set[str]]: Significant cluster -> asterisks, and the selected clusters.
+        tuple[dict[str, str], set[str], set[str]]: Significant cluster -> asterisks, the selected clusters and the probe clusters.
     """
-    columns = ["cluster", "chi2_q", "significant", "selected"]
+    columns = ["cluster", "chi2_q", "significant", "selected", "probe_selected"]
     table = pd.read_csv(enrichment_csv, dtype={"cluster": str}).drop_duplicates("cluster") if enrichment_csv.exists() else pd.DataFrame(columns=columns)
     if not set(columns) <= set(table.columns): table = pd.DataFrame(columns=columns)
     significant_rows = table[table["significant"].astype(bool)]
     stars = {c: next((st for cut, st in SIG_LEVELS if q < cut), "") for c, q in zip(significant_rows["cluster"], significant_rows["chi2_q"])}
     selected = set(table.loc[table["selected"].astype(bool), "cluster"])
-    print(f"[PYTHON-INFO][SELECTION] {len(selected)} selected joint clusters from {enrichment_csv.name}: {', '.join(sorted(selected, key=lambda c: (len(c), c)))}")
-    return stars, selected
+    probe_selected = set(table.loc[table["probe_selected"].astype(bool), "cluster"])
+    print(f"[PYTHON-INFO][SELECTION] {len(selected)} selected joint clusters from {enrichment_csv.name}: {', '.join(sorted(selected, key=lambda c: (len(c), c)))}; {len(probe_selected)} probe clusters: {', '.join(sorted(probe_selected, key=lambda c: (len(c), c)))}")
+    return stars, selected, probe_selected
 def species_colors(obs: pd.DataFrame, names: dict[str, str]) -> dict[str, str]:
     """Colour every sample as the barplots of h5ad_scanpy.py do: PALETTE_ALT by position, targets first then probes.
 
@@ -132,7 +133,7 @@ def species_colors(obs: pd.DataFrame, names: dict[str, str]) -> dict[str, str]:
     ordered = [sp for sp in inputs if is_target[sp]] + [sp for sp in inputs if not is_target[sp]]
     return {names.get(sp, sp): PALETTE_ALT[i % len(PALETTE_ALT)] for i, sp in enumerate(ordered)}
 ###################################### VIEWER
-def build_page(adata: ad.AnnData, series: pd.DataFrame, bar_key: str, view: str, names: dict[str, str], stars: dict[str, str], selected: set[str], sp_colors: dict[str, str], rng: np.random.Generator, subtitle: str) -> dict:
+def build_page(adata: ad.AnnData, series: pd.DataFrame, bar_key: str, view: str, names: dict[str, str], stars: dict[str, str], selected: set[str], probe_selected: set[str], sp_colors: dict[str, str], rng: np.random.Generator, subtitle: str) -> dict:
     """Build the HTML page payload of one view.
 
     Args:
@@ -143,6 +144,7 @@ def build_page(adata: ad.AnnData, series: pd.DataFrame, bar_key: str, view: str,
         names (dict[str, str]): Label -> display name.
         stars (dict[str, str]): Significant joint cluster -> asterisks.
         selected (set[str]): Selected joint clusters.
+        probe_selected (set[str]): Probe clusters.
         sp_colors (dict[str, str]): Display name -> species colour shared with the report.
         rng (np.random.Generator): Generator of the point subsampling.
         subtitle (str): Run description shown under the title.
@@ -167,7 +169,7 @@ def build_page(adata: ad.AnnData, series: pd.DataFrame, bar_key: str, view: str,
     return dict(title="All samples" if joint else names.get(view, view), subtitle=f"{subtitle} · {points}", slug=view, methods=[[m, t] for m, t in METHODS.items()],
                 coords={m: encode(c[keep], np.float32) for m, c in coords.items()}, ids="\n".join(ids[keep]),
                 sets={k: dict(codes=encode(codes[keep], np.uint16), cats=cats) for k, (codes, cats) in sets.items()}, bars=bars,
-                selected=[c for c in counts_by_cluster.index if c in selected], probe=[c for c in counts_by_cluster.index if c.isupper()])
+                selected=[c for c in counts_by_cluster.index if c in selected], probe=[c for c in counts_by_cluster.index if c in probe_selected])
 def write_views(pages: list[dict], series_keys: list[str], bar_key: str, title: str, out_path: Path) -> None:
     """Write all pages into one self-contained paged HTML viewer.
 
@@ -207,13 +209,13 @@ def interactive(h5ad_path: Path) -> None:
     series = summary.loc[adata.obs["record"].astype(str), series_keys].reset_index(drop=True)
     names = species_names()
     names |= {sp: f"{names.get(sp, sp)} (probe)" for sp in adata.obs.loc[adata.obs["sc_type"] == "probe", "sc_label"].unique()}
-    stars, selected = load_enrichment(enrichment_csv)
+    stars, selected, probe_selected = load_enrichment(enrichment_csv)
     sp_colors = species_colors(adata.obs, names)
     has_intra = all(f"X_{m}_{DIM}d_i" in adata.obsm for m in METHODS)
     views = ["joint"] + [sp for sp in dict.fromkeys(adata.obs["sc_label"]) if has_intra and np.isfinite(adata.obsm[f"X_umap_{DIM}d_i"][(adata.obs["sc_label"] == sp).values]).all()]
     rng = np.random.default_rng(SEED)
     subtitle = f"{run_dir.parent.name} · {run_dir.name}"
-    pages = [build_page(adata, series, bar_key, view, names, stars, selected, sp_colors, rng, subtitle) for view in tqdm(views, desc=f"{run_dir.name} views")]
+    pages = [build_page(adata, series, bar_key, view, names, stars, selected, probe_selected, sp_colors, rng, subtitle) for view in tqdm(views, desc=f"{run_dir.name} views")]
     target_dir.mkdir(parents=True, exist_ok=True)
     write_views(pages, series_keys, bar_key, f"{run_dir.parent.name} · {run_dir.name} · 3D views", out_path)
     print(f"[PYTHON-INFO][SAVE] {out_path} ({len(pages)} pages, {len(series_keys)} series, {out_path.stat().st_size / 1e6:.1f} MB)")
