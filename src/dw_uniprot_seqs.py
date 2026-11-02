@@ -10,6 +10,7 @@ import http.client
 from io import StringIO
 import pandas as pd
 from pathlib import Path
+import re
 import resource
 import time
 from tqdm import tqdm
@@ -18,14 +19,16 @@ import urllib.parse
 import urllib.request
 import yaml
 FIELDS = ["accession", "sequence", "length"]
-HTTP_RETRIES = 3
-HTTP_TIMEOUT = 600
+HTTP_BACKOFF = 15
+HTTP_RETRIES = 6
+HTTP_TIMEOUT = 300
 LOCAL_FASTA_SUFFIXES = (".fa", ".faa", ".fasta")
 OVERWRITE = False
+PAGE_SIZE = 500
 PROBE_ACCESSION = "A0A0R4I9Y1"
 QUERY_TABLE = "configs/query_configs.tsv"
 SEQUENCES_DIR = "data/sequences"
-UNIPROT_STREAM_URL = "https://rest.uniprot.org/uniprotkb/stream"
+UNIPROT_SEARCH_URL = "https://rest.uniprot.org/uniprotkb/search"
 YAML_PATH = "configs/param_configs.yaml"
 ###################################### CONFIG_AND_PARSER
 parser = argparse.ArgumentParser(description="Download UniProtKB sequences")
@@ -53,8 +56,34 @@ if args.yaml_out:
     Path(args.yaml_out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.yaml_out).write_text(yaml.dump(config_data, sort_keys=False))
 ###################################### HELPER_FUNCTIONS
+def fetch_page(url: str) -> tuple[str, dict]:
+    """GET one UniProt URL, retrying rate limits, server errors and dropped connections with exponential backoff.
+
+    Args:
+        url (str): Request URL.
+
+    Returns:
+        tuple[str, dict]: Response body and headers.
+
+    Raises:
+        RuntimeError: If UniProt answers with a client error, or still fails after HTTP_RETRIES attempts.
+    """
+    for attempt in range(1, HTTP_RETRIES + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=HTTP_TIMEOUT) as response:
+                if response.status != 200: raise RuntimeError(f"[PYTHON-ERROR] UniProt HTTP {response.status} for {url}")
+                return response.read().decode("utf-8"), dict(response.headers)
+        except urllib.error.HTTPError as e:
+            reason = f"HTTP {e.code}"
+            if (e.code != 429 and e.code < 500) or attempt == HTTP_RETRIES: raise RuntimeError(f"[PYTHON-ERROR] UniProt {reason} after {attempt} attempt(s) for {url}: {e.read().decode('utf-8', 'replace')[:300]}") from None
+        except (OSError, http.client.HTTPException) as e:
+            reason = f"connection error ({e})"
+            if attempt == HTTP_RETRIES: raise RuntimeError(f"[PYTHON-ERROR] UniProt {reason} after {attempt} attempts for {url}") from None
+        wait = HTTP_BACKOFF * 2 ** (attempt - 1)
+        print(f"[PYTHON-INFO] UniProt {reason}, retry {attempt}/{HTTP_RETRIES - 1} in {wait}s")
+        time.sleep(wait)
 def fetch_uniprot(query: str, fields: list[str]) -> pd.DataFrame:
-    """Stream the UniProtKB entries matching a query as a table.
+    """Download the UniProtKB entries matching a query as a table, page by page through the paginated search endpoint.
 
     Args:
         query (str): UniProtKB query string.
@@ -64,27 +93,27 @@ def fetch_uniprot(query: str, fields: list[str]) -> pd.DataFrame:
         pd.DataFrame: One row per entry, with UniProt's display headers as columns.
 
     Raises:
-        RuntimeError: If UniProt answers with an error code, an empty body or fewer rows than announced in ``x-total-results``.
+        RuntimeError: If a page fails, the query matches nothing, or the row count differs from ``x-total-results``.
     """
-    url = f"{UNIPROT_STREAM_URL}?query={urllib.parse.quote(query, safe='')}&format=tsv&fields={','.join(fields)}"
+    url = f"{UNIPROT_SEARCH_URL}?query={urllib.parse.quote(query, safe='')}&format=tsv&fields={','.join(fields)}&size={PAGE_SIZE}"
     print(f"[PYTHON-INFO] Query URL: {url}")
-    for attempt in range(1, HTTP_RETRIES + 1):
-        try:
-            with urllib.request.urlopen(url, timeout=HTTP_TIMEOUT) as response:
-                status, total, body = response.status, response.headers.get("x-total-results"), response.read().decode("utf-8")
-            break
-        except urllib.error.HTTPError as e:
-            if (e.code != 429 and e.code < 500) or attempt == HTTP_RETRIES: raise RuntimeError(f"[PYTHON-ERROR] UniProt HTTP {e.code} for {url}: {e.read().decode('utf-8', 'replace')[:300]}") from e
-            print(f"[PYTHON-INFO] UniProt HTTP {e.code}, retry {attempt}/{HTTP_RETRIES}")
-        except (OSError, http.client.HTTPException) as e:
-            if attempt == HTTP_RETRIES: raise RuntimeError(f"[PYTHON-ERROR] UniProt connection failed for {url}: {e}") from e
-            print(f"[PYTHON-INFO] UniProt connection error ({e}), retry {attempt}/{HTTP_RETRIES}")
-        time.sleep(10 * attempt)
-    if status != 200: raise RuntimeError(f"[PYTHON-ERROR] UniProt HTTP {status} for {url}")
-    if not body.strip(): raise RuntimeError(f"[PYTHON-ERROR] UniProt returned an empty body for {url}")
-    records = pd.read_csv(StringIO(body), sep="\t")
-    if total is not None and len(records) != int(total): raise RuntimeError(f"[PYTHON-ERROR] Truncated UniProt stream: {len(records):,} rows, {int(total):,} announced")
-    print(f"[PYTHON-INFO] UniProt HTTP {status}: {len(records):,} rows (announced {total})")
+    header, rows, total = None, [], None
+    while url:
+        body, headers = fetch_page(url)
+        headers = {k.lower(): v for k, v in headers.items()}
+        total = total or headers.get("x-total-results")
+        lines = body.splitlines()
+        if lines:
+            if header is None: header = lines[0]
+            elif lines[0] != header: raise RuntimeError(f"[PYTHON-ERROR] UniProt page header changed for {url}")
+            rows.extend(line for line in lines[1:] if line)
+        match = re.search(r'<([^>]+)>;\s*rel="next"', headers.get("link", ""))
+        url = match.group(1) if match else None
+        if total and url: print(f"[PYTHON-INFO] UniProt page: {len(rows):,}/{int(total):,} rows")
+    if header is None or not rows: raise RuntimeError(f"[PYTHON-ERROR] UniProt returned no entries for query {query}")
+    records = pd.read_csv(StringIO("\n".join([header, *rows])), sep="\t")
+    if total is None or len(records) != int(total): raise RuntimeError(f"[PYTHON-ERROR] Incomplete UniProt download: {len(records):,} rows, {total} announced")
+    print(f"[PYTHON-INFO] UniProt HTTP 200: {len(records):,} rows (announced {int(total):,})")
     return records
 def uniprot_column_names(fields: list[str]) -> dict[str, str]:
     """Map UniProt's display headers to the requested field names, by fetching one probe entry.
