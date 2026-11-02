@@ -25,7 +25,7 @@ npz_scanpy:
   umap_min_dist: 0.5
   tsne_perplexity: 30.0
   tsne_iterations: 1000
-  scanpy_dir: data/scanpy/
+  scanpy_dir: analyses/
   overwrite: false
 h5ad_scanpy:
   layout_methods:
@@ -49,3 +49,7 @@ h5ad_interactive:
   hdbscan_max_clusters: 15
   max_points_per_view: null
   overwrite: false
+ro_crate:
+  repo_url: https://github.com/ssenci97/SCambrian
+  metadata_dir: metadata
+  license: null

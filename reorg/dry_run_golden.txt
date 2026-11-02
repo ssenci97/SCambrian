@@ -1,6 +1,0 @@
-[SLURM-INFO] 5 labels x 3 models
-[SLURM-INFO] sbatch --parsable  --array=1-5 slurms/01_dw_uniprot.sh
-[SLURM-INFO] sbatch --parsable --dependency=afterok:DRY_01_dw_uniprot --array=1-5%3 slurms/02_mmseqs2.sh
-[SLURM-INFO] sbatch --parsable --dependency=afterok:DRY_02_mmseqs2 --array=0-14%2 slurms/03_reps.sh
-[SLURM-INFO] sbatch --parsable --dependency=afterok:DRY_03_reps --array=0-2 slurms/supp_01_scanpy.sh
-[SLURM-INFO] sbatch --parsable --dependency=afterok:DRY_supp_01_scanpy  slurms/supp_02_scanpy_report.sh

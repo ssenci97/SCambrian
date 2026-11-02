@@ -20,15 +20,17 @@ REPS_DIR=$(python3 -c "import yaml; print(yaml.safe_load(open('configs/param_con
 [ -n "$REPS_DIR" ] && [ "$REPS_DIR" != "/" ] && [ -d "$REPS_DIR" ] || { echo "[SLURM-INFO] Error: invalid REPS_DIR '$REPS_DIR'." >&2; exit 1; }
 TSV_PATH=$(python3 -c "import yaml; print(yaml.safe_load(open('configs/param_configs.yaml')).get('dw_uniprot_seqs', {}).get('query_table', 'configs/query_configs.tsv'))")
 [ -f "$TSV_PATH" ] || { echo "[SLURM-INFO] Error: missing TSV $TSV_PATH." >&2; exit 1; }
-OUT_DIR=$(python3 -c "import yaml; print(yaml.safe_load(open('configs/param_configs.yaml')).get('npz_scanpy', {}).get('scanpy_dir', 'data/scanpy/'))")
+OUT_DIR=$(python3 -c "import yaml; print(yaml.safe_load(open('configs/param_configs.yaml')).get('npz_scanpy', {}).get('scanpy_dir', 'analyses/'))")
 mapfile -t MODELS < <(python3 -c "import yaml; m = yaml.safe_load(open('configs/param_configs.yaml'))['extract_reps_biohub']['models']; print('\n'.join([m] if isinstance(m, str) else m))")
-[ "${CPU_ONLY:-0}" = "1" ] && MODELS=("${CPU_MODEL:-esmc_300m}") && echo "[SLURM-INFO] CPU_ONLY=1: models restricted to ${MODELS[*]}"
 TASK=${SLURM_ARRAY_TASK_ID:-0}
 [ "$TASK" -lt ${#MODELS[@]} ] || { echo "[SLURM-INFO] Task $TASK exceeds ${#MODELS[@]} models. Skipping."; exit 0; }
 MODEL=${MODELS[$TASK]}
 MODEL_DIR="$REPS_DIR/$MODEL"
 [ -d "$MODEL_DIR" ] || { echo "[SLURM-INFO] Error: missing model directory $MODEL_DIR." >&2; exit 1; }
 mapfile -t LABELS < <(awk -F'\t' '{sub(/\r$/,"")} NR==1{for(i=1;i<=NF;i++)if($i=="label"){col=i;break};next} col&&$col!=""{print $col}' "$TSV_PATH")
+ANALYSIS=$(printf "%s\n" "${LABELS[@]}" | paste -sd_ -)
+OUT_DIR="${OUT_DIR%/}/${ANALYSIS}"
+echo "[SLURM-INFO] Analysis ${ANALYSIS} -> ${OUT_DIR}"
 mapfile -t PROBES < <(awk -F'\t' '{sub(/\r$/,"")} NR==1{for(i=1;i<=NF;i++){if($i=="label")l=i; if($i=="input_type")t=i};next} l&&t&&$t=="probe"{print $l}' "$TSV_PATH")
 NPZ_ARRAY=()
 NPZ_TARGETS=()

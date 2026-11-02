@@ -5,14 +5,9 @@
 !.gitignore
 !.here
 
-data/
-raw/data/
-analyses/*/runs/**
-!analyses/*/runs/**/
-!analyses/*/runs/**/ro-crate-metadata.json
-logs/**
-!logs/**/
-!logs/**/.gitkeep
+data/esm-reps/
+analyses/
+logs/
 tmp/
 CLAUDE.md
 __pycache__/
@@ -24,4 +19,3 @@ raw/raw/
 *.part
 # Build output of DMP.tex (tectonic DMP.tex)
 DMP.pdf
-docs/*.pdf

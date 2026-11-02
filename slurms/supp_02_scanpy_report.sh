@@ -15,7 +15,12 @@ conda activate ./.env
 
 ###################################### config
 START_TIME=$(date +%s)
-OUT_DIR=$(python3 -c "import yaml; print(yaml.safe_load(open('configs/param_configs.yaml')).get('npz_scanpy', {}).get('scanpy_dir', 'data/scanpy/'))")
+OUT_DIR=$(python3 -c "import yaml; print(yaml.safe_load(open('configs/param_configs.yaml')).get('npz_scanpy', {}).get('scanpy_dir', 'analyses/'))")
+TSV_PATH=$(python3 -c "import yaml; print(yaml.safe_load(open('configs/param_configs.yaml')).get('dw_uniprot_seqs', {}).get('query_table', 'configs/query_configs.tsv'))")
+[ -f "$TSV_PATH" ] || { echo "[SLURM-INFO] Error: missing TSV $TSV_PATH." >&2; exit 1; }
+ANALYSIS=$(awk -F'\t' '{sub(/\r$/,"")} NR==1{for(i=1;i<=NF;i++)if($i=="label"){col=i;break};next} col&&$col!=""{print $col}' "$TSV_PATH" | paste -sd_ -)
+OUT_DIR="${OUT_DIR%/}/${ANALYSIS}"
+echo "[SLURM-INFO] Analysis ${ANALYSIS} -> ${OUT_DIR}"
 [ -n "$OUT_DIR" ] && [ "$OUT_DIR" != "/" ] && [ -d "$OUT_DIR" ] || { echo "[SLURM-INFO] Error: invalid OUT_DIR '$OUT_DIR'." >&2; exit 1; }
 mapfile -t H5ADS < <(find "$OUT_DIR" -mindepth 2 -maxdepth 2 -name "*.h5ad" | sort)
 [ ${#H5ADS[@]} -gt 0 ] || { echo "[SLURM-INFO] Error: no .h5ad found in $OUT_DIR/<run>/." >&2; exit 1; }
@@ -28,5 +33,7 @@ REPORT_RC=$?
 [ "$REPORT_RC" -ne 0 ] && echo "[SLURM-INFO] Error: h5ad_scanpy.py exited with $REPORT_RC (e.g. focus capture below min_capture_percent); the viewers are still written."
 echo "[SLURM-INFO] --- Writing interactive 3D UMAP/t-SNE and HDBSCAN HTML views ---"
 python3 src/h5ad_interactive.py --h5ad "$H5AD_LIST" --n_jobs "${SLURM_CPUS_PER_TASK:-1}" --yaml-in --yaml-out
+echo "[SLURM-INFO] --- Writing RO-Crate metadata of ${ANALYSIS} ---"
+python3 src/ro_crate.py --analysis_dir "$OUT_DIR" --yaml-in --yaml-out
 echo "[SLURM-INFO] $(date +'%Y-%m-%d %H:%M:%S') $(( $(date +%s) - START_TIME ))s $(free -m | awk 'NR==2 {print $3"MB"}')"
 exit "$REPORT_RC"

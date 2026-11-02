@@ -42,7 +42,6 @@ print(f"REPS_DIR={reps_dir}")
 print("TSV_PATH=" + d.get("dw_uniprot_seqs", {}).get("query_table", "configs/query_configs.tsv"))
 print("OVERWRITE=" + str(bool(d.get("extract_reps_biohub", {}).get("overwrite", False))).lower())
 ')"
-[ "${CPU_ONLY:-0}" = "1" ] && MODELS=("${CPU_MODEL:-esmc_300m}") && echo "[SLURM-INFO] CPU_ONLY=1: models restricted to ${MODELS[*]}"
 [ ! -f "${TSV_PATH}" ] && echo "[SLURM-INFO] Missing TSV file" && exit 1
 mkdir -p "$REPS_DIR"
 echo "[SLURM-INFO] Job started on $(date)"

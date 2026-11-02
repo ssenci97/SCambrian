@@ -38,7 +38,7 @@ N_JOBS = int(os.environ.get("SLURM_CPUS_PER_TASK", os.cpu_count() or 1))
 OVERWRITE = False
 PCA_COMPONENTS = None
 QUERY_TABLE = "configs/query_configs.tsv"
-SCANPY_DIR = "data/scanpy/"
+SCANPY_DIR = "analyses/"
 SEED = 42
 TSNE_ITERATIONS = 1000
 TSNE_PERPLEXITY = 30.0
@@ -50,7 +50,6 @@ parser.add_argument("--npzs", type=str, required=True, help="Comma-separated <la
 parser.add_argument("--scanpy_dir", type=str, default=SCANPY_DIR, help="Base output folder; each run goes to <scanpy_dir>/<labels>__<model>/")
 parser.add_argument("--pca_components", type=int, default=PCA_COMPONENTS, help="PCs used for the kNN graph (None or 0: full embedding space)")
 parser.add_argument("--knn_neighbors", type=int, default=KNN_NEIGHBORS, help="Neighbours of the cosine kNN graph used by Leiden and UMAP")
-parser.add_argument("--seed", type=int, default=SEED, help="Random seed of PCA, kNN, Leiden, UMAP, t-SNE and silhouette")
 parser.add_argument("--leiden_resolution", type=float, default=LEIDEN_RESOLUTION, help="Leiden resolution (higher: more, smaller clusters)")
 parser.add_argument("--layout_dimensions", type=int, nargs="+", default=LAYOUT_DIMENSIONS, help="Dimensions of the UMAP and t-SNE layouts")
 parser.add_argument("--umap_min_dist", type=float, default=UMAP_MIN_DIST, help="UMAP minimum distance between embedded points")
@@ -139,11 +138,11 @@ def run_tsne(rep: np.ndarray, n_components: list[int]) -> dict[int, np.ndarray]:
     """
     n = rep.shape[0]
     k = min(int(3 * args.tsne_perplexity) + 2, n - 1)
-    idx, dist = NNDescent(rep, n_neighbors=k + 1, metric=METRIC, random_state=args.seed, n_jobs=args.n_jobs).neighbor_graph
+    idx, dist = NNDescent(rep, n_neighbors=k + 1, metric=METRIC, random_state=SEED, n_jobs=args.n_jobs).neighbor_graph
     graph = csr_matrix((np.clip(dist[:, 1:], 0, None).ravel(), idx[:, 1:].ravel(), np.arange(0, n * k + 1, k)), shape=(n, n))
-    pcs = PCA(n_components=max(n_components), svd_solver="randomized", random_state=args.seed).fit_transform(rep)
+    pcs = PCA(n_components=max(n_components), svd_solver="randomized", random_state=SEED).fit_transform(rep)
     pcs = (pcs / np.std(pcs[:, 0]) * 1e-4).astype(np.float32)
-    tsne_kw = dict(perplexity=min(args.tsne_perplexity, (k - 2) / 3), max_iter=args.tsne_iterations, early_exaggeration=EARLY_EXAGGERATION, learning_rate="auto", metric="precomputed", random_state=args.seed, n_jobs=args.n_jobs)
+    tsne_kw = dict(perplexity=min(args.tsne_perplexity, (k - 2) / 3), max_iter=args.tsne_iterations, early_exaggeration=EARLY_EXAGGERATION, learning_rate="auto", metric="precomputed", random_state=SEED, n_jobs=args.n_jobs)
     return {nc: TSNE(n_components=nc, init=pcs[:, :nc], **tsne_kw).fit_transform(graph).astype(np.float32) for nc in n_components}
 def cluster_and_embed(adata: ad.AnnData, rep_key: str, pcs_for_neighbors: int | None, key: str, desc: str) -> float:
     """Build the cosine kNN graph, cluster it with Leiden and store UMAP and t-SNE layouts of every requested dimension in ``obsm``.
@@ -158,14 +157,14 @@ def cluster_and_embed(adata: ad.AnnData, rep_key: str, pcs_for_neighbors: int | 
     Returns:
         float: Silhouette score of the Leiden partition in the representation space.
     """
-    sc.pp.neighbors(adata, n_neighbors=min(args.knn_neighbors, adata.n_obs - 1), use_rep=rep_key, n_pcs=pcs_for_neighbors, metric=METRIC, random_state=args.seed)
-    sc.tl.leiden(adata, resolution=args.leiden_resolution, key_added=key, flavor="igraph", random_state=args.seed)
+    sc.pp.neighbors(adata, n_neighbors=min(args.knn_neighbors, adata.n_obs - 1), use_rep=rep_key, n_pcs=pcs_for_neighbors, metric=METRIC, random_state=SEED)
+    sc.tl.leiden(adata, resolution=args.leiden_resolution, key_added=key, flavor="igraph", random_state=SEED)
     rep = np.asarray(adata.obsm["X_pca"] if rep_key == "X_pca" else adata.X)
     for nc in tqdm(args.layout_dimensions, desc=f"{desc} UMAP", leave=False):
-        sc.tl.umap(adata, n_components=nc, min_dist=args.umap_min_dist, random_state=args.seed, key_added=f"X_umap_{nc}d")
+        sc.tl.umap(adata, n_components=nc, min_dist=args.umap_min_dist, random_state=SEED, key_added=f"X_umap_{nc}d")
     for nc, coords in run_tsne(rep, args.layout_dimensions).items():
         adata.obsm[f"X_tsne_{nc}d"] = coords
-    return float(silhouette_score(rep, adata.obs[key], metric=METRIC, random_state=args.seed))
+    return float(silhouette_score(rep, adata.obs[key], metric=METRIC, random_state=SEED))
 def markers_table(adata: ad.AnnData, groupby: str, analysis: str, species: str) -> pd.DataFrame:
     """Rank channels per cluster with the Wilcoxon test and flatten the result.
 
@@ -232,7 +231,7 @@ def preprocess(adata: ad.AnnData, use_pca: bool) -> tuple[str, int | None]:
     norms = np.linalg.norm(adata.X, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     adata.X = adata.X / norms
-    sc.settings.seed = args.seed
+    sc.settings.seed = SEED
     if use_pca:
         sc.tl.pca(adata, n_comps=args.pca_components)
         print(f"[PYTHON-INFO][DATA-SHAPE] Shape after PCA ({args.pca_components} PCs): {adata.obsm['X_pca'].shape}")
