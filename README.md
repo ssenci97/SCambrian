@@ -150,7 +150,7 @@ Each script reads its own section with `--yaml-in` (the default) and writes its 
 | `npz_scanpy` | `pca_components` (null: full L2-normalised embedding), `knn_neighbors` (15), `leiden_resolution` (1.0), `layout_dimensions` ([2, 3]), `umap_min_dist`, `tsne_perplexity`, `tsne_iterations` |
 | `compile_summary` | `primary_series` (`u_j_leiden2d`, the series drawn in the composition plot), `max_bars` |
 | `h5ad_scanpy` | `report_series` (`u_j_leiden2d`), plus the species and probe thresholds below |
-| `h5ad_interactive` | `max_points_per_view` |
+| `h5ad_interactive` | `max_points_per_view`, `max_colored_clusters` (30), `min_series_cluster_size` (5, smaller MMseqs2 clusters pooled) |
 | `ro_crate` | `repo_url`, `metadata_dir`, `license` |
 
 ## Species report (step 06)
@@ -180,7 +180,7 @@ Outputs, all ending in `__<report_series>`:
 - UMAP and t-SNE panels: internal and joint layouts (probe facets coloured by their probe clusters), the re-projected selected clusters, the internal-to-joint flux diagram and the count barplot;
 - `<model>_scanpy.pdf`, which merges them.
 
-`interactive/views_3d.html` shows the 3D/2D UMAP and t-SNE layouts, coloured by any `u`/`t` series of the summary. Its **Sel** button ticks the selected clusters, and its **Probe** button ticks the probe clusters. `analyses/<A>/ro-crate-metadata.json` (RO-Crate 1.1) describes the analysis folder. A copy of it and of the configs is kept in the tracked `metadata/<A>/`.
+`interactive/views_3d.html` shows the 3D/2D UMAP and t-SNE layouts, coloured by any `u`/`t`/`s` series of the summary, with a barplot, an **Agree** view (MMseqs2 vs Leiden clusters per identity threshold: ARI, NMI, purity) a **Flux** (Sankey) view between any two series and a **Corr** view (ARI/NMI of every pair of series, and species, on the proteins labelled in both). Its **Sel** button ticks the selected clusters, and its **Probe** button ticks the probe clusters. `analyses/<A>/ro-crate-metadata.json` (RO-Crate 1.1) describes the analysis folder. A copy of it and of the configs is kept in the tracked `metadata/<A>/`.
 
 ## Notebooks
 

@@ -75,6 +75,8 @@ h5ad_scanpy:
   overwrite: false
 h5ad_interactive:
   max_points_per_view: null
+  max_colored_clusters: 30
+  min_series_cluster_size: 5
   overwrite: false
 ro_crate:
   repo_url: https://github.com/ssenci97/SCambrian
