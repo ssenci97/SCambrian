@@ -17,8 +17,8 @@ CONFIG_YAML="configs/param_configs.yaml"
 START_TIME=$(date +%s)
 [ ! -f "${CONFIG_YAML}" ] && echo "[SLURM-INFO] Missing config YAML" && exit 1
 if [ "${SLURM_ARRAY_TASK_ID:-1}" -eq 1 ]; then
-  python3 src/dw_uniprot_seqs.py --yaml-out
-  python3 src/dw_uniprot_features.py --yaml-out
+  python3 src/dw_uniprot_seqs.py --yaml-out || exit 1
+  python3 src/dw_uniprot_features.py --yaml-out || exit 1
 fi
 ###################################### parse-config
 eval "$(python3 -c "import yaml; p = yaml.safe_load(open('${CONFIG_YAML}')); s1 = p.get('dw_uniprot_seqs', {}); s2 = p.get('dw_uniprot_features', {}); print(f'SEQ_DIR={s1.get(\"sequences_dir\", \"data/sequences\")}'); print(f'FEAT_DIR={s2.get(\"features_dir\", \"data/features\")}'); print(f'TSV_PATH={s1.get(\"query_table\", \"configs/query_configs.tsv\")}'); print(f'OVERWRITE={str(bool(s1.get(\"overwrite\") or s2.get(\"overwrite\"))).lower()}')")"
@@ -32,7 +32,8 @@ if [[ "${QUERY_STR}" =~ \.(fa|faa|fasta)$ ]]; then
   FP_FASTA="${SEQ_DIR}/${LABEL}_seqs.fasta"
   [ ! -f "${QUERY_STR}" ] && echo "[SLURM-INFO] Missing local source ${QUERY_STR}" && exit 1
   [ "${OVERWRITE}" != "true" ] && [ -f "${FP_FASTA}" ] && echo "[SLURM-INFO] Files exist. Skipping" && exit 0
-  cp "${QUERY_STR}" "${FP_FASTA}" && echo "[SLURM-INFO] Copied ${QUERY_STR} -> ${FP_FASTA}"
+  cp "${QUERY_STR}" "${FP_FASTA}" || { echo "[SLURM-INFO] Error: copy of ${QUERY_STR} failed" >&2; exit 1; }
+  echo "[SLURM-INFO] Copied ${QUERY_STR} -> ${FP_FASTA}"
   echo "[SLURM-INFO] $(date +'%Y-%m-%d %H:%M:%S') $(( $(date +%s) - START_TIME ))s $(free -m | awk 'NR==2 {print $3"MB"}')"
   exit 0
 fi
@@ -41,8 +42,9 @@ FP_TSV="${SEQ_DIR}/${LABEL}_seqs.tsv"
 FP_FASTA="${SEQ_DIR}/${LABEL}_seqs.fasta"
 FP_FEAT="${FEAT_DIR}/${LABEL}_feats.tsv"
 [ "${OVERWRITE}" != "true" ] && [ -f "${FP_TSV}" ] && [ -f "${FP_FASTA}" ] && [ -f "${FP_FEAT}" ] && echo "[SLURM-INFO] Files exist. Skipping" && exit 0
-python3 src/dw_uniprot_seqs.py --query "${QUERY_STR}" --label "${LABEL}" --out_tsv "${FP_TSV}" --out_fasta "${FP_FASTA}" --out_ids "${SEQ_DIR}/${LABEL}_ids.txt" --yaml-in "${CONFIG_YAML}"
-python3 src/dw_uniprot_features.py --query "${QUERY_STR}" --label "${LABEL}" --out_tsv "${FP_FEAT}" --yaml-in "${CONFIG_YAML}"
+python3 src/dw_uniprot_seqs.py --query "${QUERY_STR}" --label "${LABEL}" --out_tsv "${FP_TSV}" --out_fasta "${FP_FASTA}" --out_ids "${SEQ_DIR}/${LABEL}_ids.txt" --yaml-in "${CONFIG_YAML}" || { echo "[SLURM-INFO] Error: sequence download failed for ${LABEL}" >&2; exit 1; }
+python3 src/dw_uniprot_features.py --query "${QUERY_STR}" --label "${LABEL}" --out_tsv "${FP_FEAT}" --yaml-in "${CONFIG_YAML}" || { echo "[SLURM-INFO] Error: feature download failed for ${LABEL}" >&2; exit 1; }
+[ -s "${FP_TSV}" ] && [ -s "${FP_FASTA}" ] && [ -s "${FP_FEAT}" ] || { echo "[SLURM-INFO] Error: empty or missing outputs for ${LABEL}" >&2; exit 1; }
 echo "[SLURM-INFO] Downloaded data for ${LABEL}"
 ###################################### finalize
 echo "[SLURM-INFO] $(date +'%Y-%m-%d %H:%M:%S') $(( $(date +%s) - START_TIME ))s $(free -m | awk 'NR==2 {print $3"MB"}')"

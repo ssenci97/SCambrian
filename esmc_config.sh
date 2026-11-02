@@ -34,27 +34,27 @@ if [ -d ".env" ]; then
   conda activate ./.env
 else
   echo "[SLURM-INFO] Creating Python 3.10 env..."
-  conda create -y -p .env python=3.10
+  conda create -y -p .env python=3.10 || { echo "[SLURM-INFO] Error: conda create failed" >&2; exit 1; }
   conda activate ./.env
   
-  pip install --upgrade pip setuptools wheel packaging pyarrow fastparquet
+  pip install --upgrade pip setuptools wheel packaging pyarrow fastparquet || { echo "[SLURM-INFO] Error: base pip install failed" >&2; exit 1; }
 
   ###################################### torch
   echo "[SLURM-INFO] Installing PyTorch 2.4.1 (cu121)..."
-  pip install torch==2.4.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+  pip install torch==2.4.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 || { echo "[SLURM-INFO] Error: PyTorch install failed" >&2; exit 1; }
 
   ###################################### esmc
   echo "[SLURM-INFO] Installing ESMC + runtime deps..."
-  pip install esm httpx accelerate ninja biopython scipy pandas matplotlib huggingface_hub
+  pip install esm httpx accelerate ninja biopython scipy pandas matplotlib huggingface_hub || { echo "[SLURM-INFO] Error: ESMC deps install failed" >&2; exit 1; }
 
   ###################################### flash-attn
   echo "[SLURM-INFO] Installing precompiled flash-attn 2.6.3..."
-  pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.6.3/flash_attn-2.6.3+cu123torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
+  pip install https://github.com/Dao-AILab/flash-attention/releases/download/v2.6.3/flash_attn-2.6.3+cu123torch2.4cxx11abiFALSE-cp310-cp310-linux_x86_64.whl || { echo "[SLURM-INFO] Error: flash-attn install failed" >&2; exit 1; }
 fi
 
 ###################################### analysis (uniprot / dimred / scanpy) — also runs on an existing .env
 echo "[SLURM-INFO] Installing analysis deps..."
-pip install "numpy<2.3" pyyaml tqdm seaborn scikit-learn umap-learn pynndescent "scanpy>=1.10" anndata plotly ipywidgets anywidget hdbscan pyprojroot matplotlib-venn numba safetensors igraph pymupdf kaleido
+pip install "numpy<2.3" pyyaml tqdm seaborn scikit-learn umap-learn pynndescent "scanpy>=1.10" anndata plotly ipywidgets anywidget hdbscan pyprojroot matplotlib-venn numba safetensors igraph pymupdf kaleido || { echo "[SLURM-INFO] Error: analysis deps install failed" >&2; exit 1; }
 
 ###################################### verify
 echo "[SLURM-INFO] Comprehensive verification..."
@@ -69,7 +69,7 @@ print(f'NumPy / Numba   : {numpy.__version__} / {numba.__version__}')
 print(f'Scanpy          : {scanpy.__version__}')
 print(f'UMAP / sklearn  : {umap.__version__} / {sklearn.__version__}')
 print('All pipeline dependencies successfully verified!')
-"
+" || { echo "[SLURM-INFO] Error: dependency verification failed" >&2; exit 1; }
 
-python3 src/extract_reps_biohub.py --yaml-out
+python3 src/extract_reps_biohub.py --yaml-out || { echo "[SLURM-INFO] Error: extract_reps_biohub.py --yaml-out failed" >&2; exit 1; }
 echo "[SLURM-INFO] Script finished $(date)"

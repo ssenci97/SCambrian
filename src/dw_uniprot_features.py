@@ -6,17 +6,21 @@ The output is ``<features_dir>/<label>_feats.tsv`` with one column per field of 
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import argparse
 import datetime
+import http.client
 from io import StringIO
 import pandas as pd
 from pathlib import Path
 import resource
 import time
 from tqdm import tqdm
+import urllib.error
 import urllib.parse
 import urllib.request
 import yaml
 FEATURES_DIR = "data/features"
 FEATURE_FIELDS = [f for f in ["accession", "id", "uniparc_id", "sequence_version", "version", "date_created", "date_modified", "date_sequence_modified", "gene_names", "gene_primary", "gene_synonym", "gene_oln", "gene_orf", "protein_name", "protein_existence", "reviewed", "fragment", "organism_name", "organism_id", "lineage", "lineage_ids", "virus_hosts", "sequence", "length", "mass", "encoded_in", "ft_act_site", "ft_binding", "ft_carbohyd", "ft_chain", "ft_coiled", "ft_compbias", "ft_conflict", "ft_crosslnk", "ft_disulfid", "ft_dna_bind", "ft_domain", "ft_helix", "ft_init_met", "ft_intramem", "ft_lipid", "ft_mod_res", "ft_motif", "ft_mutagen", "ft_non_cons", "ft_non_std", "ft_non_ter", "ft_peptide", "ft_propep", "ft_region", "ft_repeat", "ft_signal", "ft_site", "ft_strand", "ft_topo_dom", "ft_transit", "ft_transmem", "ft_turn", "ft_unsure", "ft_var_seq", "ft_variant", "ft_zn_fing", "ec", "rhea", "cc_catalytic_activity", "cc_cofactor", "cc_activity_regulation", "kinetics", "ph_dependence", "redox_potential", "temp_dependence", "absorption", "cc_function", "cc_pathway", "cc_miscellaneous", "cc_caution", "cc_sequence_caution", "cc_polymorphism", "cc_rna_editing", "cc_alternative_products", "cc_sc_epred", "cc_interaction", "cc_subunit", "cc_subcellular_location", "cc_developmental_stage", "cc_induction", "cc_tissue_specificity", "cc_allergen", "cc_biotechnology", "cc_disruption_phenotype", "cc_disease", "cc_pharmaceutical", "cc_toxic_dose", "cc_ptm", "cc_domain", "protein_families", "go", "go_id", "go_p", "go_c", "go_f", "xref_proteomes", "structure_3d", "lit_pubmed_id", "keywordid", "keyword", "annotation_score", "comment_count", "feature_count", "tools"] if f != "sequence"]
+HTTP_RETRIES = 3
+HTTP_TIMEOUT = 600
 LOCAL_FASTA_SUFFIXES = (".fa", ".faa", ".fasta")
 OVERWRITE = False
 PROBE_ACCESSION = "A0A0R4I9Y1"
@@ -56,11 +60,30 @@ def fetch_uniprot(query: str, fields: list[str]) -> pd.DataFrame:
 
     Returns:
         pd.DataFrame: One row per entry, with UniProt's display headers as columns.
+
+    Raises:
+        RuntimeError: If UniProt answers with an error code, an empty body or fewer rows than announced in ``x-total-results``.
     """
     url = f"{UNIPROT_STREAM_URL}?query={urllib.parse.quote(query, safe='')}&format=tsv&fields={','.join(fields)}"
     print(f"[PYTHON-INFO] Query URL: {url}")
-    with urllib.request.urlopen(url) as response:
-        return pd.read_csv(StringIO(response.read().decode("utf-8")), sep="\t", dtype=str)
+    for attempt in range(1, HTTP_RETRIES + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=HTTP_TIMEOUT) as response:
+                status, total, body = response.status, response.headers.get("x-total-results"), response.read().decode("utf-8")
+            break
+        except urllib.error.HTTPError as e:
+            if (e.code != 429 and e.code < 500) or attempt == HTTP_RETRIES: raise RuntimeError(f"[PYTHON-ERROR] UniProt HTTP {e.code} for {url}: {e.read().decode('utf-8', 'replace')[:300]}") from e
+            print(f"[PYTHON-INFO] UniProt HTTP {e.code}, retry {attempt}/{HTTP_RETRIES}")
+        except (OSError, http.client.HTTPException) as e:
+            if attempt == HTTP_RETRIES: raise RuntimeError(f"[PYTHON-ERROR] UniProt connection failed for {url}: {e}") from e
+            print(f"[PYTHON-INFO] UniProt connection error ({e}), retry {attempt}/{HTTP_RETRIES}")
+        time.sleep(10 * attempt)
+    if status != 200: raise RuntimeError(f"[PYTHON-ERROR] UniProt HTTP {status} for {url}")
+    if not body.strip(): raise RuntimeError(f"[PYTHON-ERROR] UniProt returned an empty body for {url}")
+    records = pd.read_csv(StringIO(body), sep="\t", dtype=str)
+    if total is not None and len(records) != int(total): raise RuntimeError(f"[PYTHON-ERROR] Truncated UniProt stream: {len(records):,} rows, {int(total):,} announced")
+    print(f"[PYTHON-INFO] UniProt HTTP {status}: {len(records):,} rows (announced {total})")
+    return records
 def uniprot_column_names(fields: list[str]) -> dict[str, str]:
     """Map UniProt's display headers to the requested field names, by fetching one probe entry.
 

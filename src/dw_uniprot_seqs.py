@@ -6,16 +6,20 @@ Outputs are ``<sequences_dir>/<label>_seqs.tsv``, ``<label>_seqs.fasta`` and ``<
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import argparse
 import datetime
+import http.client
 from io import StringIO
 import pandas as pd
 from pathlib import Path
 import resource
 import time
 from tqdm import tqdm
+import urllib.error
 import urllib.parse
 import urllib.request
 import yaml
 FIELDS = ["accession", "sequence", "length"]
+HTTP_RETRIES = 3
+HTTP_TIMEOUT = 600
 LOCAL_FASTA_SUFFIXES = (".fa", ".faa", ".fasta")
 OVERWRITE = False
 PROBE_ACCESSION = "A0A0R4I9Y1"
@@ -58,11 +62,30 @@ def fetch_uniprot(query: str, fields: list[str]) -> pd.DataFrame:
 
     Returns:
         pd.DataFrame: One row per entry, with UniProt's display headers as columns.
+
+    Raises:
+        RuntimeError: If UniProt answers with an error code, an empty body or fewer rows than announced in ``x-total-results``.
     """
     url = f"{UNIPROT_STREAM_URL}?query={urllib.parse.quote(query, safe='')}&format=tsv&fields={','.join(fields)}"
     print(f"[PYTHON-INFO] Query URL: {url}")
-    with urllib.request.urlopen(url) as response:
-        return pd.read_csv(StringIO(response.read().decode("utf-8")), sep="\t")
+    for attempt in range(1, HTTP_RETRIES + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=HTTP_TIMEOUT) as response:
+                status, total, body = response.status, response.headers.get("x-total-results"), response.read().decode("utf-8")
+            break
+        except urllib.error.HTTPError as e:
+            if (e.code != 429 and e.code < 500) or attempt == HTTP_RETRIES: raise RuntimeError(f"[PYTHON-ERROR] UniProt HTTP {e.code} for {url}: {e.read().decode('utf-8', 'replace')[:300]}") from e
+            print(f"[PYTHON-INFO] UniProt HTTP {e.code}, retry {attempt}/{HTTP_RETRIES}")
+        except (OSError, http.client.HTTPException) as e:
+            if attempt == HTTP_RETRIES: raise RuntimeError(f"[PYTHON-ERROR] UniProt connection failed for {url}: {e}") from e
+            print(f"[PYTHON-INFO] UniProt connection error ({e}), retry {attempt}/{HTTP_RETRIES}")
+        time.sleep(10 * attempt)
+    if status != 200: raise RuntimeError(f"[PYTHON-ERROR] UniProt HTTP {status} for {url}")
+    if not body.strip(): raise RuntimeError(f"[PYTHON-ERROR] UniProt returned an empty body for {url}")
+    records = pd.read_csv(StringIO(body), sep="\t")
+    if total is not None and len(records) != int(total): raise RuntimeError(f"[PYTHON-ERROR] Truncated UniProt stream: {len(records):,} rows, {int(total):,} announced")
+    print(f"[PYTHON-INFO] UniProt HTTP {status}: {len(records):,} rows (announced {total})")
+    return records
 def uniprot_column_names(fields: list[str]) -> dict[str, str]:
     """Map UniProt's display headers to the requested field names, by fetching one probe entry.
 

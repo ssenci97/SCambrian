@@ -63,7 +63,7 @@ if [ "${N_FOUND}" -eq 0 ]; then
   echo "[SLURM-INFO] Warning: No matching fasta files found."
   if [ "$YAML_ONLY" = true ]; then
     echo "[SLURM-INFO] Running standalone --yaml-out updates..."
-    python src/extract_reps_biohub.py --yaml-out
+    python src/extract_reps_biohub.py --yaml-out || exit 1
     echo "[SLURM-INFO] YAML-out update completed successfully."
     exit 0
   fi
@@ -93,5 +93,5 @@ fi
 ###################################### run
 START=$(date +%s)
 echo "[SLURM-INFO] Running extract_reps_biohub.py ($MODEL)"
-/usr/bin/time -f "real %e s\nmaxrss %M KB" python src/extract_reps_biohub.py --fasta "$input_file" --models "$MODEL" --yaml-in
+/usr/bin/time -f "real %e s\nmaxrss %M KB" python src/extract_reps_biohub.py --fasta "$input_file" --models "$MODEL" --yaml-in || { echo "[SLURM-INFO] Error: extract_reps_biohub.py failed ($MODEL)" >&2; exit 1; }
 echo "[SLURM-INFO] $(date +'%Y-%m-%d %H:%M:%S') $(( $(date +%s) - START ))s $(free -m | awk 'NR==2 {print $3"MB"}')"
