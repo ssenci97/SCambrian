@@ -362,11 +362,12 @@ def interactive(h5ad_path: Path) -> None:
     if not summary_path.exists(): raise FileNotFoundError(f"[PYTHON-ERROR] Missing {summary_path}; run compile_summary.py first.")
     adata = ad.read_h5ad(h5ad_path, backed="r")
     feats, feat_paths = load_features(adata.obs["record"], list(dict.fromkeys(adata.obs["sc_label"].astype(str))))
+    adata.file.close()
     src_mtime = max(fp.stat().st_mtime for fp in (Path(__file__), TEMPLATE, h5ad_path, summary_path, enrichment_csv, *feat_paths) if fp.exists())
     if not args.overwrite and out_path.exists() and out_path.stat().st_mtime > src_mtime:
         print(f"[PYTHON-INFO] {out_path} is newer than its inputs. Skipping.")
         return
-    adata = adata.to_memory()
+    adata = ad.read_h5ad(h5ad_path)
     if not all(f"X_{m}_{DIM}d_j" in adata.obsm for m in METHODS):
         print(f"[PYTHON-INFO] {h5ad_path}: no {DIM}D UMAP/t-SNE layouts. Skipping.")
         return
