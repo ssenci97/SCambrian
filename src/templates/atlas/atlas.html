@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>__STYLE__</style>
+</head>
+<body>
+<header class="top">
+  <button id="leftTog" class="icon" title="Show or hide the filters pane" aria-label="Filters pane">&#9776;</button>
+  <div class="brand"><h1 id="h1"></h1><div class="sub" id="sub"></div></div>
+  <nav class="group" aria-label="Pages">
+    <button id="homeBtn" title="Overview of every page">Overview</button>
+    <button id="prev" class="arrow" title="Previous page (←)" aria-label="Previous page">&#9664;</button>
+    <select id="pageSel" aria-label="Page"></select>
+    <button id="next" class="arrow" title="Next page (→)" aria-label="Next page">&#9654;</button>
+  </nav>
+  <div class="group seg" id="viewSeg" role="group" aria-label="View"></div>
+  <label class="group colourby" title="Series that colours the points (C cycles sample / cluster)">Colour by <select id="colourSel" aria-label="Colour by"></select></label>
+  <div class="group">
+    <button id="helpBtn" class="icon" title="Help and shortcuts" aria-label="Help">?</button>
+    <button id="inspTog" class="icon" title="Inspector" aria-label="Inspector">&#9432;</button>
+    <button id="appTog" class="icon" title="Appearance: colours, fonts, sizes" aria-label="Appearance">&#9881;</button>
+  </div>
+</header>
+<main>
+  <aside id="left" class="pane">
+    <div class="phead"><b>Filters</b><span><button id="clearAll" title="Remove every filter">Clear all</button></span></div>
+    <details class="sec" id="secFind" open><summary>Find &amp; export</summary>
+      <div class="find"><input id="find" type="search" placeholder="Find protein ID…" aria-label="Find protein ID" autocomplete="off"><button id="exportIds" title="Download the IDs of the points shown">&#10515; IDs</button></div>
+      <div id="linfo" class="muted"></div>
+    </details>
+    <details class="sec" id="secSp" open><summary>Samples</summary>
+      <div class="bar"><button data-reset="sample" title="Reset the sample colours and drawing order">&#8634;</button><button data-all="sample">All</button><button data-none="sample">None</button></div>
+      <input class="q" id="qSp" placeholder="Filter samples…" aria-label="Filter samples"><div id="listSp"></div>
+    </details>
+    <details class="sec" id="secCl" open><summary>Cluster series</summary>
+      <select id="fserSel" class="wide" aria-label="Series to filter"></select>
+      <div class="bar"><button id="selBtn" title="Tick only the joint clusters selected by the report (re-projected)">Sel</button><button id="probeBtn" title="Tick only the probe clusters selected by the report (probe enrichment)">Probe</button><button data-reset="series" title="Reset the colours and drawing order of this series">&#8634;</button><button data-all="series">All</button><button data-none="series">None</button></div>
+      <input class="q" id="qCl" placeholder="Filter clusters…" aria-label="Filter clusters"><div id="listCl"></div>
+    </details>
+    <details class="sec" id="secFt" hidden><summary>Features</summary>
+      <div class="bar"><select id="ftSel" aria-label="Feature"></select><label class="switch" title="Keep the proteins with every ticked term (on) or with any (off)"><input type="checkbox" id="ftAnd" aria-label="All ticked terms"><span>AND</span></label></div>
+      <div class="bar"><button id="ftClr" title="Clear every feature filter">&#8634;</button><button id="ftAll" title="Tick every listed term">All</button><button id="ftNone" title="Untick the terms of this feature">None</button></div>
+      <input class="q" id="qFt" placeholder="Filter terms…" aria-label="Filter terms"><div id="ftInfo" class="muted"></div><div id="listFt"></div>
+    </details>
+    <details class="sec" id="secSel" open><summary>Selection</summary>
+      <div id="selInfo" class="muted"></div>
+      <div class="bar"><button id="lassoClr" title="Clear the lasso or cluster subset">&#10005; Clear selection</button></div>
+    </details>
+    <input type="color" id="picker" tabindex="-1" aria-hidden="true">
+  </aside>
+  <section class="centre">
+    <div id="pills" class="pills" aria-label="Active filters"></div>
+    <div id="ctlPts" class="ctl"><label class="sz" title="Point size">Size <input type="range" data-a="mk.size" min="0.5" max="8" step="0.5"><output data-v="mk.size"></output></label><label class="sz" title="Opacity of the shown points">Alpha <input type="range" data-a="mk.alpha" min="0.05" max="1" step="0.05"><output data-v="mk.alpha"></output></label><label class="switch" title="Draw the filtered-out points as grey ghosts (off hides them)"><input type="checkbox" data-a="mk.ghost"><span>Ghosts</span></label><label class="sz" title="Opacity of the ghost points">Ghost α <input type="range" data-a="mk.ghostAlpha" min="0.01" max="0.5" step="0.01"><output data-v="mk.ghostAlpha"></output></label><button id="reset" title="Reset camera">&#10226; View</button></div>
+    <div id="ctl2d" class="ctl"><label>X <select id="pX" aria-label="X dimension"></select></label><label>Y <select id="pY" aria-label="Y dimension"></select></label><label class="sz">Azimuth <input type="range" id="pAz" min="-180" max="180" step="5"><span id="pAzV"></span></label><label class="sz">Elevation <input type="range" id="pEl" min="-90" max="90" step="5"><span id="pElV"></span></label><button id="pDef" title="Dimension 1 vs 2, no rotation">Default</button><label class="switch" title="Drag lassoes points (on) or pans (off)"><input type="checkbox" id="lassoTog"><span>Lasso</span></label><label class="switch" title="Write the cluster labels at the centre of the largest shown clusters"><input type="checkbox" data-a="mk.labels"><span>Labels</span></label></div>
+    <div id="ctlBars" class="ctl"><button id="logBtn" title="Toggle log scale (L)">log</button><button id="pctBtn" title="Sample shares of every cluster, over the ticked samples (P)">%</button><span class="muted">precomputed counts per joint cluster; follow the sample ticks and the ticks of the report series</span></div>
+    <div id="ctlFlux" class="ctl"><label>From <select id="fFrom" aria-label="Left series"></select></label><button id="fSwap" title="Swap the two series">&#8644;</button><label>To <select id="fTo" aria-label="Right series"></select></label><label title="Largest clusters per side, the rest pooled as 'other'">Nodes <input type="number" data-a="lay.fluxNodes" min="2" max="200" step="1"></label><span class="muted">follows every filter and the lasso</span></div>
+    <div id="ctlNet" class="ctl">
+      <label>Feature <select id="nFeat" aria-label="Network feature"></select></label>
+      <label title="Most frequent terms drawn as nodes">Nodes <input type="number" data-a="net.terms" min="5" max="400" step="5"></label>
+      <label title="Fewest shared proteins of an edge">Min shared <input type="number" data-a="net.edge" min="1" step="1"></label>
+      <label title="Lowest Jaccard index of an edge">Min Jaccard <input type="number" data-a="net.jac" min="0" max="1" step="0.05"></label>
+      <label>Layout <select data-a="net.layout"><option value="fa2">ForceAtlas2</option><option value="force">Force</option><option value="grouped">Grouped by community</option><option value="circular">Circular by community</option></select></label>
+      <label>Edge weight <select data-a="net.weight"><option value="jaccard">Jaccard</option><option value="count">Shared proteins</option></select></label>
+      <label>Colour <select data-a="net.colour"><option value="share">Share</option><option value="community">Community</option><option value="sample">Main sample</option></select></label>
+      <details class="more"><summary>More</summary>
+        <label title="Layout iterations">Iterations <input type="number" data-a="net.iter" min="20" max="2000" step="20"></label>
+        <label class="sz">Spacing <input type="range" data-a="net.spacing" min="0.2" max="4" step="0.1"><output data-v="net.spacing"></output></label>
+        <label class="sz">Node size <input type="range" data-a="net.nodeScale" min="0.2" max="3" step="0.1"><output data-v="net.nodeScale"></output></label>
+        <label class="sz">Edge width <input type="range" data-a="net.edgeScale" min="0" max="4" step="0.1"><output data-v="net.edgeScale"></output></label>
+        <label title="Node labels written">Labels <input type="number" data-a="net.labels" min="0" max="400" step="5"></label>
+        <label title="Characters per label">Label length <input type="number" data-a="net.clip" min="5" max="120" step="1"></label>
+        <label class="switch" title="Drop the nodes without any edge"><input type="checkbox" data-a="net.isolated"><span>Hide isolated</span></label>
+      </details>
+      <button id="nRelayout" title="New random start of the layout">&#10227; Re-layout</button>
+    </div>
+    <div id="ctlEnr" class="ctl">
+      <label>Mode <select data-a="enr.mode"><option value="clusters">Clusters × terms</option><option value="summary">Series summary</option></select></label>
+      <label class="eClu">Clusters of <select id="eSer" aria-label="Cluster series"></select></label>
+      <label class="eClu">Feature <select id="eFt" aria-label="Feature"></select></label>
+      <label class="eClu">Colour <select data-a="enr.metric"><option value="enr">log2 enrichment</option><option value="lq">−log10 q</option><option value="frac">Share of the cluster</option></select></label>
+      <label class="eSum">Score <select data-a="enr.sumMetric"><option value="nmi">NMI (single-valued features)</option><option value="purity">Purity (every feature)</option></select></label>
+      <label class="eClu" title="Largest clusters drawn as rows">Rows <input type="number" data-a="enr.rows" min="2" max="500" step="5"></label>
+      <label class="eClu" title="Most enriched terms drawn as columns">Columns <input type="number" data-a="enr.cols" min="2" max="300" step="5"></label>
+      <details class="more eClu"><summary>More</summary>
+        <label title="Fewest proteins of a cluster × term pair tested">Min proteins <input type="number" data-a="enr.min" min="1" max="1000" step="1"></label>
+        <label title="Highest BH-adjusted q of an enriched pair">Max q <input type="number" data-a="enr.q" min="0" max="1" step="0.01"></label>
+        <label>Order <select data-a="enr.order"><option value="diag">Diagonal</option><option value="size">Cluster size</option><option value="name">Cluster name</option></select></label>
+        <label title="Characters per term label">Label length <input type="number" data-a="enr.clip" min="5" max="200" step="1"></label>
+        <label class="switch" title="Write the values in the cells (off writes significance asterisks)"><input type="checkbox" data-a="enr.values"><span>Values</span></label>
+      </details>
+      <span class="muted">shown proteins only; follows every filter</span>
+    </div>
+    <div id="ovBox" class="box scroll"><div id="overview"></div></div>
+    <div class="stage" id="stage"><div id="plot"></div><div id="busy">Rendering…</div></div>
+    <div id="barsBox" class="box"><div id="bars" class="fill"></div></div>
+    <div id="fluxBox" class="box"><div id="flux" class="fill"></div><div id="fluxMsg" class="msg" hidden></div></div>
+    <div id="enrBox" class="box"><div id="enr" class="fill"></div><div id="enrMsg" class="msg" hidden></div></div>
+    <div id="netBox" class="box"><div id="net" class="fill"></div><div id="netMsg" class="msg" hidden></div></div>
+  </section>
+  <aside id="right" class="pane">
+    <div class="tabs seg"><button id="tabInsp" data-tab="insp">Inspector</button><button id="tabApp" data-tab="app">Appearance</button></div>
+    <div id="insp" class="tab"><div id="inspBody" class="muted">Click a point, a bar, a flux node, a network node or the &#9432; of a cluster to inspect it.</div></div>
+    <div id="app" class="tab">
+      <details class="sec" open><summary>Typography</summary><div id="fontRows"></div></details>
+      <details class="sec"><summary>Palette &amp; special colours</summary><div id="palRow" class="swatches"></div><div id="specRows"></div><div class="bar"><button id="palReset">Reset colours</button></div></details>
+      <details class="sec" id="secColTab" open><summary>Series colours</summary>
+        <select id="ctSer" class="wide" aria-label="Series to recolour"></select>
+        <input class="q" id="ctQ" placeholder="Filter categories…" aria-label="Filter categories">
+        <div class="bar"><button id="ctFill" title="Give every category of this series its own palette colour">Fill from palette</button><button id="ctReset" title="Remove every custom colour of this series">Reset series</button></div>
+        <div id="ctRows"></div>
+        <div class="bar pager"><button id="ctPrev">&#9664;</button><span id="ctPage" class="muted"></span><button id="ctNext">&#9654;</button></div>
+      </details>
+      <details class="sec"><summary>Markers</summary>
+        <label class="row">Point size <input type="range" data-a="mk.size" min="0.5" max="8" step="0.5"><output data-v="mk.size"></output></label>
+        <label class="row">Point alpha <input type="range" data-a="mk.alpha" min="0.05" max="1" step="0.05"><output data-v="mk.alpha"></output></label>
+        <label class="row">Ghosts <input type="checkbox" data-a="mk.ghost"></label>
+        <label class="row">Ghost alpha <input type="range" data-a="mk.ghostAlpha" min="0.01" max="0.5" step="0.01"><output data-v="mk.ghostAlpha"></output></label>
+        <label class="row">Find ring size <input type="range" data-a="mk.ring" min="4" max="40" step="1"><output data-v="mk.ring"></output></label>
+        <label class="row">2D labels <input type="checkbox" data-a="mk.labels"></label>
+        <label class="row">2D labels drawn <input type="number" data-a="mk.maxLabels" min="0" max="500" step="5"></label>
+        <label class="row" title="MMseqs2 and family series: largest clusters among the shown points that get a colour">Coloured clusters <input type="number" data-a="mk.maxColored" min="1" max="500" step="1"></label>
+      </details>
+      <details class="sec"><summary>Layout</summary>
+        <label class="row">3D/2D panels <select data-a="lay.stack"><option value="auto">Auto</option><option value="side">Side by side</option><option value="stack">Stacked</option></select></label>
+        <label class="row">Filters width <input type="range" data-a="lay.left" min="200" max="600" step="10"><output data-v="lay.left"></output></label>
+        <label class="row">Right pane width <input type="range" data-a="lay.right" min="220" max="700" step="10"><output data-v="lay.right"></output></label>
+        <label class="row">Chips per list <input type="number" data-a="lay.maxChips" min="20" max="5000" step="20"></label>
+      </details>
+      <details class="sec" open><summary>Settings</summary>
+        <div class="muted">Saved in this browser for this report. Export them to reapply after regenerating the report or to share them.</div>
+        <div class="bar"><button id="setExport">&#10515; Export</button><button id="setImport">&#10514; Import</button><button id="setReset">Reset all</button><input type="file" id="setFile" accept=".json,application/json" hidden></div>
+        <div id="setMsg" class="muted"></div>
+      </details>
+    </div>
+  </aside>
+</main>
+<div id="help" class="pop" hidden>
+  <div class="phead"><b>Help</b><button id="helpClose" class="icon" aria-label="Close">&#10005;</button></div>
+  <ul>
+    <li>Checklists: click toggles · double-click isolates · ⓘ inspects · ▲ ▼ draws in front / behind · swatch repicks the colour (shift-click resets)</li>
+    <li>Ticks of several series, samples, features and the lasso combine (AND); each active filter is a pill above the view, × removes it</li>
+    <li>Features: tick terms to keep the proteins carrying them (OR, or AND with the switch); several features AND</li>
+    <li>2D: lasso filters points · double-click clears</li>
+    <li>Click a point, a bar, a flux node or a network node to inspect it; bars and flux nodes also isolate their cluster</li>
+    <li>Enrichment: clusters of any series against uniprot_family, GO and every other feature (hypergeometric test, BH q); Series summary scores every series against the features; click a cell to inspect or drill down</li>
+    <li>Network: click a node keeps its proteins · shift-click adds it to the term filter</li>
+    <li>⚙ Appearance: every font, palette colour, special colour and category colour; settings persist in this browser and export to JSON</li>
+    <li>Keys: ← → pages · V view · C colouring · L log · P % bars · / find · Esc closes</li>
+  </ul>
+</div>
+<script>__PLOTLYJS__</script>
+<script id="payload" type="application/json">__DATA__</script>
+__SCRIPTS__
+</body>
+</html>

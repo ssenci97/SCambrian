@@ -1,0 +1,16 @@
+function bars(p) {
+  const b = p.views.bars, cats = p.sets.sample.cats, spc = paint(p, "sample", cats.map(c => remap(c[1]))), col = Object.fromEntries(cats.map((c, i) => [c[0], spc[i]]));
+  const hidSp = S.f.sample, hidCl = S.f.series[D.leiden_key] || new Set(), clc = tint(p, D.leiden_key, S.keep), clCol = Object.fromEntries(p.sets[D.leiden_key].cats.map((c, i) => [c[0], clc[i]]));
+  const idx = b.clusters.map((_, i) => i).filter(i => !hidCl.has(b.clusters[i])), x = idx.map(i => b.clusters[i]);
+  const visSp = b.species.map((sp, j) => j).filter(j => !hidSp.has(b.species[j])), sum = i => visSp.reduce((s, j) => s + b.counts[j][i], 0), pct = S.pct, log = S.log && !pct, tot = i => pct ? (sum(i) ? 100 : 0) : sum(i), top = Math.max(1, ...idx.map(tot));
+  const traces = visSp.map(j => { const sp = b.species[j], nm = sp.replace(/%/g, "%%"); return {type: "bar", name: sp, x, y: idx.map(i => pct ? (sum(i) ? 100 * b.counts[j][i] / sum(i) : 0) : b.counts[j][i]), customdata: idx.map(i => b.counts[j][i]), marker: {color: col[sp], line: {width: 0}}, hovertemplate: pct ? `<b>%{x}</b> · ${nm}: %{y:.1f}%% (%{customdata:,})<br>click to isolate<extra></extra>` : `<b>%{x}</b> · ${nm}: %{y:,}<br>click to isolate<extra></extra>`}; });
+  const fs = font("star"), legendRows = Math.ceil(visSp.length / Math.max(1, Math.floor($("bars").clientWidth / (font("legend") * 14)))), mt = 10, mb = 30 + font("tick") * 2 + legendRows * font("legend") * 1.6;
+  const starred = idx.filter(i => b.stars && b.stars[i]), lines = Math.max(0, ...starred.map(i => b.stars[i].length)), ph = Math.max(60, $("bars").clientHeight - mt - mb), room = lines ? lines * fs * 1.15 + 6 : 4;
+  const annotations = starred.map(i => ({x: b.clusters[i], text: `<b>${[...b.stars[i]].join("<br>")}</b>`, y: log ? Math.log10(Math.max(1, tot(i))) : tot(i), yanchor: "bottom", yshift: 1, showarrow: false, font: {size: fs}}));
+  const ticktext = x.map(c => `<span style="color:${clCol[c] || "#1f2330"}">${esc(c)}</span>`);
+  const layout = {...base(), annotations, barmode: "stack", bargap: 0.15, margin: {l: 30 + 2 * font("axis"), r: 6, t: mt, b: mb}, showlegend: true, legend: {orientation: "h", x: 0.5, xanchor: "center", y: -0.08, yanchor: "top", itemclick: false, itemdoubleclick: false, font: {size: font("legend")}}, xaxis: {type: "category", tickfont: {size: font("tick")}, fixedrange: true, tickvals: x, ticktext}, yaxis: {title: {text: pct ? "% of the cluster" : "proteins", font: {size: font("axis")}}, tickfont: {size: font("tick")}, type: log ? "log" : "linear", range: log ? [Math.log10(0.8), Math.log10(top) + (Math.log10(top) - Math.log10(0.8)) * room / Math.max(ph - room, ph * 0.4)] : [0, top * ph / Math.max(ph - room, ph * 0.4)], gridcolor: "#e6e8ec", fixedrange: true}};
+  Plotly.react($("bars"), traces, layout, {responsive: true, displaylogo: false, toImageButtonOptions: {format: "png", scale: 2, filename: `${p.slug}_bars`}});
+  hook("bars", "plotly_click", e => isolate(e.points[0].x));
+  $("logBtn").classList.toggle("on", log); $("logBtn").disabled = pct; $("pctBtn").classList.toggle("on", pct);
+}
+view("bars", {label: "Bars", title: "Protein count per joint cluster", panel: "barsBox", ctl: "ctlBars", plots: ["bars"], render: bars});

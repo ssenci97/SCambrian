@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Writes one paged, self-contained HTML viewer of the UMAP and t-SNE layouts of npz_scanpy.py, coloured by the cluster series of compile_summary.py (Leiden and MMseqs2).
+"""Writes one paged, self-contained HTML protein atlas of the UMAP and t-SNE layouts of npz_scanpy.py, coloured by the cluster series of compile_summary.py (Leiden and MMseqs2).
 
-Per projections.h5ad a single ``<model>/interactive/views_3d.html`` is saved, with one page for the joint view and one per target (internal view), browsed with arrows, a page menu or the arrow keys. Every page has the views of the VIEWS registry of the template, switched in the header or with the V key: side-by-side 3D UMAP and t-SNE panels, a static 2D projection of the same 3D layouts, a full-size barplot (counts, log or per-cluster species shares) and a flux (Sankey) view between any two series, together with a species/cluster switch. Every species and cluster colour can be repicked from its checklist swatch (kept across views and pages by name), the point alpha is set in the header and the unticked points are either hidden or drawn as faint grey ghosts behind the shown ones, with their own alpha. Views needing data beyond the points get it from a builder of VIEW_BUILDERS, so a new view is one template entry and at most one builder. The cluster label sets are the UMAP and t-SNE series of ``sc_summary.tsv`` (``{analysis}_{u|t}_{i|j}_leiden{2|3}d``), so every name in the viewer is the SERIAL of the summary: letters for joint clusters (UPPER case when the cluster holds probe and target proteins) and ``<label>_001`` for internal ones. The MMseqs2 series (``{analysis}_s_{i|j}_id90``, ...) are added too, joint ones on every page and internal ones on the internal pages: their clusters smaller than ``min_series_cluster_size`` are pooled into one "other" category and only the ``max_colored_clusters`` largest among the points shown get a colour (recomputed on every filter, lasso or subset), the checklist showing the first ones matching its filter. The flux view counts the shown points between the clusters of two series. The barplot and the Sel/Probe buttons use the report series (``h5ad_scanpy.report_series``): Sel ticks the joint clusters selected by h5ad_scanpy.py (``selected`` column of its enrichment table, whose significant clusters also get chi-square asterisks over their bars), Probe ticks the probe clusters selected by h5ad_scanpy.py (``probe_selected`` column, probe enrichment), a subset of the UPPER-case clusters. A left sidebar holds a protein ID finder, an export of the IDs of the points shown, and species and cluster checklists. Probe samples are suffixed "(probe)" and get no internal page. Species colours follow the barplots of h5ad_scanpy.py (PALETTE_ALT by sample position, targets first). In the 2D view a lasso selects the shown points and cluster labels can be toggled. When some samples come from a UniProtKB query, their ``<features_dir>/<label>_feats.tsv`` of dw_uniprot_features.py (joined on the accession, which is the record id) unlocks two more things. A Features sidebar section filters the points by the terms of any MULTI_FEATURES entry (GO, keywords, families, EC, pathways, locations, cofactors and the DOMAIN_FEATURES sequence features), several features ANDed together and the terms of one feature ORed (or ANDed with its switch); the SINGLE_FEATURES (reviewed, evidence, score, signal peptide, transmembrane helices, fragment, family) become colouring series like the clusters. A Network view draws the co-annotation network of a non-domain feature over the shown proteins: nodes are its ``max_network_terms`` most frequent terms, edges join terms shared by at least ``min_edge_proteins`` proteins, laid out by a force-directed layout in the page; it is refused when every point of the page is shown or more than ``max_network_proteins`` are, so that the browser never freezes. Samples from local FASTA files count as unannotated. An output newer than this script, its template, the .h5ad, the summary, the enrichment table and the feature tables is skipped unless ``--overwrite`` is set.
+Per projections.h5ad a single ``<model>/interactive/views_3d.html`` is saved, assembled from ``templates/atlas`` (atlas.html, atlas.css and the ATLAS_SCRIPTS modules, inlined with Plotly so the file works offline). The page is a three-pane atlas: a top bar with an Overview of every page (joint view and one per target), the page navigator, the view tabs and the Colour-by series; a left Filters pane (find and ID export, samples, any cluster series, UniProt features, lasso selection) whose active filters are listed as removable pills above the view; a right pane with an Inspector (protein, cluster, network term or cluster × term cards) and an Appearance drawer. Filters are kept by name per series, so the ticks of several series, the samples, the feature terms and the lasso combine (AND). The Appearance drawer tunes every font size (interface, titles, axes, ticks, legends, hover, 2D labels, network and flux labels, asterisks, inspector), the palette, the special colours (unassigned, pooled, uncoloured, ghost, ring, edges, quantitative scale) and the colour of every category of every series, the network communities included; settings are saved in the browser and exported or imported as JSON. The views are 3D and 2D UMAP/t-SNE panels, a barplot of the report series (counts, log or per-cluster species shares), a flux (Sankey) between any two series, a Network of the co-annotation of a non-domain feature over the shown proteins (``max_network_terms`` most frequent terms, edges shared by at least ``min_edge_proteins`` proteins, ForceAtlas2, force, community-grouped or circular layouts, Louvain communities, refused above ``max_network_proteins`` shown proteins or when every point is shown) and an Enrichment view crossing the clusters of any series with ``uniprot_family`` or any feature term (hypergeometric test with Benjamini-Hochberg q, heatmap of log2 enrichment, -log10 q or share) together with a summary scoring every series against every feature (NMI or purity). The cluster label sets are the UMAP and t-SNE series of ``sc_summary.tsv`` (``{analysis}_{u|t}_{i|j}_leiden{2|3}d``), so every name is the SERIAL of the summary: letters for joint clusters (UPPER case when the cluster holds probe and target proteins) and ``<label>_001`` for internal ones. The MMseqs2 series (``{analysis}_s_{i|j}_id90``, ...) are added too, joint ones on every page and internal ones on the internal pages: their clusters smaller than ``min_series_cluster_size`` are pooled into one "other" category and only the ``max_colored_clusters`` largest among the points shown get a colour. The barplot and the Sel/Probe presets use the report series (``h5ad_scanpy.report_series``): Sel ticks the joint clusters selected by h5ad_scanpy.py (``selected`` column of its enrichment table, whose significant clusters also get chi-square asterisks), Probe ticks its probe clusters (``probe_selected`` column). Probe samples are suffixed "(probe)" and get no internal page. Species colours follow the barplots of h5ad_scanpy.py (PALETTE_ALT by sample position, targets first). When some samples come from a UniProtKB query, their ``<features_dir>/<label>_feats.tsv`` of dw_uniprot_features.py (joined on the accession) give the MULTI_FEATURES term filters, the Network and Enrichment views and the SINGLE_FEATURES colouring series; samples from local FASTA files count as unannotated. An output newer than this script, the atlas template files, the .h5ad, the summary, the enrichment table and the feature tables is skipped unless ``--overwrite`` is set.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -31,17 +31,27 @@ DIM = 3
 DOMAIN_FEATURES = {"Domain": "ft_domain", "Region": "ft_region", "Motif": "ft_motif", "Repeat": "ft_repeat", "Zinc finger": "ft_zn_fing", "DNA binding": "ft_dna_bind", "Topological domain": "ft_topo_dom"}
 DYNAMIC_FEATURE_KEYS = ["uniprot_family"]
 FEATURES_DIR = "data/features"
+FLUX_NODES = 25
+FONT_AXIS = 13
 FONT_FAMILY = "DejaVu Sans"
+FONT_HOVER = 13
+FONT_LABEL = 15
 FONT_LEGEND = 15
+FONT_NET = 12
+FONT_SANKEY = 12
 FONT_TICK = 12
 FONT_TITLE = 20
+FONT_UI = 14
 MARKER_SIZE = 0.5
+MAX_CHIPS = 300
 MAX_COLORED_CLUSTERS = 30
+MAX_LABELS = 60
 MAX_NETWORK_PROTEINS = 20000
 MAX_NETWORK_TERMS = 120
 MAX_POINTS_PER_VIEW = None
 METHODS = {"umap": "UMAP", "tsne": "t-SNE"}
 MIN_EDGE_PROTEINS = 2
+NET_LABELS = 30
 MIN_SERIES_CLUSTER_SIZE = 5
 MMSEQS_PATTERN = re.compile(r"_s_([ij])_id(\d+)$")
 MULTI_FEATURES = {"GO (all)": "go", "GO process": "go_p", "GO component": "go_c", "GO function": "go_f", "Keyword": "keyword", "Family": "protein_families", "EC": "ec", "Pathway": "cc_pathway", "Subcellular location": "cc_subcellular_location", "Cofactor": "cc_cofactor"} | DOMAIN_FEATURES
@@ -50,6 +60,7 @@ OUTPUT_FILE = "views_3d.html"
 OVERWRITE = False
 PALETTE = ["#7A5271", "#30767A", "#A66C58", "#8E81B9", "#899E64", "#DA919B", "#76BBE2", "#F1B584", "#93DEB6", "#ECDE90"]
 PALETTE_ALT = PALETTE[::2] + PALETTE[1::2]
+QUANT = ["#76BBE2", "#7b2c6d"]
 REPORT_SERIES = "u_j_leiden2d"
 SEED = 42
 SIG_LEVELS = [(0.001, "***"), (0.01, "**"), (0.05, "*")]
@@ -57,7 +68,8 @@ SINGLE_FEATURES = ["uniprot_reviewed", "uniprot_existence", "uniprot_score", "un
 SPECIES_KEY = "sample"
 SUBDIR = "interactive"
 SUMMARY_FILE = "sc_summary.tsv"
-TEMPLATE = Path(__file__).resolve().parent / "templates" / "h5ad_interactive.html"
+TEMPLATE_DIR = Path(__file__).resolve().parent / "templates" / "atlas"
+ATLAS_SCRIPTS = ["core.js", "filters.js", "appearance.js", "inspector.js", "views/overview.js", "views/points.js", "views/bars.js", "views/flux.js", "views/network.js", "views/enrich.js", "main.js"]
 YAML_PATH = "configs/param_configs.yaml"
 ###################################### CONFIG_AND_PARSER
 parser = argparse.ArgumentParser(description="Interactive 3D UMAP/t-SNE HTML views of the summary cluster series")
@@ -345,9 +357,11 @@ def write_views(pages: list[dict], bar_key: str, title: str, out_path: Path, fea
         features (dict): Encoded MULTI_FEATURES over the .h5ad rows (empty without UniProt features).
         desc (str): Newline-separated gene and protein name per .h5ad row (empty without UniProt features).
     """
-    config = dict(alpha=ALPHA, ghost_alpha=GHOST_ALPHA, color_ghost=COLOR_BG, color_minor=COLOR_MINOR, color_other=COLOR_OTHER, max_colored=args.max_colored_clusters, font_family=FONT_FAMILY, font_legend=FONT_LEGEND, font_tick=FONT_TICK, font_title=FONT_TITLE, marker_size=MARKER_SIZE, palette=PALETTE_ALT, max_network_proteins=args.max_network_proteins, max_network_terms=args.max_network_terms, min_edge_proteins=args.min_edge_proteins)
-    payload = json.dumps(dict(title=title, config=config, hover_keys=[SPECIES_KEY, bar_key], leiden_key=bar_key, pages=pages, features=features, desc=desc), separators=(",", ":")).replace("</", "<\\/")
-    out_path.write_text(TEMPLATE.read_text().replace("__TITLE__", escape(title), 1).replace("__PLOTLYJS__", get_plotlyjs(), 1).replace("__DATA__", payload, 1), encoding="utf-8")
+    config = dict(alpha=ALPHA, ghost_alpha=GHOST_ALPHA, color_bg=COLOR_BG, color_ghost=COLOR_BG, color_minor=COLOR_MINOR, color_other=COLOR_OTHER, max_colored=args.max_colored_clusters, font_family=FONT_FAMILY, font_ui=FONT_UI, font_title=FONT_TITLE, font_axis=FONT_AXIS, font_tick=FONT_TICK, font_legend=FONT_LEGEND, font_hover=FONT_HOVER, font_label=FONT_LABEL, font_net=FONT_NET, font_sankey=FONT_SANKEY, marker_size=MARKER_SIZE, palette=PALETTE_ALT, quant=QUANT, max_labels=MAX_LABELS, max_chips=MAX_CHIPS, flux_nodes=FLUX_NODES, net_labels=NET_LABELS, max_network_proteins=args.max_network_proteins, max_network_terms=args.max_network_terms, min_edge_proteins=args.min_edge_proteins)
+    payload = json.dumps(dict(title=title, config=config, hover_keys=[SPECIES_KEY, bar_key], leiden_key=bar_key, single=SINGLE_FEATURES, pages=pages, features=features, desc=desc), separators=(",", ":")).replace("</", "<\\/")
+    scripts = "\n".join(f"<script>\n{(TEMPLATE_DIR / name).read_text()}\n</script>" for name in ATLAS_SCRIPTS)
+    html = (TEMPLATE_DIR / "atlas.html").read_text().replace("__TITLE__", escape(title), 1).replace("__STYLE__", (TEMPLATE_DIR / "atlas.css").read_text(), 1).replace("__SCRIPTS__", scripts, 1).replace("__PLOTLYJS__", get_plotlyjs(), 1)
+    out_path.write_text(html.replace("__DATA__", payload, 1), encoding="utf-8")
 def interactive(h5ad_path: Path) -> None:
     """Write the paged HTML viewer of the joint view and of every target of one .h5ad.
 
@@ -363,7 +377,7 @@ def interactive(h5ad_path: Path) -> None:
     adata = ad.read_h5ad(h5ad_path, backed="r")
     feats, feat_paths = load_features(adata.obs["record"], list(dict.fromkeys(adata.obs["sc_label"].astype(str))))
     adata.file.close()
-    src_mtime = max(fp.stat().st_mtime for fp in (Path(__file__), TEMPLATE, h5ad_path, summary_path, enrichment_csv, *feat_paths) if fp.exists())
+    src_mtime = max(fp.stat().st_mtime for fp in (Path(__file__), *TEMPLATE_DIR.rglob("*"), h5ad_path, summary_path, enrichment_csv, *feat_paths) if fp.exists())
     if not args.overwrite and out_path.exists() and out_path.stat().st_mtime > src_mtime:
         print(f"[PYTHON-INFO] {out_path} is newer than its inputs. Skipping.")
         return
