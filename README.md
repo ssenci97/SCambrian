@@ -180,7 +180,7 @@ Outputs, all ending in `__<report_series>`:
 - UMAP and t-SNE panels: internal and joint layouts (probe facets coloured by their probe clusters), the re-projected selected clusters, the internal-to-joint flux diagram and the count barplot;
 - `<model>_scanpy.pdf`, which merges them.
 
-`interactive/views_3d.html` shows the 3D/2D UMAP and t-SNE layouts, coloured by any `u`/`t`/`s` series of the summary, with a barplot, an **Agree** view (MMseqs2 vs Leiden clusters per identity threshold: ARI, NMI, purity) a **Flux** (Sankey) view between any two series and a **Corr** view (ARI/NMI of every pair of series, and species, on the proteins labelled in both). Its **Sel** button ticks the selected clusters, and its **Probe** button ticks the probe clusters. `analyses/<A>/ro-crate-metadata.json` (RO-Crate 1.1) describes the analysis folder. A copy of it and of the configs is kept in the tracked `metadata/<A>/`.
+`interactive/views_3d.html` shows the 3D/2D UMAP and t-SNE layouts, coloured by any `u`/`t`/`s` series of the summary, with a barplot (counts, log or per-cluster sample shares) and a **Flux** (Sankey) view between any two series. Every sample and cluster colour is repicked from its checklist swatch and its ▲/▼ draws it in front of or behind the others; a header slider sets the point alpha and unticked points are hidden or kept as grey ghosts with their own alpha. Its **Sel** button ticks the selected clusters, and its **Probe** button ticks the probe clusters. `analyses/<A>/ro-crate-metadata.json` (RO-Crate 1.1) describes the analysis folder. A copy of it and of the configs is kept in the tracked `metadata/<A>/`.
 
 ## Notebooks
 

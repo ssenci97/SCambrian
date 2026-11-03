@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Writes one paged, self-contained HTML viewer of the UMAP and t-SNE layouts of npz_scanpy.py, coloured by the cluster series of compile_summary.py (Leiden and MMseqs2).
 
-Per projections.h5ad a single ``<model>/interactive/views_3d.html`` is saved, with one page for the joint view and one per target (internal view), browsed with arrows, a page menu or the arrow keys. Every page has the views of the VIEWS registry of the template, switched in the header or with the V key: side-by-side 3D UMAP and t-SNE panels, a static 2D projection of the same 3D layouts, a full-size barplot, an agreement view of the sequence (MMseqs2) and embedding (Leiden) clusters, a flux (Sankey) view between any two series and a correlation view of every pair of label sets, together with a species/cluster switch. Views needing data beyond the points get it from a builder of VIEW_BUILDERS, so a new view is one template entry and at most one builder. The cluster label sets are the UMAP and t-SNE series of ``sc_summary.tsv`` (``{analysis}_{u|t}_{i|j}_leiden{2|3}d``), so every name in the viewer is the SERIAL of the summary: letters for joint clusters (UPPER case when the cluster holds probe and target proteins) and ``<label>_001`` for internal ones. The MMseqs2 series (``{analysis}_s_{i|j}_id90``, ...) are added too, joint ones on every page and internal ones on the internal pages: their clusters smaller than ``min_series_cluster_size`` are pooled into one "other" category and only the ``max_colored_clusters`` largest among the points shown get a colour (recomputed on every filter, lasso or subset), the checklist showing the first ones matching its filter. The agreement view compares, per identity threshold, the MMseqs2 series with the Leiden report series of the page (its internal counterpart on internal pages): adjusted Rand index, normalised mutual information and, per Leiden cluster, the purity (share of its proteins in its largest MMseqs2 cluster) and the number of MMseqs2 clusters it spans; a heatmap cell opens the 2D view of that Leiden cluster coloured by that MMseqs2 series. The flux view counts the shown points between the clusters of two series. The correlation view is a heatmap of the adjusted Rand index or the normalised mutual information of every pair of label sets of the page (species and every series), each pair scored on the proteins labelled in both with the raw labels (no pooling, no subsampling); a cell opens the flux view of that pair. The barplot and the Sel/Probe buttons use the report series (``h5ad_scanpy.report_series``): Sel ticks the joint clusters selected by h5ad_scanpy.py (``selected`` column of its enrichment table, whose significant clusters also get chi-square asterisks over their bars), Probe ticks the probe clusters selected by h5ad_scanpy.py (``probe_selected`` column, probe enrichment), a subset of the UPPER-case clusters. A left sidebar holds a protein ID finder, an export of the IDs of the points shown, and species and cluster checklists. Probe samples are suffixed "(probe)" and get no internal page. Species colours follow the barplots of h5ad_scanpy.py (PALETTE_ALT by sample position, targets first). In the 2D view a lasso selects the shown points and cluster labels can be toggled. An output newer than this script, its template, the .h5ad, the summary and the enrichment table is skipped unless ``--overwrite`` is set.
+Per projections.h5ad a single ``<model>/interactive/views_3d.html`` is saved, with one page for the joint view and one per target (internal view), browsed with arrows, a page menu or the arrow keys. Every page has the views of the VIEWS registry of the template, switched in the header or with the V key: side-by-side 3D UMAP and t-SNE panels, a static 2D projection of the same 3D layouts, a full-size barplot (counts, log or per-cluster species shares) and a flux (Sankey) view between any two series, together with a species/cluster switch. Every species and cluster colour can be repicked from its checklist swatch (kept across views and pages by name), the point alpha is set in the header and the unticked points are either hidden or drawn as faint grey ghosts behind the shown ones, with their own alpha. Views needing data beyond the points get it from a builder of VIEW_BUILDERS, so a new view is one template entry and at most one builder. The cluster label sets are the UMAP and t-SNE series of ``sc_summary.tsv`` (``{analysis}_{u|t}_{i|j}_leiden{2|3}d``), so every name in the viewer is the SERIAL of the summary: letters for joint clusters (UPPER case when the cluster holds probe and target proteins) and ``<label>_001`` for internal ones. The MMseqs2 series (``{analysis}_s_{i|j}_id90``, ...) are added too, joint ones on every page and internal ones on the internal pages: their clusters smaller than ``min_series_cluster_size`` are pooled into one "other" category and only the ``max_colored_clusters`` largest among the points shown get a colour (recomputed on every filter, lasso or subset), the checklist showing the first ones matching its filter. The flux view counts the shown points between the clusters of two series. The barplot and the Sel/Probe buttons use the report series (``h5ad_scanpy.report_series``): Sel ticks the joint clusters selected by h5ad_scanpy.py (``selected`` column of its enrichment table, whose significant clusters also get chi-square asterisks over their bars), Probe ticks the probe clusters selected by h5ad_scanpy.py (``probe_selected`` column, probe enrichment), a subset of the UPPER-case clusters. A left sidebar holds a protein ID finder, an export of the IDs of the points shown, and species and cluster checklists. Probe samples are suffixed "(probe)" and get no internal page. Species colours follow the barplots of h5ad_scanpy.py (PALETTE_ALT by sample position, targets first). In the 2D view a lasso selects the shown points and cluster labels can be toggled. An output newer than this script, its template, the .h5ad, the summary and the enrichment table is skipped unless ``--overwrite`` is set.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -9,7 +9,6 @@ import argparse
 import base64
 import datetime
 from html import escape
-from itertools import combinations
 import json
 import numpy as np
 import pandas as pd
@@ -17,11 +16,11 @@ from pathlib import Path
 from plotly.offline import get_plotlyjs
 import re
 import resource
-from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
 import time
 from tqdm import tqdm
 import yaml
 ALPHA = 0.8
+GHOST_ALPHA = 0.08
 COLOR_BG = "#BFC5CE"
 COLOR_MINOR = "#D5D9DF"
 COLOR_OTHER = "#E6E8EC"
@@ -44,7 +43,7 @@ PALETTE_ALT = PALETTE[::2] + PALETTE[1::2]
 REPORT_SERIES = "u_j_leiden2d"
 SEED = 42
 SIG_LEVELS = [(0.001, "***"), (0.01, "**"), (0.05, "*")]
-SPECIES_KEY = "species"
+SPECIES_KEY = "sample"
 SUBDIR = "interactive"
 SUMMARY_FILE = "sc_summary.tsv"
 TEMPLATE = Path(__file__).resolve().parent / "templates" / "h5ad_interactive.html"
@@ -163,59 +162,7 @@ def bars_payload(ctx: dict) -> dict:
     counts = counts.loc[sorted(counts.index, key=lambda c: (len(c), c.lower()))]
     species_order = [c[0] for c in ctx["sets"][SPECIES_KEY][1][1:] if c[0] in counts.columns]
     return dict(clusters=list(counts.index), stars=[ctx["stars"].get(c, "") for c in counts.index], species=species_order, counts=[counts[sp].astype(int).tolist() for sp in species_order])
-def agreement_payload(ctx: dict) -> dict | None:
-    """Compare every MMseqs2 series of the page scope with its Leiden reference series.
-
-    Args:
-        ctx (dict): Page context of build_page.
-
-    Returns:
-        dict | None: Reference series, MMseqs2 series and identities, clusters, ARI, NMI and mean purity per threshold, and purity, spanned clusters and dominant cluster per threshold and Leiden cluster; None without MMseqs2 series.
-    """
-    series, ref_key, keys = ctx["series"], ctx["ref_key"], ctx["agree_keys"]
-    if not keys or ref_key not in series: return None
-    ref = series[ref_key]
-    clusters = sorted(ref.dropna().unique(), key=lambda c: (len(c), c.lower()))
-    out = dict(ref=ref_key, keys=keys, identity=[int(MMSEQS_PATTERN.search(k).group(2)) for k in keys], clusters=clusters, ari=[], nmi=[], purity=[], cell_purity=[], spanned=[], dominant=[])
-    for key in keys:
-        both = ref.notna() & series[key].notna()
-        pairs = pd.DataFrame({"r": ref[both], "s": series[key][both]}).groupby(["r", "s"]).size()
-        top, size = pairs.groupby(level=0).max().reindex(clusters), pairs.groupby(level=0).sum().reindex(clusters)
-        dominant = pairs.groupby(level=0).idxmax().reindex(clusters)
-        out["ari"].append(round(float(adjusted_rand_score(ref[both], series[key][both])), 4) if both.any() else None)
-        out["nmi"].append(round(float(normalized_mutual_info_score(ref[both], series[key][both])), 4) if both.any() else None)
-        out["purity"].append(round(float(top.sum() / size.sum()), 4) if both.any() else None)
-        out["cell_purity"].append([None if pd.isna(t) else round(float(t / n), 4) for t, n in zip(top, size)])
-        out["spanned"].append([int(v) for v in pairs.groupby(level=0).size().reindex(clusters, fill_value=0)])
-        out["dominant"].append([d[1] if isinstance(d, tuple) else "" for d in dominant])
-    return out
-def correlation_payload(ctx: dict) -> dict | None:
-    """Score the agreement of every pair of label sets of the page (species and every series) on the raw labels, before any pooling or subsampling.
-
-    Args:
-        ctx (dict): Page context of build_page.
-
-    Returns:
-        dict | None: Label sets, and per pair the adjusted Rand index, the normalised mutual information and the number of proteins labelled in both (None below 2 proteins); None with fewer than two label sets.
-    """
-    labels = ({SPECIES_KEY: ctx["species"]} if ctx["species"].nunique() > 1 else {}) | {k: ctx["series"][k] for k in ctx["series"].columns}
-    keys = list(labels)
-    if len(keys) < 2: return None
-    codes = {k: pd.factorize(v)[0] for k, v in labels.items()}
-    size = len(keys)
-    out = dict(keys=keys, ari=[[None] * size for _ in keys], nmi=[[None] * size for _ in keys], n=[[0] * size for _ in keys])
-    for i, k in enumerate(keys):
-        out["n"][i][i] = int((codes[k] >= 0).sum())
-        out["ari"][i][i] = out["nmi"][i][i] = 1.0 if out["n"][i][i] else None
-    for i, j in tqdm(list(combinations(range(size), 2)), desc="Series pairs", leave=False):
-        both = (codes[keys[i]] >= 0) & (codes[keys[j]] >= 0)
-        a, b, n = codes[keys[i]][both], codes[keys[j]][both], int(both.sum())
-        out["n"][i][j] = out["n"][j][i] = n
-        if n < 2: continue
-        out["ari"][i][j] = out["ari"][j][i] = round(float(adjusted_rand_score(a, b)), 4)
-        out["nmi"][i][j] = out["nmi"][j][i] = round(float(normalized_mutual_info_score(a, b)), 4)
-    return out
-VIEW_BUILDERS = {"bars": bars_payload, "agree": agreement_payload, "corr": correlation_payload}
+VIEW_BUILDERS = {"bars": bars_payload}
 ###################################### VIEWER
 def build_page(adata: ad.AnnData, series: pd.DataFrame, bar_key: str, mmseqs_keys: list[str], view: str, names: dict[str, str], stars: dict[str, str], selected: set[str], probe_selected: set[str], sp_colors: dict[str, str], rng: np.random.Generator, subtitle: str) -> dict:
     """Build the HTML page payload of one view: the points and their label sets, then one payload per VIEW_BUILDERS entry.
@@ -248,8 +195,7 @@ def build_page(adata: ad.AnnData, series: pd.DataFrame, bar_key: str, mmseqs_key
     n_max = args.max_points_per_view
     keep = np.sort(rng.choice(len(ids), n_max, replace=False)) if n_max and len(ids) > n_max else np.arange(len(ids))
     sets = {SPECIES_KEY: categories(species, sp_colors)} | {col: categories(view_series[col], min_size=args.min_series_cluster_size, max_colored=args.max_colored_clusters) if col in mmseqs_keys else categories(view_series[col]) for col in keys}
-    ref_key = bar_key if joint else "_i_".join(bar_key.rsplit("_j_", 1))
-    ctx = dict(series=view_series, species=species, sets=sets, bar_key=bar_key, ref_key=ref_key, agree_keys=[k for k in page_mmseqs if MMSEQS_PATTERN.search(k).group(1) == ("j" if joint else "i")], stars=stars)
+    ctx = dict(series=view_series, species=species, sets=sets, bar_key=bar_key, stars=stars)
     views = {name: builder(ctx) for name, builder in VIEW_BUILDERS.items()}
     clusters = views["bars"]["clusters"]
     points = f"{len(keep):,}/{len(ids):,} points shown" if len(keep) < len(ids) else f"{len(ids):,} points"
@@ -266,7 +212,7 @@ def write_views(pages: list[dict], bar_key: str, title: str, out_path: Path) -> 
         title (str): Document title.
         out_path (Path): Output HTML path.
     """
-    config = dict(alpha=ALPHA, color_minor=COLOR_MINOR, color_other=COLOR_OTHER, max_colored=args.max_colored_clusters, font_family=FONT_FAMILY, font_legend=FONT_LEGEND, font_tick=FONT_TICK, font_title=FONT_TITLE, marker_size=MARKER_SIZE, palette=PALETTE_ALT)
+    config = dict(alpha=ALPHA, ghost_alpha=GHOST_ALPHA, color_ghost=COLOR_BG, color_minor=COLOR_MINOR, color_other=COLOR_OTHER, max_colored=args.max_colored_clusters, font_family=FONT_FAMILY, font_legend=FONT_LEGEND, font_tick=FONT_TICK, font_title=FONT_TITLE, marker_size=MARKER_SIZE, palette=PALETTE_ALT)
     payload = json.dumps(dict(title=title, config=config, hover_keys=[SPECIES_KEY, bar_key], leiden_key=bar_key, pages=pages), separators=(",", ":")).replace("</", "<\\/")
     out_path.write_text(TEMPLATE.read_text().replace("__TITLE__", escape(title), 1).replace("__PLOTLYJS__", get_plotlyjs(), 1).replace("__DATA__", payload, 1), encoding="utf-8")
 def interactive(h5ad_path: Path) -> None:
