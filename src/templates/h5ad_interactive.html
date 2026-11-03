@@ -89,7 +89,9 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
 #sizeV,#alphaV,#ghostV{min-width:30px;font-variant-numeric:tabular-nums}
 .found{margin-top:4px;padding:6px 8px;border-radius:8px;background:var(--bg);font-size:13px;word-break:break-all}
 .found[hidden]{display:none}
-.tog{display:flex;flex-wrap:wrap;gap:6px 16px}
+.tog{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center}
+#ftSel{flex:1;min-width:0;padding:4px 6px}
+.ctl input[type=number]{font:inherit;width:70px;border:1px solid var(--line);border-radius:8px;padding:3px 6px}
 @media (max-width:900px){html,body{height:auto}body{overflow:auto}main{grid-template-columns:1fr;grid-template-rows:auto auto}aside{max-height:45vh}.stage{flex:none;height:900px}.box{flex:none;height:700px}}
 </style>
 </head>
@@ -115,9 +117,10 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
 </header>
 <main>
   <aside id="side">
-    <div><div class="find"><input id="find" type="search" placeholder="Find protein ID…" aria-label="Find protein ID" autocomplete="off"><button id="exportIds" title="Download the IDs of the points shown">&#10515; IDs</button></div><div id="linfo" class="muted"></div><div class="muted">click toggles · double-click isolates · click a bar, a flux node or a cluster cell shows its cluster<br>2D: lasso filters points · double-click clears<br>swatch: click repicks the colour · shift-click resets it<br>▲ ▼ on a chip: draw it in front / behind the others<br>← → pages · V view · C colouring · L log · P % bars · / find</div><div id="found" class="found" hidden></div></div>
+    <div><div class="find"><input id="find" type="search" placeholder="Find protein ID…" aria-label="Find protein ID" autocomplete="off"><button id="exportIds" title="Download the IDs of the points shown">&#10515; IDs</button></div><div id="linfo" class="muted"></div><div class="muted">click toggles · double-click isolates · click a bar, a flux node or a cluster cell shows its cluster<br>2D: lasso filters points · double-click clears<br>swatch: click repicks the colour · shift-click resets it<br>▲ ▼ on a chip: draw it in front / behind the others<br>Features: tick terms to keep the proteins carrying them · Network: co-annotation of the shown proteins, click a node to filter<br>← → pages · V view · C colouring · L log · P % bars · / find</div><div id="found" class="found" hidden></div></div>
     <section class="sec" id="sec2d" hidden><div class="shead"><b>2D</b><span><button id="lassoClr" title="Clear the lasso or cluster subset" hidden>&#10005; subset</button></span></div><div class="tog"><label class="switch" title="Drag lassoes points (on) or pans (off)"><input type="checkbox" id="lassoTog" aria-label="Lasso selection"><span class="lab on">Lasso</span></label><label class="switch" title="Write the cluster labels at the centre of the largest shown clusters"><input type="checkbox" id="labTog" aria-label="Cluster labels"><span class="lab on">Labels</span></label></div></section>
     <section class="sec" id="secGhost" hidden><div class="shead"><b>Unticked</b></div><div class="tog"><label class="switch" title="Draw the unticked or unlassoed points as grey ghosts behind the shown ones (off hides them)"><input type="checkbox" id="ghostTog" aria-label="Ghost unticked points"><span class="lab on">Ghost</span></label><label class="sz" title="Opacity of the ghost points">Alpha <input type="range" id="ghostA" min="0.01" max="0.5" step="0.01"><span id="ghostV"></span></label></div></section>
+    <section class="sec" id="secFt" hidden><div class="shead"><b>Features</b><span><button id="ftClr" title="Clear every feature filter">&#8634;</button> <button id="ftAll" title="Tick every listed term">All</button> <button id="ftNone" title="Untick the terms of this feature">None</button></span></div><div class="tog" style="margin-bottom:6px"><select id="ftSel" aria-label="Feature"></select><label class="switch" title="Keep the proteins with every ticked term (on) or with any (off)"><input type="checkbox" id="ftAnd" aria-label="All ticked terms"><span class="lab on">AND</span></label></div><input class="q" id="qFt" placeholder="Filter terms…" aria-label="Filter terms"><div id="ftInfo" class="muted" style="margin-bottom:4px"></div><div id="listFt"></div></section>
     <section class="sec" id="secSp"><div class="shead"><b>Sample</b><span><button data-reset="sp" title="Reset the sample colours and drawing order">&#8634;</button> <button data-all="sp">All</button> <button data-none="sp">None</button></span></div><input class="q" id="qSp" placeholder="Filter samples…" aria-label="Filter samples"><div id="listSp"></div></section>
     <section class="sec" id="secCl"><div class="shead"><b id="clTitle"></b><span><button id="selBtn" title="Tick only the joint clusters selected by the report (re-projected)">Sel</button> <button id="probeBtn" title="Tick only the probe clusters selected by the report (probe enrichment)">Probe</button> <button data-reset="cl" title="Reset the colours and drawing order of this series">&#8634;</button> <button data-all="cl">All</button> <button data-none="cl">None</button></span></div><input class="q" id="qCl" placeholder="Filter clusters…" aria-label="Filter clusters"><div id="listCl"></div></section>
     <input type="color" id="picker" tabindex="-1" aria-hidden="true">
@@ -126,6 +129,8 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
     <div id="barsBox" class="box"><button id="logBtn" class="corner" title="Toggle log scale (L)">log</button><button id="pctBtn" class="corner" title="Sample shares of every cluster, over the ticked samples (P)">%</button><div id="bars" class="fill"></div></div>
     <div id="ctlFlux" class="ctl"><label>From <select id="fFrom" aria-label="Left series"></select></label><button id="fSwap" title="Swap the two series">&#8644;</button><label>To <select id="fTo" aria-label="Right series"></select></label><span class="muted">largest 25 clusters per side, the rest pooled as "other"; follows the sample/cluster ticks and the lasso</span></div>
     <div id="fluxBox" class="box"><div id="flux" class="fill"></div><div id="fluxMsg" class="msg" hidden></div></div>
+    <div id="ctlNet" class="ctl" hidden><label>Feature <select id="nFeat" aria-label="Network feature"></select></label><label>Nodes <input type="number" id="nTerms" min="5" max="400" step="5" aria-label="Most frequent terms"></label><label>Min shared <input type="number" id="nEdge" min="1" step="1" aria-label="Fewest shared proteins of an edge"></label><span class="muted">most frequent terms of the shown proteins; edges join terms shared by at least "min shared" proteins; follows every tick, filter and lasso</span></div>
+    <div id="netBox" class="box"><div id="net" class="fill"></div><div id="netMsg" class="msg" hidden></div></div>
     <div id="ctl2d" class="ctl" hidden><label>X <select id="pX" aria-label="X dimension"></select></label><label>Y <select id="pY" aria-label="Y dimension"></select></label><label class="sz">Azimuth <input type="range" id="pAz" min="-180" max="180" step="5"><span id="pAzV"></span></label><label class="sz">Elevation <input type="range" id="pEl" min="-90" max="90" step="5"><span id="pElV"></span></label><button id="pDef" title="Dimension 1 vs 2, no rotation">Default</button></div>
     <div class="stage" id="stage"><div id="plot"></div><div id="busy">Rendering…</div></div>
   </div>
@@ -135,12 +140,15 @@ aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;pa
 <script>
 const D = JSON.parse(document.getElementById("payload").textContent);
 const C = D.config, P = D.pages, $ = id => document.getElementById(id), MAX_CHIPS = 300, MAX_LABELS = 60, FLUX_NODES = 25, QUANT = [[0, "#76BBE2"], [1, "#7b2c6d"]];
-const S = {page: 0, byCluster: false, cluster: D.leiden_key, hidden: {sp: new Set(), cl: new Set()}, q: {sp: "", cl: ""}, size: C.marker_size, rev: 0, cam: {}, stacked: innerWidth < 900, log: false, find: null, lasso: null, drag: "lasso", labels: true, keep: [], view: "3d", last: "3d", fit: false, proj: {x: 0, y: 1, az: 0, el: 0}, flux: {from: null, to: null}, alpha: C.alpha, ghost: true, ghostAlpha: C.ghost_alpha, ghostIdx: [], gn: 0, ov: {}, z: {}, pct: false, pick: null};
+const FT = Object.keys(D.features || {}), DESC = D.desc ? D.desc.split("\n") : null, NET_EDGES = 2500, NET_ITER = 300, NET_LABELS = 30, FOUND_TERMS = 8;
+const S = {page: 0, byCluster: false, cluster: D.leiden_key, hidden: {sp: new Set(), cl: new Set()}, q: {sp: "", cl: ""}, size: C.marker_size, rev: 0, cam: {}, stacked: innerWidth < 900, log: false, find: null, lasso: null, drag: "lasso", labels: true, keep: [], view: "3d", last: "3d", fit: false, proj: {x: 0, y: 1, az: 0, el: 0}, flux: {from: null, to: null}, alpha: C.alpha, ghost: true, ghostAlpha: C.ghost_alpha, ghostIdx: [], gn: 0, ov: {}, z: {}, pct: false, pick: null, ft: {}, ftSel: FT[0] || null, ftCnt: null, net: {feat: null, terms: C.max_network_terms, edge: C.min_edge_proteins}};
+S.q.ft = "";
 const VIEWS = {
   "3d": {label: "3D", title: "3D scatter", panel: "stage", side: "secGhost", plots: ["plot"], points: true, render: plot},
   "2d": {label: "2D", title: "2D projection of the 3D layouts", panel: "stage", ctl: "ctl2d", side: ["sec2d", "secGhost"], plots: ["plot"], points: true, render: plot},
   bars: {label: "Bars", title: "Protein count per joint cluster", panel: "barsBox", plots: ["bars"], render: bars},
   flux: {label: "Flux", title: "Proteins flowing between the clusters of two series", panel: "fluxBox", ctl: "ctlFlux", plots: ["flux"], render: flux},
+  network: {label: "Network", title: "Co-annotation network of a UniProt feature over the shown proteins", panel: "netBox", ctl: "ctlNet", plots: ["net"], render: network, ok: () => netFeats().length > 0},
 };
 function decode(s, T) { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new T(u.buffer); }
 function short(k) { return k.replace(/^.*_([uts]_[ij]_[a-z0-9]+)$/, "$1"); }
@@ -153,8 +161,9 @@ function page() {
     p._s = Object.fromEntries(Object.entries(p.sets).map(([k, v]) => [k, decode(v.codes, v.wide ? Uint32Array : Uint16Array)]));
     p._r = Object.fromEntries(p.methods.map(([m]) => [m, ranges(p._c[m])]));
     p._ids = p.ids.split("\n");
+    p._rows = decode(p.rows, Uint32Array);
     p._b = Object.fromEntries(p.views.bars.clusters.map((c, i) => [c, i]));
-    p._h = p._ids.map((id, i) => `<b>${id}</b>` + D.hover_keys.map(k => `<br>${k}: ${p.sets[k].cats[p._s[k][i]][0]}`).join(""));
+    p._h = p._ids.map((id, i) => `<b>${id}</b>` + (DESC && DESC[p._rows[i]] ? `<br>${DESC[p._rows[i]]}` : "") + D.hover_keys.map(k => `<br>${k}: ${p.sets[k].cats[p._s[k][i]][0]}`).join(""));
   }
   return p;
 }
@@ -189,9 +198,19 @@ function zmove(k, nm, d) {
   z[nm] = d > 0 ? Math.max(0, ...v) + 1 : Math.min(0, ...v) - 1;
   draw();
 }
+function feat(nm) { const f = D.features[nm]; if (!f._off) { f._off = decode(f.off, Uint32Array); f._idx = decode(f.idx, f.wide ? Uint32Array : Uint16Array); } return f; }
+function ftState(nm) { return S.ft[nm] = S.ft[nm] || {on: new Set(), and: false}; }
+function ftActive() { return Object.entries(S.ft).filter(([, f]) => f.on.size).map(([nm, f]) => { const F = feat(nm), m = new Uint8Array(F.vocab.length); f.on.forEach(t => m[t] = 1); return {nm, off: F._off, idx: F._idx, m, and: f.and, need: f.on.size}; }); }
+function ftOk(a, r) { let h = 0; for (let j = a.off[r], e = a.off[r + 1]; j < e; j++) if (a.m[a.idx[j]]) { if (!a.and) return true; h++; } return a.and && h === a.need; }
 function render() {
-  const p = page(), k = key(), codes = p._s[k], keep = [], ghost = [], sp = p._s.sample, cl = p._s[S.cluster], V = VIEWS[S.view];
-  for (let i = 0; i < codes.length; i++) if (!S.hidden.sp.has(sp[i]) && !S.hidden.cl.has(cl[i]) && (!S.lasso || S.lasso.has(i))) keep.push(i); else if (S.ghost) ghost.push(i);
+  const p = page(), k = key(), codes = p._s[k], keep = [], ghost = [], sp = p._s.sample, cl = p._s[S.cluster], V = VIEWS[S.view], rows = p._rows;
+  const act = ftActive(), mine = act.find(a => a.nm === S.ftSel), others = act.filter(a => a !== mine), F = S.ftSel ? feat(S.ftSel) : null, cnt = F ? new Uint32Array(F.vocab.length) : null;
+  for (let i = 0; i < codes.length; i++) {
+    const r = rows[i], base = !S.hidden.sp.has(sp[i]) && !S.hidden.cl.has(cl[i]) && (!S.lasso || S.lasso.has(i)) && others.every(a => ftOk(a, r));
+    if (base && F) for (let j = F._off[r], e = F._off[r + 1]; j < e; j++) cnt[F._idx[j]]++;
+    if (base && (!mine || ftOk(mine, r))) keep.push(i); else if (S.ghost) ghost.push(i);
+  }
+  S.ftCnt = cnt;
   S.keep = stack(p, keep); S.ghostIdx = ghost; S.cols = tint(p, S.cluster, keep);
   V.render(p, k, keep);
   if (S.fit) { S.fit = false; V.plots.forEach(id => { if ($(id).data) Plotly.Plots.resize($(id)); }); }
@@ -327,6 +346,84 @@ function sidebar(p, n) {
   $("clTitle").textContent = S.cluster;
   $("listSp").replaceChildren(...checklist("sp", spCats, !S.byCluster));
   $("listCl").replaceChildren(...checklist("cl", p.sets[S.cluster].cats, S.byCluster));
+  ftList();
+}
+function ftTerms() {
+  const nm = S.ftSel, F = feat(nm), st = ftState(nm), q = S.q.ft.trim().toLowerCase(), cnt = S.ftCnt || [];
+  return F.vocab.map((_, t) => t).filter(t => (cnt[t] || st.on.has(t)) && (!q || F.vocab[t].toLowerCase().includes(q))).sort((a, b) => st.on.has(b) - st.on.has(a) || cnt[b] - cnt[a] || a - b);
+}
+function ftList() {
+  if (!FT.length) return;
+  const nm = S.ftSel, F = feat(nm), st = ftState(nm), cnt = S.ftCnt || [], list = ftTerms(), act = Object.entries(S.ft).filter(([, f]) => f.on.size);
+  $("ftSel").value = nm; $("ftAnd").checked = st.and;
+  $("ftInfo").textContent = act.length ? "Active: " + act.map(([n, f]) => `${n} (${f.on.size} ${f.and ? "AND" : "OR"})`).join(" · ") : `No feature filter · ${list.length.toLocaleString()} terms among the shown proteins`;
+  const els = list.slice(0, MAX_CHIPS).map(t => {
+    const el = document.createElement("div"), on = st.on.has(t), c = cnt[t] || 0;
+    el.className = "chip" + (st.on.size && !on ? " off" : "");
+    el.title = `${F.vocab[t]}\n${c.toLocaleString()} shown proteins · ${F.n[t].toLocaleString()} in the dataset`;
+    el.innerHTML = `<input type="checkbox" tabindex="-1"${on ? " checked" : ""}><span class="nm"></span><span class="n">${c.toLocaleString()}</span>`;
+    el.querySelector(".nm").textContent = F.vocab[t];
+    el.onclick = () => ftChip(t);
+    return el;
+  });
+  if (list.length > MAX_CHIPS) { const m = document.createElement("div"); m.className = "muted more"; m.textContent = `+${(list.length - MAX_CHIPS).toLocaleString()} more · refine the filter (All acts on every match)`; els.push(m); }
+  $("listFt").replaceChildren(...els);
+}
+function ftChip(t) {
+  const st = ftState(S.ftSel);
+  if (timer) { clearTimeout(timer); timer = null; st.on = new Set([t]); draw(); return; }
+  timer = setTimeout(() => { timer = null; st.on.has(t) ? st.on.delete(t) : st.on.add(t); draw(); }, 240);
+}
+function ftIsolate(nm, t) { S.ftSel = nm; S.q.ft = ""; $("qFt").value = ""; ftState(nm).on = new Set([t]); toPoints(); draw(); }
+function netFeats() { return FT.filter(nm => D.features[nm].net); }
+function clip(s, n) { return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+function forceLayout(n, E) {
+  const x = new Float64Array(n), y = new Float64Array(n), dx = new Float64Array(n), dy = new Float64Array(n), deg = new Float64Array(n), k = Math.sqrt(1 / n), jm = Math.max(1e-9, ...E.map(e => e.j));
+  E.forEach(e => { deg[e.a]++; deg[e.b]++; });
+  for (let i = 0; i < n; i++) { const a = 2.399963 * i, r = Math.sqrt((i + 0.5) / n); x[i] = r * Math.cos(a); y[i] = r * Math.sin(a); }
+  for (let it = 0; it < NET_ITER; it++) {
+    const t = 0.1 * (1 - it / NET_ITER) + 0.002;
+    dx.fill(0); dy.fill(0);
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) { const ux = x[i] - x[j], uy = y[i] - y[j], f = k * k / (ux * ux + uy * uy + 1e-6); dx[i] += ux * f; dy[i] += uy * f; dx[j] -= ux * f; dy[j] -= uy * f; }
+    E.forEach(e => { const ux = x[e.a] - x[e.b], uy = y[e.a] - y[e.b], f = Math.hypot(ux, uy) / k * (0.1 + e.j / jm) / Math.sqrt(Math.min(deg[e.a], deg[e.b])); dx[e.a] -= ux * f; dy[e.a] -= uy * f; dx[e.b] += ux * f; dy[e.b] += uy * f; });
+    for (let i = 0; i < n; i++) { const gx = dx[i] - 0.6 * k * x[i], gy = dy[i] - 0.6 * k * y[i], l = Math.hypot(gx, gy) || 1, s = Math.min(l, t) / l; x[i] += gx * s; y[i] += gy * s; }
+  }
+  return {x, y};
+}
+function netLabels(x, y, n) {
+  const rx = Math.max(...x) - Math.min(...x) || 1, ry = Math.max(...y) - Math.min(...y) || 1, on = [];
+  for (let j = 0; j < x.length && on.length < n; j++) if (on.every(i => Math.abs(x[i] - x[j]) / rx > 0.12 || Math.abs(y[i] - y[j]) / ry > 0.04)) on.push(j);
+  return new Set(on);
+}
+function network(p) {
+  const fs = netFeats(), nm = fs.includes(S.net.feat) ? S.net.feat : fs[0];
+  S.net.feat = nm;
+  $("nFeat").replaceChildren(...fs.map(f => new Option(f, f))); $("nFeat").value = nm; $("nTerms").value = S.net.terms; $("nEdge").value = S.net.edge;
+  const F = feat(nm), off = F._off, idx = F._idx, rows = p._rows, n = S.keep.length, total = rows.length, cnt = new Uint32Array(F.vocab.length);
+  let msg = !n ? "No point shown." : n === total ? `Every point of the page is shown (${total.toLocaleString()}): untick samples or clusters, lasso or filter by a feature first.` : n > C.max_network_proteins ? `${n.toLocaleString()} proteins shown, the network accepts up to ${C.max_network_proteins.toLocaleString()}: narrow the selection.` : "";
+  let annotated = 0;
+  if (!msg) S.keep.forEach(i => { const r = rows[i]; if (off[r + 1] > off[r]) annotated++; for (let j = off[r]; j < off[r + 1]; j++) cnt[idx[j]]++; });
+  const top = msg ? [] : Array.from(cnt.keys()).filter(t => cnt[t]).sort((a, b) => cnt[b] - cnt[a] || a - b).slice(0, Math.max(2, S.net.terms));
+  if (!msg && !top.length) msg = `No shown protein has a ${nm} term.`;
+  $("netMsg").hidden = !msg; $("netMsg").textContent = msg;
+  if (msg) { Plotly.purge($("net")); return; }
+  const T = top.length, loc = new Int32Array(F.vocab.length).fill(-1), pair = new Map(), buf = [];
+  top.forEach((t, j) => loc[t] = j);
+  S.keep.forEach(i => {
+    const r = rows[i]; buf.length = 0;
+    for (let j = off[r]; j < off[r + 1]; j++) if (loc[idx[j]] >= 0) buf.push(loc[idx[j]]);
+    for (let a = 0; a < buf.length; a++) for (let b = a + 1; b < buf.length; b++) { const u = Math.min(buf[a], buf[b]), v = Math.max(buf[a], buf[b]), key = u * T + v; pair.set(key, (pair.get(key) || 0) + 1); }
+  });
+  const E = [...pair].filter(([, w]) => w >= S.net.edge).map(([key, w]) => { const a = Math.floor(key / T), b = key % T; return {a, b, w, j: w / (cnt[top[a]] + cnt[top[b]] - w)}; }).sort((u, v) => v.w - u.w || u.a - v.a || u.b - v.b).slice(0, NET_EDGES);
+  const {x, y} = forceLayout(T, E), share = top.map(t => cnt[t] / n), name = t => F.vocab[t], lab = netLabels(x, y, NET_LABELS);
+  const tiers = [[0, 0.2, 0.6, 0.3], [0.2, 0.5, 1.6, 0.5], [0.5, 1.01, 3.2, 0.75]];
+  const edges = tiers.map(([lo, hi, w, o]) => { const b = E.filter(e => e.j >= lo && e.j < hi); return {type: "scatter", mode: "lines", x: b.flatMap(e => [x[e.a], x[e.b], null]), y: b.flatMap(e => [y[e.a], y[e.b], null]), line: {width: w, color: "#9aa1ad"}, opacity: o, hoverinfo: "skip", showlegend: false}; });
+  const mids = {type: "scatter", mode: "markers", x: E.map(e => (x[e.a] + x[e.b]) / 2), y: E.map(e => (y[e.a] + y[e.b]) / 2), marker: {size: 8, opacity: 0}, customdata: E.map(e => [clip(name(top[e.a]), 60), clip(name(top[e.b]), 60), e.w, e.j]), hovertemplate: "%{customdata[0]}<br>↔ %{customdata[1]}<br>%{customdata[2]:,} shared proteins · Jaccard %{customdata[3]:.2f}<extra></extra>", showlegend: false};
+  const smax = Math.max(...share), nodes = {type: "scatter", mode: "markers+text", x: Array.from(x), y: Array.from(y), text: top.map((t, j) => lab.has(j) ? clip(name(t).replace(/\s*\[GO:\d+\]$/, ""), 32) : ""), textposition: "top center", textfont: {size: C.font_tick, color: "#1f2330"}, customdata: top.map(t => [name(t), cnt[t]]), hovertemplate: "<b>%{customdata[0]}</b><br>%{customdata[1]:,} shown proteins (%{marker.color:.1%})<br>click to filter the points<extra></extra>", showlegend: false,
+    marker: {size: top.map(t => 10 + 30 * Math.sqrt(cnt[t] / cnt[top[0]])), color: share, colorscale: QUANT, cmin: 0, cmax: smax, line: {width: 1, color: "#ffffff"}, colorbar: {orientation: "h", x: 0.5, xanchor: "center", y: -0.02, yanchor: "top", len: 0.5, thickness: 12, tickformat: ".0%", tickfont: {size: C.font_tick}, title: {text: "share of the shown proteins", side: "top", font: {size: C.font_tick + 1}}}}};
+  const ax = {visible: false, fixedrange: false}, head = `<b>${nm}</b> · ${T} terms · ${E.length.toLocaleString()} edges · ${annotated.toLocaleString()}/${n.toLocaleString()} shown proteins annotated`;
+  Plotly.react($("net"), [...edges, mids, nodes], {...base(), margin: {l: 10, r: 10, t: 40, b: 70}, hovermode: "closest", dragmode: "pan", xaxis: ax, yaxis: {...ax, scaleanchor: "x"}, annotations: [{text: head, x: 0, xanchor: "left", y: 1, yanchor: "bottom", xref: "paper", yref: "paper", showarrow: false, font: {size: C.font_title - 4}}]}, {responsive: true, displaylogo: false, scrollZoom: true, toImageButtonOptions: {format: "png", scale: 2, filename: `${p.slug}_network_${nm.replace(/\W+/g, "_")}`}});
+  hook("net", e => { const pt = e.points && e.points[0]; if (pt && pt.curveNumber === edges.length + 1) ftIsolate(nm, top[pt.pointIndex]); });
 }
 let timer = null;
 function chip(s, i, all) {
@@ -365,7 +462,7 @@ function find(q) {
   }
   $("find").classList.toggle("miss", !!q && S.find === null);
   $("found").hidden = S.find === null;
-  if (S.find !== null) $("found").innerHTML = p._h[S.find] + p.keys.filter(k => !D.hover_keys.includes(k)).map(k => `<br>${short(k)}: ${p.sets[k].cats[p._s[k][S.find]][0]}`).join("");
+  if (S.find !== null) { const r = p._rows[S.find]; $("found").innerHTML = p._h[S.find] + p.keys.filter(k => !D.hover_keys.includes(k)).map(k => `<br>${short(k)}: ${p.sets[k].cats[p._s[k][S.find]][0]}`).join("") + FT.filter(nm => !nm.startsWith("GO (")).map(nm => { const F = feat(nm), ts = Array.from(F._idx.subarray(F._off[r], F._off[r + 1]), t => F.vocab[t]); return ts.length ? `<br><b>${nm}</b>: ${ts.slice(0, FOUND_TERMS).join("; ").replace(/</g, "&lt;")}${ts.length > FOUND_TERMS ? ` (+${ts.length - FOUND_TERMS})` : ""}` : ""; }).join(""); }
   draw();
 }
 function exportIds() {
@@ -398,7 +495,7 @@ function sync() {
 }
 function go(i) {
   if (i < 0 || i >= P.length || i === S.page) return;
-  S.page = i; S.find = null; S.lasso = null; S.flux = {from: null, to: null}; $("find").value = ""; $("find").classList.remove("miss"); $("found").hidden = true;
+  S.page = i; S.find = null; S.lasso = null; S.flux = {from: null, to: null}; S.ft = {}; $("find").value = ""; $("find").classList.remove("miss"); $("found").hidden = true;
   if (!viewOk(S.view)) S.view = S.last;
   S.fit = true; unfilter(); defaults(); syncView(); sync(); draw();
 }
@@ -424,6 +521,18 @@ $("fFrom").onchange = e => { S.flux = {from: e.target.value, to: fluxKeys(page()
 $("fTo").onchange = e => { S.flux = {from: fluxKeys(page())[0], to: e.target.value}; draw(); };
 $("fSwap").onclick = () => { const [a, b] = fluxKeys(page()); S.flux = {from: b, to: a}; draw(); };
 $("size").value = S.size; $("sizeV").textContent = S.size;
+$("secFt").hidden = !FT.length;
+const ftGroup = (label, names) => { const g = document.createElement("optgroup"); g.label = label; g.replaceChildren(...names.map(nm => new Option(nm, nm))); return g; };
+$("ftSel").replaceChildren(...[ftGroup("Annotation", FT.filter(nm => !D.features[nm].domain)), ftGroup("Domains", FT.filter(nm => D.features[nm].domain))].filter(g => g.children.length));
+$("ftSel").onchange = e => { S.ftSel = e.target.value; S.q.ft = ""; $("qFt").value = ""; draw(); };
+$("ftAnd").onchange = e => { ftState(S.ftSel).and = e.target.checked; draw(); };
+$("qFt").oninput = e => { S.q.ft = e.target.value; ftList(); };
+$("ftAll").onclick = () => { const st = ftState(S.ftSel); ftTerms().forEach(t => st.on.add(t)); draw(); };
+$("ftNone").onclick = () => { ftState(S.ftSel).on.clear(); draw(); };
+$("ftClr").onclick = () => { S.ft = {}; draw(); };
+$("nFeat").onchange = e => { S.net.feat = e.target.value; draw(); };
+$("nTerms").onchange = e => { S.net.terms = Math.max(2, Math.min(400, +e.target.value || C.max_network_terms)); draw(); };
+$("nEdge").onchange = e => { S.net.edge = Math.max(1, +e.target.value || 1); draw(); };
 $("prev").onclick = () => go(S.page - 1);
 $("next").onclick = () => go(S.page + 1);
 $("pageSel").onchange = e => go(+e.target.value);

@@ -77,6 +77,9 @@ h5ad_interactive:
   max_points_per_view: null
   max_colored_clusters: 30
   min_series_cluster_size: 5
+  max_network_proteins: 20000
+  max_network_terms: 120
+  min_edge_proteins: 2
   overwrite: false
 ro_crate:
   repo_url: https://github.com/ssenci97/SCambrian
