@@ -1,4 +1,3 @@
-const ENR_SUMMARY_FEATURES = ["Family", "Keyword", "GO process", "GO function", "GO component", "Pathway", "EC", "Subcellular location"];
 function lgamma(z) {
   const g = [676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
   if (z < 0.5) return Math.log(Math.PI / Math.abs(Math.sin(Math.PI * z))) - lgamma(1 - z);
@@ -28,90 +27,59 @@ function termReader(p, ft) {
   const F = feat(ft), off = F._off, idx = F._idx, rows = p._rows;
   return {size: F.vocab.length, name: t => F.vocab[t], each: (i, fn) => { const r = rows[i]; for (let j = off[r]; j < off[r + 1]; j++) fn(idx[j]); }, any: i => off[rows[i] + 1] > off[rows[i]]};
 }
-function contingency(p, k, ft) {
-  const codes = p._s[k], cats = p.sets[k].cats, R = termReader(p, ft), TT = R.size, nc = new Map(), nt = new Map(), nct = new Map(), skip = cats.map((c, i) => !i || c[1] === C.color_other);
-  let N = 0;
-  S.keep.forEach(i => { const c = codes[i]; if (skip[c] || !R.any(i)) return; N++; nc.set(c, (nc.get(c) || 0) + 1); R.each(i, t => { nt.set(t, (nt.get(t) || 0) + 1); const key = c * TT + t; nct.set(key, (nct.get(key) || 0) + 1); }); });
-  return {N, nc, nt, nct, TT, R};
+const SHOWN = "\u0000shown";
+function enrClusters(p, k) {
+  const cats = p.sets[k].cats, codes = p._s[k], n = new Map();
+  S.keep.forEach(i => { const c = codes[i]; if (c && cats[c][1] !== C.color_other) n.set(c, (n.get(c) || 0) + 1); });
+  return [...n].sort((a, b) => b[1] - a[1]);
 }
-function enrCompute(p) {
-  const o = A.enr, k = S.enr.ser, ft = S.enr.ft, {N, nc, nt, nct, TT, R} = contingency(p, k, ft), cats = p.sets[k].cats;
-  if (!N) return {msg: `No shown protein has both a ${short(k)} cluster and a ${ft} annotation.`};
-  const tests = [];
-  nct.forEach((v, key) => { if (v < o.min) return; const c = Math.floor(key / TT), t = key % TT, a = nc.get(c), b = nt.get(t); tests.push({c, t, v, a, b, frac: v / a, enr: Math.log2((v / a) / (b / N)), p: hyperTail(v, N, b, a)}); });
-  if (!tests.length) return {msg: `No cluster × term pair holds ${o.min}+ proteins.`};
-  const q = bh(tests.map(x => x.p)); tests.forEach((x, i) => { x.q = q[i]; x.lq = -Math.log10(Math.max(q[i], 1e-300)); x.sig = q[i] <= o.q && x.enr > 0; });
-  const rows = [...nc].sort((u, v) => v[1] - u[1]).slice(0, o.rows).map(([c]) => c), rowSet = new Set(rows), score = new Map();
-  tests.forEach(x => { if (rowSet.has(x.c) && x.sig) score.set(x.t, Math.max(score.get(x.t) || 0, x.lq)); });
-  let cols = [...score].sort((u, v) => v[1] - u[1]).slice(0, o.cols).map(([t]) => t);
-  if (!cols.length) return {msg: `No term is enriched in the ${rows.length} largest clusters at q ≤ ${o.q} (min ${o.min} proteins).`};
-  const cell = new Map(); tests.forEach(x => { if (rowSet.has(x.c)) cell.set(x.c * TT + x.t, x); });
-  const val = x => !x ? null : o.metric === "frac" ? x.frac : !x.sig ? null : o.metric === "lq" ? x.lq : x.enr;
-  let rs = rows;
-  if (o.order === "name") rs = [...rows].sort((a, b) => cats[a][0].length - cats[b][0].length || cats[a][0].localeCompare(cats[b][0], undefined, {numeric: true}));
-  if (o.order === "diag") {
-    const best = new Map(rows.map(c => { let bt = -1, bv = -Infinity; cols.forEach(t => { const x = cell.get(c * TT + t); if (x && x.sig && x.lq > bv) { bv = x.lq; bt = t; } }); return [c, [bt, bv]]; }));
-    const first = new Map(); rows.forEach(c => { const t = best.get(c)[0]; if (t >= 0 && !first.has(t)) first.set(t, first.size); });
-    cols = [...cols].sort((a, b) => (first.has(a) ? first.get(a) : 1e9) - (first.has(b) ? first.get(b) : 1e9));
-    const pos = new Map(cols.map((t, j) => [t, j]));
-    rs = [...rows].sort((a, b) => { const ta = best.get(a)[0], tb = best.get(b)[0]; return (ta < 0) - (tb < 0) || (pos.get(ta) ?? 1e9) - (pos.get(tb) ?? 1e9) || best.get(b)[1] - best.get(a)[1]; });
-  }
-  return {N, rows: rs, cols, cell, TT, R, cats, val, tested: tests.length, sig: tests.filter(x => x.sig).length};
+function enrTest(p, ft, bg, fg) {
+  const R = termReader(p, ft), K = new Map(), k = new Map();
+  let N = 0, n = 0;
+  bg.forEach(i => { if (!R.any(i)) return; N++; const f = fg(i); if (f) n++; R.each(i, t => { K.set(t, (K.get(t) || 0) + 1); if (f) k.set(t, (k.get(t) || 0) + 1); }); });
+  const tests = [...k].filter(([, v]) => v >= A.enr.min).map(([t, v]) => ({t, k: v, n, K: K.get(t), N, fold: (v / n) / (K.get(t) / N), p: hyperTail(v, N, K.get(t), n)}));
+  const q = bh(tests.map(x => x.p)); tests.forEach((x, i) => { x.q = q[i]; x.lq = -Math.log10(Math.max(q[i], 1e-300)); });
+  return {tests, n, N, R};
 }
-function nmi(p, k, ft) {
-  const {N, nc, nt, nct, TT} = contingency(p, k, ft);
-  if (!N) return null;
-  let I = 0, hc = 0, ht = 0, purity = 0;
-  const best = new Map();
-  nct.forEach((v, key) => { const c = Math.floor(key / TT), t = key % TT; I += v / N * Math.log(v * N / (nc.get(c) * nt.get(t))); best.set(c, Math.max(best.get(c) || 0, v)); });
-  nc.forEach(v => { hc -= v / N * Math.log(v / N); }); nt.forEach(v => { ht -= v / N * Math.log(v / N); });
-  best.forEach(v => { purity += v; });
-  return {nmi: hc + ht > 0 ? 2 * I / (hc + ht) : 0, purity: purity / N, n: N, clusters: nc.size, terms: nt.size};
+function wrap(text, w) {
+  const lines = [];
+  let cur = "";
+  text.split(/\s+/).forEach(word => { if (cur && (cur + " " + word).length > w) { lines.push(cur); cur = word; } else cur = cur ? cur + " " + word : word; });
+  if (cur) lines.push(cur);
+  return lines.slice(0, 4).map((l, j) => j === 3 && lines.length > 4 ? l + " …" : l);
 }
-function enrSummary(p) {
-  const rows = enrClusterKeys(p), singles = enrSingles(p), multis = ENR_SUMMARY_FEATURES.filter(f => FT.includes(f)), metric = A.enr.sumMetric, cols = metric === "nmi" ? singles : [...singles, ...multis];
-  if (!cols.length) return {msg: metric === "nmi" ? "NMI needs a single-valued UniProt series (uniprot_family, …): none on this page; switch to purity." : "No UniProt feature on this page."};
-  const sig = `${S.page}|${S.keep.length}|${S.keep[0]}|${S.keep[S.keep.length - 1]}|${metric}|${cols.join(",")}`;
-  if (!S.enrSum || S.enrSum.sig !== sig) S.enrSum = {sig, z: rows.map(k => cols.map(ft => (metric === "nmi" && !p.sets[ft]) ? null : nmi(p, k, ft)))};
-  const ok = cols.map((_, j) => S.enrSum.z.some(r => r[j] && r[j].terms > 1));
-  if (!ok.some(Boolean)) return {msg: "Every UniProt feature has a single value over the shown proteins."};
-  return {rows, cols: cols.filter((_, j) => ok[j]), z: S.enrSum.z.map(r => r.filter((_, j) => ok[j]))};
-}
-function heat(el, z, x, y, text, custom, hover, colorbar, zmin, zmax, fname) {
-  const lab = Math.max(...y.map(s => s.length)) * font("tick") * 0.62, bot = Math.min(320, Math.max(...x.map(s => s.length)) * font("tick") * 0.62 * 0.75 + 20);
-  Plotly.react($(el), [{type: "heatmap", z, x: x.map((_, j) => j), y: y.map((_, j) => j), text, texttemplate: "%{text}", textfont: {size: font("tick")}, customdata: custom, hovertemplate: hover, colorscale: [[0, A.col.low], [1, A.col.high]], zmin, zmax, hoverongaps: false, xgap: 1, ygap: 1, colorbar: {thickness: 12, len: 0.8, tickfont: {size: font("tick")}, title: {text: colorbar, side: "right", font: {size: font("axis")}}}}],
-    {...base(), margin: {l: Math.min(360, lab + 16), r: 44, t: font("axis") + 20, b: bot}, modebar: {orientation: "v"}, xaxis: {tickvals: x.map((_, j) => j), ticktext: x.map(esc), tickangle: -45, tickfont: {size: font("tick")}, side: "bottom", showgrid: false, zeroline: false}, yaxis: {tickvals: y.map((_, j) => j), ticktext: y.map(esc), autorange: "reversed", tickfont: {size: font("tick")}, showgrid: false, zeroline: false}, plot_bgcolor: "#f7f8fa"},
-    {responsive: true, displaylogo: false, toImageButtonOptions: {format: "png", scale: 2, filename: fname}});
-}
+function enrStep(d) { const o = [...$("eCl").options].map(x => x.value), j = o.indexOf(S.enr.cl); S.enr.cl = o[Math.max(0, Math.min(o.length - 1, j + d))]; draw(); }
+function enrFeatures(p) { return [...enrSingles(p), ...FT]; }
 function enrich(p) {
-  const sers = enrClusterKeys(p), fts = [...enrSingles(p), ...FT], o = A.enr;
+  const sers = enrClusterKeys(p).filter(k => k !== "sample"), fts = enrFeatures(p), o = A.enr;
   if (!sers.includes(S.enr.ser)) S.enr.ser = D.leiden_key;
-  if (!fts.includes(S.enr.ft)) S.enr.ft = fts.includes("uniprot_family") ? "uniprot_family" : fts[0];
-  $("eSer").replaceChildren(...sers.map(k => new Option(short(k), k))); $("eSer").value = S.enr.ser;
+  if (!fts.includes(S.enr.ft)) S.enr.ft = ["uniprot_family", "GO process", "Family"].find(f => fts.includes(f)) || fts[0];
+  const k = S.enr.ser, ft = S.enr.ft, cats = p.sets[k].cats, cl = enrClusters(p, k);
+  if (S.enr.cl !== SHOWN && !cl.some(([c]) => cats[c][0] === S.enr.cl)) S.enr.cl = cl.length ? cats[cl[0][0]][0] : SHOWN;
+  $("eSer").replaceChildren(...sers.map(x => new Option(short(x), x))); $("eSer").value = k;
+  $("eCl").replaceChildren(new Option("Shown proteins vs page", SHOWN), ...cl.map(([c, n]) => new Option(`${cats[c][0]} (${n.toLocaleString()})`, cats[c][0]))); $("eCl").value = S.enr.cl;
   const grp = (label, names) => { const g = document.createElement("optgroup"); g.label = label; g.replaceChildren(...names.map(nm => new Option(nm, nm))); return g; };
-  $("eFt").replaceChildren(...[grp("Single-valued", enrSingles(p)), grp("Annotation terms", FT.filter(f => !D.features[f].domain)), grp("Domains", FT.filter(f => D.features[f].domain))].filter(g => g.children.length)); $("eFt").value = S.enr.ft;
-  const sum = o.mode === "summary";
-  document.querySelectorAll(".eClu").forEach(el => el.hidden = sum); document.querySelectorAll(".eSum").forEach(el => el.hidden = !sum);
-  const res = !fts.length ? {msg: "No UniProt feature in this report: the Enrichment view needs the feature tables of step 01."} : sum ? enrSummary(p) : enrCompute(p);
-  $("enrMsg").hidden = !res.msg; $("enrMsg").textContent = res.msg || "";
-  if (res.msg) { Plotly.purge($("enr")); return; }
-  if (sum) {
-    const m = o.sumMetric, z = res.z.map(r => r.map(v => v ? v[m] : null)), text = z.map(r => r.map(v => v === null ? "" : v.toFixed(2))), custom = res.z.map((r, i) => r.map((v, j) => [res.rows[i], res.cols[j], v ? v.n : 0, v ? v.clusters : 0, v ? v.terms : 0, v ? v.nmi : 0, v ? v.purity : 0]));
-    heat("enr", z, res.cols, res.rows.map(short), text, custom, "<b>%{customdata[0]}</b> × <b>%{customdata[1]}</b><br>NMI %{customdata[5]:.3f} · purity %{customdata[6]:.3f}<br>%{customdata[2]:,} shown annotated proteins · %{customdata[3]:,} clusters · %{customdata[4]:,} terms<br>click opens the cluster × term map<extra></extra>", m === "nmi" ? "NMI" : "purity", 0, 1, `${p.slug}_enrichment_summary`);
-    Plotly.relayout($("enr"), {annotations: [{text: `<b>Cluster series vs UniProt features</b> · ${m === "nmi" ? "normalised mutual information" : "purity (share of proteins carrying the main term of their cluster)"} · shown proteins`, x: 0, xanchor: "left", y: 1, yanchor: "bottom", xref: "paper", yref: "paper", showarrow: false, font: {size: font("axis")}}]});
-    hook("enr", "plotly_click", e => { const pt = e.points && e.points[0]; if (!pt) return; S.enr.ser = res.rows[pt.y]; S.enr.ft = res.cols[pt.x]; A.enr.mode = "clusters"; save(); syncControls(); draw(); });
-    return;
-  }
-  const {rows, cols, cell, TT, R, cats, val} = res, metric = o.metric;
-  const z = rows.map(c => cols.map(t => val(cell.get(c * TT + t)))), finite = z.flat().filter(v => v !== null), zmax = finite.length ? Math.max(...finite) : 1;
-  const text = rows.map(c => cols.map(t => { const x = cell.get(c * TT + t); if (!x) return ""; if (o.values) return metric === "frac" ? (100 * x.frac).toFixed(0) : metric === "lq" ? x.lq.toFixed(1) : x.sig ? x.enr.toFixed(1) : ""; return x.sig ? (x.q < 0.001 ? "***" : x.q < 0.01 ? "**" : "*") : ""; }));
-  const custom = rows.map(c => cols.map(t => { const x = cell.get(c * TT + t); return [cats[c][0], R.name(t), x ? x.v : 0, x ? x.a : 0, x ? x.frac : 0, x ? x.enr : 0, x ? x.q : 1, x ? x.b : 0]; }));
-  heat("enr", z, cols.map(t => clip(R.name(t).replace(/\s*\[GO:\d+\]$/, ""), o.clip)), rows.map(c => cats[c][0]), text, custom, "<b>%{customdata[0]}</b> × %{customdata[1]}<br>%{customdata[2]:,} / %{customdata[3]:,} annotated proteins of the cluster (%{customdata[4]:.1%})<br>term on %{customdata[7]:,} shown proteins · log2 enrichment %{customdata[5]:.2f} · q %{customdata[6]:.2g}<br>click inspects<extra></extra>", metric === "frac" ? "share of the cluster" : metric === "lq" ? "−log10 q" : "log2 enrichment", 0, Math.max(zmax, 1e-6), `${p.slug}_enrichment_${short(S.enr.ser)}_${S.enr.ft.replace(/\W+/g, "_")}`);
-  Plotly.relayout($("enr"), {annotations: [{text: `<b>${esc(short(S.enr.ser))} × ${esc(S.enr.ft)}</b> · ${rows.length} clusters · ${cols.length} terms · ${res.sig.toLocaleString()}/${res.tested.toLocaleString()} pairs enriched at q ≤ ${o.q} (hypergeometric, BH) · ${res.N.toLocaleString()} shown annotated proteins`, x: 0, xanchor: "left", y: 1, yanchor: "bottom", xref: "paper", yref: "paper", showarrow: false, font: {size: font("axis")}}]});
-  hook("enr", "plotly_click", e => {
-    const pt = e.points && e.points[0]; if (!pt) return;
-    const c = rows[pt.y], t = cols[pt.x], x = cell.get(c * TT + t);
-    showInspect({type: "assoc", k: S.enr.ser, ft: S.enr.ft, cl: cats[c][0], t, term: R.name(t), x});
-  });
+  $("eFt").replaceChildren(...[grp("Single-valued", enrSingles(p)), grp("Annotation terms", FT.filter(f => !D.features[f].domain)), grp("Domains", FT.filter(f => D.features[f].domain))].filter(g => g.children.length)); $("eFt").value = ft;
+  const shownMode = S.enr.cl === SHOWN, code = shownMode ? -1 : cats.findIndex(c => c[0] === S.enr.cl), codes = p._s[k], keepSet = shownMode ? new Set(S.keep) : null;
+  const res = !fts.length ? null : shownMode ? enrTest(p, ft, seq(0, p._ids.length), i => keepSet.has(i)) : enrTest(p, ft, S.keep, i => codes[i] === code);
+  const sig = res ? res.tests.filter(x => x.q <= o.q && x.fold > 1).sort((a, b) => a.q - b.q || b.fold - a.fold) : [];
+  const fallback = res && !sig.length, rows = (fallback ? res.tests.filter(x => x.fold > 1).sort((a, b) => a.p - b.p) : sig).slice(0, Math.max(1, o.terms));
+  const msg = !res ? "No UniProt feature in this report: the Enrichment view needs the feature tables of step 01." : !res.n ? `No protein of ${shownMode ? "the selection" : "cluster " + S.enr.cl} has a ${ft} annotation.` : shownMode && res.n === res.N ? "Every annotated protein of the page is shown: filter or lasso a subset to test it against the page." : !rows.length ? `No ${ft} term is carried by ${o.min}+ proteins and over-represented.` : "";
+  $("enrMsg").hidden = !msg; $("enrMsg").textContent = msg;
+  if (msg) { Plotly.purge($("enr")); return; }
+  const X = x => o.x === "fold" ? x.fold : o.x === "count" ? x.k : x.lq, xt = o.x === "fold" ? "fold enrichment" : o.x === "count" ? "proteins with the term" : "−log10 q";
+  const labels = rows.map(x => wrap(res.R.name(x.t).replace(/\s*\[GO:\d+\]$/, ""), o.wrap)), longest = Math.max(...labels.flat().map(l => l.length));
+  const qmax = Math.max(...rows.map(x => x.lq), 1e-6), fs = font("tick"), boxW = $("enr").clientWidth || 800;
+  const trace = {type: "bar", orientation: "h", y: rows.map((_, j) => j), x: rows.map(X), marker: {color: rows.map(x => x.lq), colorscale: [[0, A.col.enrLow], [1, A.col.enrHigh]], cmin: 0, cmax: qmax, line: {width: 0}, colorbar: {thickness: 12, len: 0.6, tickfont: {size: fs}, title: {text: "−log10 q", side: "right", font: {size: font("axis")}}}},
+    text: rows.map(x => `${x.k.toLocaleString()}/${x.n.toLocaleString()}`), textposition: "outside", cliponaxis: false, textfont: {size: fs},
+    customdata: rows.map(x => [res.R.name(x.t), x.k, x.n, x.K, x.N, x.fold, x.q]), hovertemplate: "<b>%{customdata[0]}</b><br>%{customdata[1]:,}/%{customdata[2]:,} proteins vs %{customdata[3]:,}/%{customdata[4]:,} in the background<br>fold %{customdata[5]:.2f} · q %{customdata[6]:.2g}<br>click inspects<extra></extra>"};
+  const title = `<b>${shownMode ? "Shown proteins vs page" : `Cluster ${esc(S.enr.cl)} of ${esc(short(k))}`}</b> · ${esc(ft)} · ${res.n.toLocaleString()} annotated proteins vs ${res.N.toLocaleString()} · ${fallback ? `no term at q ≤ ${o.q}, most significant shown` : `${sig.length} terms at q ≤ ${o.q}`}`;
+  Plotly.react($("enr"), [trace], {...base(), bargap: rows.length < 8 ? 0.55 : 0.25, margin: {l: Math.min(boxW * 0.45, longest * fs * 0.6 + 16), r: 60, t: font("axis") + 24, b: 30 + 2 * font("axis")}, modebar: {orientation: "v"},
+    xaxis: {title: {text: xt, font: {size: font("axis")}}, tickfont: {size: fs}, gridcolor: "#e6e8ec", zeroline: false, rangemode: "tozero"},
+    yaxis: {tickvals: rows.map((_, j) => j), ticktext: labels.map(l => l.map(esc).join("<br>")), autorange: "reversed", tickfont: {size: fs}, automargin: false},
+    annotations: [{text: title, x: 0, xanchor: "left", y: 1, yanchor: "bottom", xref: "paper", yref: "paper", showarrow: false, font: {size: font("axis")}}]},
+    {responsive: true, displaylogo: false, toImageButtonOptions: {format: "png", scale: 2, filename: `${p.slug}_enrichment_${shownMode ? "shown" : short(k) + "_" + S.enr.cl}_${ft.replace(/\W+/g, "_")}`}});
+  hook("enr", "plotly_click", e => { const pt = e.points && e.points[0]; if (!pt) return; const x = rows[pt.pointIndex]; showInspect({type: "assoc", k, ft, cl: shownMode ? null : S.enr.cl, t: x.t, term: res.R.name(x.t), x}, true); });
+  $("ePrev").disabled = $("eCl").selectedIndex <= 0; $("eNext").disabled = $("eCl").selectedIndex >= $("eCl").options.length - 1;
 }
-view("enrich", {label: "Enrichment", title: "Clusters of any series against UniProt families, GO terms and the other features", panel: "enrBox", ctl: "ctlEnr", plots: ["enr"], render: enrich, ok: () => FT.length > 0 || enrSingles(P[S.page]).length > 0});
+view("enrich", {label: "Enrichment", title: "Terms over-represented in a cluster or in the shown proteins", panel: "enrBox", ctl: "ctlEnr", plots: ["enr"], render: enrich, ok: () => FT.length > 0 || enrSingles(P[S.page]).length > 0});

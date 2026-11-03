@@ -1,8 +1,7 @@
 const INSPECT_FEATURES = ["GO process", "GO function", "Keyword", "Family", "Pathway"];
-function showInspect(o, quiet) {
+function showInspect(o, open) {
   S.insp = o;
-  if (innerWidth >= 900 && (A.lay.noright || A.lay.tab !== "insp")) { A.lay.tab = "insp"; A.lay.noright = false; save(); applyCss(); refit(); }
-  if (!quiet) inspect();
+  if (open) { A.lay.tab = "insp"; save(); paneTog("right", true); }
 }
 function card(title, sub, body, actions) {
   const el = document.createElement("div"); el.className = "icard";
@@ -39,16 +38,18 @@ function clusterCard(p, k, nm) {
   const spRows = [...per].map((n, j) => [j, n]).filter(([, n]) => n).sort((u, v) => v[1] - u[1]).map(([j, n]) => [`<i class="sw" style="background:${spCols[j]}"></i>${esc(spc[j][0])}`, `${n.toLocaleString()} · ${(100 * n / total).toFixed(1)}%`]);
   const terms = fts.map((f, j) => { const top = [...tc[j]].sort((u, v) => v[1] - u[1]).slice(0, 6); return top.length ? `<div><b>${esc(f)}</b>: ${top.map(([t, n]) => `<span class="tag" title="${n.toLocaleString()} proteins">${esc(D.features[f].vocab[t])} · ${(100 * n / total).toFixed(0)}%</span>`).join("")}</div>` : ""; }).join("");
   const body = `<div>${total.toLocaleString()} proteins · ${shownN.toLocaleString()} shown</div>${tags.map(t => `<span class="tag">${t}</span>`).join("")}${table(spRows)}${terms}`;
-  return card(nm, `Cluster of ${short(k)} · ${p.title}`, body, [["Isolate", () => isolate(nm, k)], ["Hide", () => { hidden(k).add(nm); draw(); }], ["Show", () => { hidden(k).delete(nm); draw(); }]]);
+  return card(nm, `Cluster of ${short(k)} · ${p.title}`, body, [["Isolate", () => isolate(nm, k)], ["Hide", () => { hidden(k).add(nm); draw(); }], ["Show", () => { hidden(k).delete(nm); draw(); }], ...(FT.length && k !== "sample" ? [["Enrichment", () => { S.enr.ser = k; S.enr.cl = nm; setView("enrich"); }, "Terms over-represented in this cluster"]] : [])]);
 }
 function termCard(o) {
   const F = D.features[o.nm], nb = o.nb.slice(0, 10).map(([t, w, j]) => [esc(clip(F.vocab[t], 60)), `${w.toLocaleString()} · J ${j.toFixed(2)}`]);
   return card(F.vocab[o.t], `${o.nm} term · network`, `<div>${o.n.toLocaleString()} shown proteins (${(100 * o.share).toFixed(1)}%) · ${F.n[o.t].toLocaleString()} in the dataset</div>${o.comm ? `<span class="tag">${esc(o.comm)}</span>` : ""}${nb.length ? `<div class="muted">Strongest neighbours (shared proteins · Jaccard)</div>${table(nb)}` : ""}`, [["Keep its proteins", () => ftIsolate(o.nm, o.t)], ["Add to filter", () => ftIsolate(o.nm, o.t, true)]]);
 }
 function assocCard(o) {
-  const x = o.x, single = !FT.includes(o.ft), body = x ? table([["Proteins of the cluster with the term", `${x.v.toLocaleString()} / ${x.a.toLocaleString()}`], ["Share of the cluster", `${(100 * x.frac).toFixed(1)}%`], ["Shown proteins with the term", x.b.toLocaleString()], ["log2 enrichment", x.enr.toFixed(2)], ["q (hypergeometric, BH)", x.q.toExponential(2)]]) : `<div class="muted">Fewer than ${A.enr.min} proteins share this cluster and term.</div>`;
+  const x = o.x, single = !FT.includes(o.ft), rows = [["Cluster proteins with the term", `${x.k.toLocaleString()} / ${x.n.toLocaleString()} (${(100 * x.k / x.n).toFixed(1)}%)`], ["Background proteins with the term", `${x.K.toLocaleString()} / ${x.N.toLocaleString()} (${(100 * x.K / x.N).toFixed(1)}%)`], ["Fold enrichment", x.fold.toFixed(2)], ["p (hypergeometric)", x.p.toExponential(2)], ["q (BH)", x.q.toExponential(2)]];
   const keepTerm = () => single ? isolate(o.term, o.ft) : ftIsolate(o.ft, o.t);
-  return card(`${o.cl} × ${o.term}`, `${short(o.k)} × ${o.ft} · enrichment`, body, [["Isolate cluster", () => isolate(o.cl, o.k)], ["Keep term proteins", keepTerm], ["Both", () => { isolate(o.cl, o.k); if (single) { const p = page(), cats = p.sets[o.ft].cats; setHidden(o.ft, new Set(cats.map(c => c[0]).filter(n => n !== o.term))); draw(); } else ftIsolate(o.ft, o.t, true); }]]);
+  const acts = [["Keep term proteins", keepTerm]];
+  if (o.cl !== null) acts.unshift(["Isolate cluster", () => isolate(o.cl, o.k)]);
+  return card(o.term, o.cl === null ? `${o.ft} · shown proteins against the page` : `${o.ft} · cluster ${o.cl} of ${short(o.k)}`, table(rows), acts);
 }
 function inspect() {
   if (document.body.classList.contains("noright") || A.lay.tab !== "insp") return;

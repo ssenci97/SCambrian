@@ -59,7 +59,7 @@ function points(p, k, keep) {
     el.on("plotly_relayout", e => Object.keys(e).forEach(k => { const m = k.match(/^(scene\d*)\.camera$/); if (m) S.cam[m[1]] = e[k]; if (k === "dragmode") { S.drag = e[k]; $("lassoTog").checked = S.drag === "lasso"; } }));
     el.on("plotly_selected", e => { if (!e || S.view !== "2d") return; const n = P[S.page].methods.length, sel = new Set(); e.points.forEach(pt => { if (pt.curveNumber >= S.gn && pt.curveNumber < S.gn + n) sel.add(S.keep[pt.pointIndex]); }); if (sel.size) { S.lasso = sel; draw(); } });
     el.on("plotly_deselect", () => { if (S.lasso) { S.lasso = null; draw(); } });
-    el.on("plotly_click", e => { const pt = e && e.points && e.points[0], n = P[S.page].methods.length; if (!pt || pt.curveNumber < S.gn || pt.curveNumber >= S.gn + n) return; const i = S.keep[pt.pointNumber ?? pt.pointIndex]; if (i !== undefined) showInspect({type: "protein", i, page: S.page}); });
+    el.on("plotly_click", e => { const pt = e && e.points && e.points[0], n = P[S.page].methods.length; if (!pt || pt.curveNumber < S.gn || pt.curveNumber >= S.gn + n) return; const i = S.keep[pt.pointNumber ?? pt.pointIndex]; if (i !== undefined) showInspect({type: "protein", i, page: S.page}, true); });
   }
 }
 view("3d", {label: "3D", title: "3D scatter", panel: "stage", ctl: "ctlPts", plots: ["plot"], points: true, render: points});

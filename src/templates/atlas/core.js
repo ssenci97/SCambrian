@@ -2,17 +2,17 @@ const D = JSON.parse(document.getElementById("payload").textContent);
 const C = D.config, P = D.pages, $ = id => document.getElementById(id);
 const FT = Object.keys(D.features || {}), DESC = D.desc ? D.desc.split("\n") : null, FOUND_TERMS = 8, NET_EDGES = 2500;
 const FONT_KEYS = [["ui", "Interface"], ["title", "Plot titles"], ["axis", "Axis titles"], ["tick", "Tick labels"], ["legend", "Legend"], ["hover", "Hover boxes"], ["label", "2D cluster labels"], ["net", "Network labels"], ["sankey", "Flux node labels"], ["star", "Bar asterisks"], ["inspect", "Inspector"]];
-const SPECIAL = [["unassigned", "Unassigned"], ["other", "Pooled \"other\""], ["minor", "Uncoloured clusters"], ["ghost", "Ghost points"], ["ring", "Find ring"], ["edge", "Network edges"], ["low", "Scale low"], ["high", "Scale high"]];
-const STORE = "scambrian-atlas:" + D.title;
+const SPECIAL = [["enrLow", "Enrichment: least significant"], ["enrHigh", "Enrichment: most significant"], ["unassigned", "Unassigned"], ["other", "Pooled \"other\""], ["minor", "Uncoloured clusters"], ["ghost", "Ghost points"], ["ring", "Find ring"], ["edge", "Network edges"], ["low", "Scale low"], ["high", "Scale high"]];
+const STORE = "scambrian-atlas-v2:" + D.title;
 const COMMUNITY = "network communities";
 function defaults() {
   return {
     font: {ui: C.font_ui, title: C.font_title, axis: C.font_axis, tick: C.font_tick, legend: C.font_legend, hover: C.font_hover, label: C.font_label, net: C.font_net, sankey: C.font_sankey, star: C.font_tick, inspect: C.font_ui}, scale: 1,
-    col: {palette: [...C.palette], unassigned: C.color_bg, other: C.color_other, minor: C.color_minor, ghost: C.color_ghost, ring: "#000000", edge: "#9aa1ad", low: C.quant[0], high: C.quant[1]},
+    col: {palette: [...C.palette], unassigned: C.color_bg, other: C.color_other, minor: C.color_minor, ghost: C.color_ghost, ring: "#000000", edge: "#9aa1ad", low: C.quant[0], high: C.quant[1], enrLow: "#4575B4", enrHigh: "#D73027"},
     ov: {}, z: {},
     mk: {size: C.marker_size, alpha: C.alpha, ghost: true, ghostAlpha: C.ghost_alpha, ring: 14, labels: true, maxLabels: C.max_labels, maxColored: C.max_colored},
-    lay: {stack: "auto", left: 300, right: 320, fluxNodes: C.flux_nodes, maxChips: C.max_chips, noleft: false, noright: false, tab: "insp"},
-    enr: {mode: "clusters", metric: "enr", sumMetric: "nmi", rows: 40, cols: 30, min: 3, q: 0.05, order: "diag", clip: 40, values: false},
+    lay: {stack: "auto", left: 270, right: 360, fluxNodes: C.flux_nodes, maxChips: C.max_chips, topN: 10, noleft: false, tab: "insp"},
+    enr: {x: "lq", terms: 20, min: 3, q: 0.05, wrap: 40},
     net: {terms: C.max_network_terms, edge: C.min_edge_proteins, jac: 0, weight: "jaccard", layout: "fa2", colour: "share", iter: 300, spacing: 1, nodeScale: 1, edgeScale: 1, labels: C.net_labels, clip: 32, isolated: false, seed: 1},
   };
 }
@@ -29,7 +29,7 @@ function save() { clearTimeout(saveT); saveT = setTimeout(() => { try { localSto
 function aget(path) { return path.split(".").reduce((o, k) => o == null ? o : o[k], A); }
 function aset(path, v) { const ks = path.split("."), last = ks.pop(); ks.reduce((o, k) => o[k], A)[last] = v; }
 function font(k) { return Math.max(4, Math.round(A.font[k] * A.scale)); }
-const S = {page: 0, view: "overview", last: "3d", colour: "sample", fser: D.leiden_key, f: {sample: new Set(), series: {}}, q: {sp: "", cl: "", ft: ""}, ft: {}, ftSel: FT[0] || null, ftCnt: null, lasso: null, find: null, insp: null, cam: {}, rev: 0, proj: {x: 0, y: 1, az: 0, el: 0}, flux: {from: null, to: null}, log: false, pct: false, drag: "lasso", keep: [], ghostIdx: [], gn: 0, cols: [], fit: false, n: 0, netCache: null, ctPage: 0, ctQ: "", enr: {ser: D.leiden_key, ft: null}, enrSum: null};
+const S = {page: 0, view: "3d", last: "3d", colour: D.leiden_key, openRight: false, more: {sp: false, cl: false, ft: false}, fser: D.leiden_key, f: {sample: new Set(), series: {}}, q: {sp: "", cl: "", ft: ""}, ft: {}, ftSel: FT[0] || null, ftCnt: null, lasso: null, find: null, insp: null, cam: {}, rev: 0, proj: {x: 0, y: 1, az: 0, el: 0}, flux: {from: null, to: null}, log: false, pct: false, drag: "pan", keep: [], ghostIdx: [], gn: 0, cols: [], fit: false, n: 0, netCache: null, ctPage: 0, ctQ: "", enr: {ser: D.leiden_key, cl: null, ft: null}};
 const VIEWS = {};
 function view(id, v) { VIEWS[id] = v; }
 function decode(s, T) { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new T(u.buffer); }

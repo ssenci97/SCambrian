@@ -6,29 +6,39 @@ function buildAppearance() {
   $("specRows").innerHTML = SPECIAL.map(([k, label]) => `<label class="row">${label} <input type="color" data-a="col.${k}"></label>`).join("");
   $("fontReset").onclick = () => { const d = defaults(); A.font = d.font; A.scale = d.scale; changed("font"); };
   $("palReset").onclick = () => { A.col = defaults().col; changed("col"); };
+  numberBoxes();
 }
 function applyCss() {
   const r = document.documentElement.style, mobile = innerWidth < 900;
   r.setProperty("--fs-ui", font("ui") + "px"); r.setProperty("--fs-inspect", font("inspect") + "px");
   r.setProperty("--lw", A.lay.left + "px"); r.setProperty("--rw", A.lay.right + "px");
   document.body.classList.toggle("noleft", mobile ? !S.openLeft : A.lay.noleft);
-  document.body.classList.toggle("noright", mobile ? !S.openRight : A.lay.noright);
+  document.body.classList.toggle("noright", !S.openRight);
   ["insp", "app"].forEach(t => { $(t).hidden = A.lay.tab !== t; document.querySelector(`[data-tab="${t}"]`).classList.toggle("on", A.lay.tab === t); });
-  $("inspTog").classList.toggle("on", !document.body.classList.contains("noright") && A.lay.tab === "insp");
-  $("appTog").classList.toggle("on", !document.body.classList.contains("noright") && A.lay.tab === "app");
+  $("inspTog").classList.toggle("on", S.openRight && A.lay.tab === "insp");
+  $("appTog").classList.toggle("on", S.openRight && A.lay.tab === "app");
   $("leftTog").classList.toggle("on", !document.body.classList.contains("noleft"));
 }
 let fitT = null;
 function refit() { clearTimeout(fitT); fitT = setTimeout(() => (VIEWS[S.view].plots || []).forEach(id => { if ($(id).data) Plotly.Plots.resize($(id)); }), 60); }
 function paneTog(side, open) {
-  const mobile = innerWidth < 900, key = side === "left" ? "openLeft" : "openRight", no = "no" + side, cur = mobile ? !!S[key] : !A.lay[no], next = open === undefined ? !cur : open;
-  if (mobile) { S[key] = next; if (next) S[side === "left" ? "openRight" : "openLeft"] = false; } else { A.lay[no] = !next; save(); }
-  applyCss(); refit(); colourTable(); inspect();
+  if (side === "right") { S.openRight = open === undefined ? !S.openRight : open; if (S.openRight && innerWidth < 900) S.openLeft = false; applyCss(); colourTable(); inspect(); return; }
+  const mobile = innerWidth < 900, cur = mobile ? !!S.openLeft : !A.lay.noleft, next = open === undefined ? !cur : open;
+  if (mobile) { S.openLeft = next; if (next) S.openRight = false; } else { A.lay.noleft = !next; save(); }
+  applyCss(); refit();
 }
-function rightTab(t) { const open = !document.body.classList.contains("noright"); if (open && A.lay.tab === t) { paneTog("right", false); return; } A.lay.tab = t; save(); paneTog("right", true); }
+function rightTab(t) { if (S.openRight && A.lay.tab === t) { paneTog("right", false); return; } A.lay.tab = t; save(); paneTog("right", true); }
+function numberBoxes() {
+  document.querySelectorAll("output[data-v]").forEach(o => {
+    const r = o.previousElementSibling, n = document.createElement("input");
+    n.type = "number"; n.className = "num"; n.dataset.a = o.dataset.v; n.setAttribute("aria-label", o.dataset.v);
+    if (r && r.type === "range") { n.min = r.min; n.max = r.max; n.step = "any"; }
+    o.replaceWith(n);
+  });
+}
 function syncControls() {
   document.querySelectorAll("[data-a]").forEach(el => { const v = aget(el.dataset.a); if (v === undefined) return; if (el.type === "checkbox") el.checked = !!v; else el.value = v; });
-  document.querySelectorAll("[data-v]").forEach(el => { const v = aget(el.dataset.v); el.textContent = el.dataset.v.startsWith("lay.") ? v + "px" : v; });
+
 }
 function changed(path) {
   save(); syncControls();
@@ -60,7 +70,7 @@ function ctCats(p, k) {
   return order(cats, k !== "sample").map(i => [cats[i][0], cols[i], cats[i][2]]);
 }
 function colourTable() {
-  if (document.body.classList.contains("noright") || A.lay.tab !== "app") return;
+  if (!S.openRight || A.lay.tab !== "app") return;
   const p = page(), keys = ctSeries(p), cur = $("ctSer").value;
   $("ctSer").replaceChildren(...keys.map(k => new Option(k, k)));
   $("ctSer").value = keys.includes(cur) ? cur : keys.includes(S.colour) ? S.colour : keys[0];

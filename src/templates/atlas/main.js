@@ -7,7 +7,7 @@ function syncView() {
   route();
 }
 function setView(v) { if (!viewOk(v)) v = "3d"; if (v === S.view) { draw(); return; } S.view = v; if (VIEWS[v].points) S.last = v; S.fit = true; syncView(); draw(); }
-function syncProj() { const pr = S.proj; $("pX").value = pr.x; $("pY").value = pr.y; $("pAz").value = pr.az; $("pEl").value = pr.el; $("pAzV").textContent = pr.az + "°"; $("pElV").textContent = pr.el + "°"; }
+function syncProj() { const pr = S.proj; $("pX").value = pr.x; $("pY").value = pr.y; $("pAz").value = pr.az; $("pEl").value = pr.el; $("pAzN").value = pr.az; $("pElN").value = pr.el; }
 function setAxis(w, v) { const o = w === "x" ? "y" : "x"; if (S.proj[o] === v) S.proj[o] = S.proj[w]; S.proj[w] = v; syncProj(); draw(); }
 function sync() {
   const p = P[S.page], keys = seriesKeys(p);
@@ -23,10 +23,10 @@ function sync() {
 function route() { try { history.replaceState(null, "", `#${S.page + 1}/${S.view}`); } catch (e) {} }
 function go(i, keepView) {
   if (i < 0 || i >= P.length || i === S.page) return;
-  S.page = i; S.find = null; S.lasso = null; S.flux = {from: null, to: null}; S.ft = {}; S.netCache = null; S.enrSum = null; $("find").value = ""; $("find").classList.remove("miss");
+  S.page = i; S.find = null; S.lasso = null; S.flux = {from: null, to: null}; S.ft = {}; S.netCache = null; S.enr.cl = null; S.more = {sp: false, cl: false, ft: false}; $("find").value = ""; $("find").classList.remove("miss");
   if (S.insp && S.insp.type !== "cluster") S.insp = null;
   if (!keepView && !viewOk(S.view)) S.view = S.last;
-  S.fit = true; unfilter(); startFilters(); syncView(); sync(); draw();
+  S.fit = true; unfilter(); syncView(); sync(); draw();
 }
 function colourBy(k) { S.colour = k; if (k !== "sample") S.fser = k; sync(); draw(); }
 document.title = D.title;
@@ -35,7 +35,7 @@ $("viewSeg").replaceChildren(...Object.entries(VIEWS).filter(([, v]) => !v.nav).
 ["pX", "pY"].forEach(id => $(id).replaceChildren(...[0, 1, 2].map(d => new Option(`dim ${d + 1}`, d))));
 $("pX").onchange = e => setAxis("x", +e.target.value);
 $("pY").onchange = e => setAxis("y", +e.target.value);
-["pAz", "pEl"].forEach(id => { $(id).oninput = e => { S.proj[id === "pAz" ? "az" : "el"] = +e.target.value; syncProj(); }; $(id).onchange = () => draw(); });
+["pAz", "pEl"].forEach(id => { $(id).oninput = e => { S.proj[id === "pAz" ? "az" : "el"] = +e.target.value; syncProj(); }; $(id).onchange = () => draw(); $(id + "N").onchange = e => { const r = $(id), v = Math.max(+r.min, Math.min(+r.max, +e.target.value || 0)); S.proj[id === "pAz" ? "az" : "el"] = v; syncProj(); draw(); }; });
 $("pDef").onclick = () => { S.proj = {x: 0, y: 1, az: 0, el: 0}; syncProj(); draw(); };
 $("fFrom").onchange = e => { S.flux = {from: e.target.value, to: fluxKeys(page())[1]}; draw(); };
 $("fTo").onchange = e => { S.flux = {from: fluxKeys(page())[0], to: e.target.value}; draw(); };
@@ -46,21 +46,21 @@ $("ftSel").replaceChildren(...[ftGroup("Annotation", FT.filter(nm => !D.features
 $("ftSel").onchange = e => { S.ftSel = e.target.value; S.q.ft = ""; $("qFt").value = ""; draw(); };
 $("ftAnd").onchange = e => { ftState(S.ftSel).and = e.target.checked; draw(); };
 $("qFt").oninput = e => { S.q.ft = e.target.value; ftList(); };
-$("ftAll").onclick = () => { const st = ftState(S.ftSel); ftTerms().forEach(t => st.on.add(t)); draw(); };
 $("ftNone").onclick = () => { ftState(S.ftSel).on.clear(); draw(); };
-$("ftClr").onclick = () => { S.ft = {}; draw(); };
 $("nFeat").onchange = e => { S.net = e.target.value; draw(); };
 $("nRelayout").onclick = () => { A.net.seed = (A.net.seed || 1) + 1; save(); draw(); };
-$("eSer").onchange = e => { S.enr.ser = e.target.value; draw(); };
+$("eSer").onchange = e => { S.enr.ser = e.target.value; S.enr.cl = null; draw(); };
+$("eCl").onchange = e => { S.enr.cl = e.target.value; draw(); };
+$("ePrev").onclick = () => enrStep(-1);
+$("eNext").onclick = () => enrStep(1);
 $("eFt").onchange = e => { S.enr.ft = e.target.value; draw(); };
 $("homeBtn").onclick = () => setView("overview");
 $("prev").onclick = () => go(S.page - 1);
 $("next").onclick = () => go(S.page + 1);
 $("pageSel").onchange = e => go(+e.target.value);
 $("colourSel").onchange = e => colourBy(e.target.value);
-$("fserSel").onchange = e => { S.fser = e.target.value; S.q.cl = ""; $("qCl").value = ""; sidebar(page(), S.n); };
+$("fserSel").onchange = e => { S.fser = e.target.value; S.q.cl = ""; $("qCl").value = ""; S.more.cl = false; sidebar(page(), S.n); };
 $("picker").onchange = e => { const pk = e.target._pick; if (!pk) return; setColour(pk[0], pk[1], e.target.value); e.target._pick = null; draw(); };
-document.querySelectorAll("[data-reset]").forEach(b => b.onclick = () => { const k = b.dataset.reset === "sample" ? "sample" : S.fser; delete A.ov[k]; delete A.z[k]; save(); draw(); });
 const listOf = w => w === "sample" ? "sp" : "cl";
 document.querySelectorAll("[data-all]").forEach(b => b.onclick = () => { const s = listOf(b.dataset.all), k = listKey(s), cats = P[S.page].sets[k].cats, h = hidden(k); shown(s).forEach(i => h.delete(cats[i][0])); draw(); });
 document.querySelectorAll("[data-none]").forEach(b => b.onclick = () => { const s = listOf(b.dataset.none), k = listKey(s), cats = P[S.page].sets[k].cats, h = hidden(k); shown(s).forEach(i => h.add(cats[i][0])); draw(); });
@@ -69,11 +69,9 @@ $("pctBtn").onclick = () => { S.pct = !S.pct; bars(page()); };
 $("find").onkeydown = e => { if (e.key === "Enter") find(e.target.value); else if (e.key === "Escape") { e.target.value = ""; find(""); e.target.blur(); } };
 $("find").onsearch = e => { if (!e.target.value) find(""); };
 $("exportIds").onclick = exportIds;
-$("lassoClr").onclick = () => { S.lasso = null; draw(); };
-$("clearAll").onclick = () => { unfilter(); S.ft = {}; S.lasso = null; S.find = null; $("find").value = ""; draw(); };
 $("lassoTog").checked = S.drag === "lasso";
 $("lassoTog").onchange = e => { S.drag = e.target.checked ? "lasso" : "pan"; if (S.view === "2d") Plotly.relayout($("plot"), {dragmode: S.drag}); };
-$("selBtn").onclick = () => { unfilter(); startFilters(); sync(); draw(); };
+$("selBtn").onclick = () => { delete S.f.series[D.leiden_key]; tick(P[S.page].selected); sync(); draw(); };
 $("probeBtn").onclick = () => { delete S.f.series[D.leiden_key]; tick(P[S.page].probe); sync(); draw(); };
 $("reset").onclick = () => { S.rev++; S.cam = {}; draw(); };
 $("qSp").oninput = e => { S.q.sp = e.target.value; sidebar(page(), S.n); };
@@ -83,6 +81,7 @@ $("inspTog").onclick = () => rightTab("insp");
 $("appTog").onclick = () => rightTab("app");
 document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { A.lay.tab = b.dataset.tab; save(); applyCss(); colourTable(); inspect(); });
 $("helpBtn").onclick = () => { $("help").hidden = !$("help").hidden; };
+$("rightClose").onclick = () => paneTog("right", false);
 $("helpClose").onclick = () => { $("help").hidden = true; };
 $("ctSer").onchange = () => { S.ctPage = 0; colourTable(); };
 $("ctQ").oninput = e => { S.ctQ = e.target.value; S.ctPage = 0; colourTable(); };
@@ -95,7 +94,7 @@ $("setImport").onclick = () => $("setFile").click();
 $("setFile").onchange = e => { const f = e.target.files[0]; if (f) settingsImport(f); e.target.value = ""; };
 $("setReset").onclick = settingsReset;
 addEventListener("keydown", e => {
-  if (e.key === "Escape") { $("help").hidden = true; if (innerWidth < 900) { S.openLeft = S.openRight = false; applyCss(); } }
+  if (e.key === "Escape") { $("help").hidden = true; if (innerWidth < 900) S.openLeft = false; if (S.openRight) paneTog("right", false); else applyCss(); }
   if (e.ctrlKey || e.metaKey || e.altKey || (["INPUT", "SELECT", "TEXTAREA"].includes(e.target.tagName) && !["checkbox", "range", "color"].includes(e.target.type))) return;
   if (e.key === "ArrowLeft") go(S.page - 1);
   else if (e.key === "ArrowRight") go(S.page + 1);
@@ -107,10 +106,6 @@ addEventListener("keydown", e => {
 });
 let rt = null, wasMobile = innerWidth < 900;
 addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { const m = innerWidth < 900; if (m !== wasMobile) { wasMobile = m; applyCss(); } if (VIEWS[S.view].points) draw(); else if (S.view === "bars" || S.view === "enrich") draw(); }, 200); });
-const [hp, hv] = location.hash.slice(1).split("/"), h = parseInt(hp, 10);
-S.page = h >= 1 && h <= P.length ? h - 1 : 0;
+S.page = 0;
 buildAppearance(); bindControls(); syncControls(); applyCss();
-startFilters();
-S.view = hv && VIEWS[hv] && viewOk(hv) ? hv : "overview";
-if (VIEWS[S.view].points) S.last = S.view;
 syncView(); syncProj(); sync(); draw();
