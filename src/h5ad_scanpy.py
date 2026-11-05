@@ -14,7 +14,7 @@ Probe clusters are called per probe P on the same series, where c_kP is the numb
     9. probe share p_kP = c_kP / n_P and fold enrichment E_kP = (c_kP / n_k) / (n_P / N);
     10. probe test: one-sided hypergeometric P(X >= c_kP), BH-corrected across all joint clusters (probe_q);
     11. probe cluster of P: at least one target protein, probe_q < probe_max_q, E_kP >= min_fold_change and c_kP >= min_probe_proteins, keeping the max_probe_clusters highest p_kP.
-The selection drives every report element. The panels, each A4/4 wide, are drawn for every method in ``--layout_methods`` (UMAP and t-SNE, 2D layouts): (a) internal layouts with all clusters of at least min_intra_cluster_proteins proteins coloured by protein count, (b) joint layouts coloured by specificity index, labelling per species its selected clusters on top of the others, with one facet per probe coloured by its probe clusters, then once: (c) a re-projected UMAP of all proteins of the selected clusters from every sample where present, optimised on the stored joint kNN graph restricted to them, (d) internal-to-selected joint cluster fluxes on a square-root (semi-quantitative) scale, coloured by specificity index and outlined in black from module_min_specificity_percent, and (e) a per-sample protein-count barplot of the selected clusters with chi-square significance asterisks. Probe outputs are the probe_cluster_enrichment and probe_capture tables (target proteins inside the probe clusters, per target and probe), a ``probe_selected`` column of the species enrichment table and one protein module of the target proteins of every probe cluster. Output names end with ``__<report_series>``. A report whose outputs all exist and are newer than this script, the .h5ad and the summary is skipped unless ``--overwrite`` is set. All figures are saved as PNG and PDF, merged into ``<model>_scanpy.pdf``.
+The selection drives every report element. The panels, each A4/4 wide, are drawn for every method in ``--layout_methods`` (UMAP and t-SNE, 2D layouts): (a) internal layouts with all clusters of at least min_intra_cluster_proteins proteins coloured by protein count, (b) joint layouts coloured by specificity index, labelling per species its selected clusters on top of the others, with one facet per probe coloured by its probe clusters, then once: (c) a re-projected UMAP of all proteins of the selected clusters from every sample where present, optimised on the stored joint kNN graph restricted to them, (d) internal-to-selected joint cluster fluxes on a square-root (semi-quantitative) scale, coloured by specificity index and outlined in black from module_min_specificity_percent, and (e) a per-sample protein-count barplot of the selected clusters with chi-square significance asterisks. Probe outputs are the probe_cluster_enrichment and probe_capture tables (target proteins inside the probe clusters, per target and probe), a ``probe_selected`` column of the species enrichment table and one protein module of the target proteins of every probe cluster. With ``probe_mmseqs`` the same probe test, tables and modules are also written for every MMseqs2 joint series of the summary (outputs ending with ``__s_j_id90``, ...). Output names end with ``__<report_series>``. A report whose outputs all exist and are newer than this script, the .h5ad and the summary is skipped unless ``--overwrite`` is set. All figures are saved as PNG and PDF, merged into ``<model>_scanpy.pdf``.
 """
 ###################################### DEPENDENCIES_AND_CONSTANTS
 import anndata as ad
@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 import pymupdf
+import re
 import resource
 from scipy.stats import chi2_contingency, false_discovery_control, hypergeom
 import time
@@ -82,6 +83,8 @@ PALETTE_ALT = PALETTE[::2] + PALETTE[1::2]
 PANEL_DPI = 300
 PANEL_WIDTH_INCHES = A4_WIDTH_INCHES / 4
 PROBE_MAX_Q = 0.05
+PROBE_MMSEQS = True
+MMSEQS_JOINT_PATTERN = re.compile(r"_(s_j_id\d+)$")
 PT_SIZE = 1.0
 REPORT_SERIES = "u_j_leiden2d"
 REPORT_ORDER = ["umap_intra_species_top_clusters", "tsne_intra_species_top_clusters", "umap_joint_clusters_species_specificity", "tsne_joint_clusters_species_specificity", "umap_reprojected_top_clusters", "sankey_intra_to_inter_clusters", "barplot_umap_labelled_clusters_protein_counts"]
@@ -109,12 +112,13 @@ parser.add_argument("--chi2_max_q", type=float, default=CHI2_MAX_Q, help="BH-cor
 parser.add_argument("--probe_max_q", type=float, default=PROBE_MAX_Q, help="BH-corrected hypergeometric q-value below which a joint cluster can be a probe cluster")
 parser.add_argument("--min_probe_proteins", type=int, default=MIN_PROBE_PROTEINS, help="Minimum probe proteins of a probe cluster")
 parser.add_argument("--max_probe_clusters", type=int, default=MAX_PROBE_CLUSTERS, help="Probe clusters kept per probe, by decreasing probe share")
+parser.add_argument("--probe_mmseqs", action=argparse.BooleanOptionalAction, default=PROBE_MMSEQS, help="Also test the probes on every MMseqs2 joint series (s_j_id90, ...) of the summary")
 parser.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=OVERWRITE, help="Redraw a report whose outputs already exist")
 parser.add_argument("--yaml-in", nargs="?", const=YAML_PATH, default=YAML_PATH)
 parser.add_argument("--yaml-out", nargs="?", const=YAML_PATH, default=None)
 cli_preview, _ = parser.parse_known_args()
 script_key = "h5ad_scanpy"
-params = dict(report_series=REPORT_SERIES, layout_methods=LAYOUT_METHODS, max_selected_per_species=MAX_SELECTED_PER_SPECIES, min_species_proteins=MIN_SPECIES_PROTEINS, min_intra_cluster_proteins=MIN_INTRA_CLUSTER_PROTEINS, balanced_min_share_ratio=BALANCED_MIN_SHARE_RATIO, min_module_proteins=MIN_MODULE_PROTEINS, module_min_specificity_percent=MODULE_MIN_SPECIFICITY_PERCENT, chi2_max_q=CHI2_MAX_Q, min_fold_change=MIN_FOLD_CHANGE, probe_max_q=PROBE_MAX_Q, min_probe_proteins=MIN_PROBE_PROTEINS, max_probe_clusters=MAX_PROBE_CLUSTERS, overwrite=OVERWRITE)
+params = dict(report_series=REPORT_SERIES, layout_methods=LAYOUT_METHODS, max_selected_per_species=MAX_SELECTED_PER_SPECIES, min_species_proteins=MIN_SPECIES_PROTEINS, min_intra_cluster_proteins=MIN_INTRA_CLUSTER_PROTEINS, balanced_min_share_ratio=BALANCED_MIN_SHARE_RATIO, min_module_proteins=MIN_MODULE_PROTEINS, module_min_specificity_percent=MODULE_MIN_SPECIFICITY_PERCENT, chi2_max_q=CHI2_MAX_Q, min_fold_change=MIN_FOLD_CHANGE, probe_max_q=PROBE_MAX_Q, min_probe_proteins=MIN_PROBE_PROTEINS, max_probe_clusters=MAX_PROBE_CLUSTERS, probe_mmseqs=PROBE_MMSEQS, overwrite=OVERWRITE)
 if cli_preview.yaml_in and Path(cli_preview.yaml_in).exists():
     config_data = yaml.safe_load(Path(cli_preview.yaml_in).read_text()) or {}
     if script_key in config_data: params.update(config_data[script_key])
@@ -496,18 +500,49 @@ def write_tables(adata: ad.AnnData, js: JointStats, ps: ProbeStats, target_dir: 
     for sp in js.counts.columns:
         for cl in js.counts.index[js.significant & (js.spec[sp] >= args.module_min_specificity_percent / 100) & (js.counts[sp] >= args.min_module_proteins)]:
             obs.loc[(species_labels == sp).values & (cluster_labels == cl).values, "protein_id"].to_csv(modules_dir / f"{sp}_{js.counts.loc[cl, sp]:07d}_clust{cl}_{param_tag}.txt", index=False, header=False)
+    write_probe_tables(obs, ps, list(js.counts.columns), target_dir, modules_dir, param_tag)
+def write_probe_tables(obs: pd.DataFrame, ps: ProbeStats, species_list: list[str], target_dir: Path, modules_dir: Path, param_tag: str) -> None:
+    """Write the probe enrichment and capture tables and the target proteins of every probe cluster of one joint series.
+
+    Args:
+        obs (pd.DataFrame): Observation table with ``protein_id``, ``species``, ``input_type`` and ``cluster`` columns.
+        ps (ProbeStats): Probe cluster statistics of the series.
+        species_list (list[str]): Targets.
+        target_dir (Path): Report folder.
+        modules_dir (Path): Folder of the protein module lists.
+        param_tag (str): Series tag of the outputs.
+    """
+    cluster_labels, species_labels = obs["cluster"].astype(str), obs["species"].astype(str)
     ps.table.to_csv(target_dir / f"probe_cluster_enrichment__{param_tag}.csv", index=False)
     is_target = (obs["input_type"].astype(str) == "target").values
     capture = []
     for pr, cls in ps.ranked.items():
         in_probe = cluster_labels.isin(cls).values
-        for sp in js.counts.columns:
+        for sp in species_list:
             is_sp = (species_labels == sp).values
             capture.append(dict(target=sp, probe=pr, n_target=int(is_sp.sum()), n_in_probe_clusters=int((is_sp & in_probe).sum()), pct_in_probe_clusters=round(100 * (is_sp & in_probe).sum() / max(is_sp.sum(), 1), 2)))
         for cl in cls:
             members = is_target & (cluster_labels == cl).values
             obs.loc[members, "protein_id"].to_csv(modules_dir / f"{pr}_{int(members.sum()):07d}_clust{cl}_{param_tag}.txt", index=False, header=False)
     pd.DataFrame(capture, columns=["target", "probe", "n_target", "n_in_probe_clusters", "pct_in_probe_clusters"]).to_csv(target_dir / f"probe_capture__{param_tag}.csv", index=False)
+def mmseqs_probe_tables(obs: pd.DataFrame, summary: pd.DataFrame, species_list: list[str], probes: list[str], target_dir: Path, modules_dir: Path) -> None:
+    """Test the probes on every MMseqs2 joint series of the summary and write their probe tables and modules.
+
+    Args:
+        obs (pd.DataFrame): Observation table with ``protein_id``, ``species`` and ``input_type`` columns.
+        summary (pd.DataFrame): sc_summary.tsv indexed by record.
+        species_list (list[str]): Targets.
+        probes (list[str]): Probes.
+        target_dir (Path): Report folder.
+        modules_dir (Path): Folder of the protein module lists.
+    """
+    for column in summary.columns:
+        match = MMSEQS_JOINT_PATTERN.search(column)
+        if not match: continue
+        series_obs = obs.copy()
+        series_obs["cluster"] = series_obs["protein_id"].map(summary[column])
+        print(f"[PYTHON-INFO][SERIES] probe test on {column}; {series_obs['cluster'].isna().sum():,} proteins unassigned")
+        write_probe_tables(series_obs, probe_stats(series_obs, species_list, probes), species_list, target_dir, modules_dir, match.group(1))
 def intra_summary(obs: pd.DataFrame, species_list: list[str], modules_dir: Path, param_tag: str) -> dict[str, tuple[np.ndarray, int, pd.Series]]:
     """Summarise the intra-species clusters of every species and write the protein lists of the large ones.
 
@@ -640,7 +675,7 @@ def plot_reprojection(adata: ad.AnnData, clusters: list[str], colors: dict[str, 
     add_bottom_legend(fig, colors, "Joint cluster")
     save_fig(fig, path)
     plt.close(fig)
-def load_report_data(h5ad_path: Path, summary_path: Path) -> tuple[ad.AnnData, str]:
+def load_report_data(h5ad_path: Path, summary_path: Path) -> tuple[ad.AnnData, str, pd.DataFrame]:
     """Load the layouts and attach the joint and internal SERIALs of the report series from the summary.
 
     Args:
@@ -648,7 +683,7 @@ def load_report_data(h5ad_path: Path, summary_path: Path) -> tuple[ad.AnnData, s
         summary_path (Path): sc_summary.tsv of compile_summary.py.
 
     Returns:
-        tuple[ad.AnnData, str]: Layouts with ``protein_id``, ``species``, ``input_type``, ``cluster`` and ``intra_cluster`` observations, and the joint summary column.
+        tuple[ad.AnnData, str, pd.DataFrame]: Layouts with ``protein_id``, ``species``, ``input_type``, ``cluster`` and ``intra_cluster`` observations, the joint summary column and the summary indexed by record.
     """
     summary = pd.read_csv(summary_path, sep="\t", dtype=str).set_index("record")
     joint_col = next((c for c in summary.columns if c.endswith(f"_{args.report_series}")), None)
@@ -660,7 +695,7 @@ def load_report_data(h5ad_path: Path, summary_path: Path) -> tuple[ad.AnnData, s
     obs["cluster"] = obs["protein_id"].map(summary[joint_col])
     obs["intra_cluster"] = obs["protein_id"].map(summary[intra_col]) if intra_col in summary else np.nan
     print(f"[PYTHON-INFO][SERIES] joint {joint_col}, internal {intra_col if intra_col in summary else 'none'}; {obs['cluster'].isna().sum():,} proteins unassigned")
-    return adata, joint_col
+    return adata, joint_col, summary
 def report(h5ad_path: Path) -> None:
     """Write tables, modules, panels, fluxes and the merged PDF of the report series of one model.
 
@@ -672,11 +707,12 @@ def report(h5ad_path: Path) -> None:
     target_dir = Path(args.outdir) / h5ad_path.parent.name if args.outdir else h5ad_path.parent
     out = target_dir / f"{target_dir.name}_scanpy.pdf"
     done = [target_dir / f"species_cluster_enrichment__{param_tag}.csv", out] + [target_dir / f"{m}_joint_clusters_species_specificity__{param_tag}.pdf" for m in args.layout_methods]
+    if args.probe_mmseqs: done += [target_dir / f"probe_cluster_enrichment__{m.group(1)}.csv" for c in pd.read_csv(summary_path, sep="\t", nrows=0).columns if (m := MMSEQS_JOINT_PATTERN.search(c))]
     src_mtime = max(Path(__file__).stat().st_mtime, h5ad_path.stat().st_mtime, summary_path.stat().st_mtime)
     if not args.overwrite and all(p.exists() and p.stat().st_mtime > src_mtime for p in done):
         print(f"[PYTHON-INFO] Report of {h5ad_path} for {param_tag} already exists and is newer than its inputs. Skipping.")
         return
-    adata, joint_col = load_report_data(h5ad_path, summary_path)
+    adata, joint_col, summary = load_report_data(h5ad_path, summary_path)
     modules_dir, intra_dir = target_dir / "protein-modules", target_dir / "intra_group"
     for d in (modules_dir, intra_dir): d.mkdir(parents=True, exist_ok=True)
     inputs = list(dict.fromkeys(adata.obs["species"]))
@@ -686,6 +722,7 @@ def report(h5ad_path: Path) -> None:
     js, ps = joint_stats(adata.obs, species_list), probe_stats(adata.obs, species_list, probes)
     counts = pd.crosstab(adata.obs["cluster"].astype(str), adata.obs["species"]).reindex(columns=species_list + probes, fill_value=0)
     write_tables(adata, js, ps, target_dir, modules_dir, param_tag)
+    if args.probe_mmseqs and probes: mmseqs_probe_tables(adata.obs, summary, species_list, probes, target_dir, modules_dir)
     intra = intra_summary(adata.obs, species_list, modules_dir, param_tag)
     plot_layout_panels(adata, js, ps, counts, intra, target_dir, intra_dir, param_tag)
     if intra: plot_flux(adata.obs, js, intra, target_dir / f"sankey_intra_to_inter_clusters__{param_tag}.png")

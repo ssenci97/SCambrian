@@ -177,6 +177,7 @@ Outputs, all ending in `__<report_series>`:
 - `species_cluster_enrichment` and `species_top_clusters` (CSV); the enrichment table also flags the probe clusters (`probe_selected`);
 - `probe_cluster_enrichment` (one row per probe and joint cluster) and `probe_capture` (per target and probe, the target proteins inside the probe clusters, as a count and a percent; this is the probe readout);
 - `protein-modules/`: species modules, and the target proteins of every probe cluster (`<probe>_<n>_clust<cluster>_…`);
+- with `probe_mmseqs: true` (default), the probe test is repeated on every MMseqs2 joint series: `probe_cluster_enrichment`, `probe_capture` and probe-cluster modules ending in `__s_j_id90`, `__s_j_id80`, …;
 - UMAP and t-SNE panels: internal and joint layouts (probe facets coloured by their probe clusters), the re-projected selected clusters, the internal-to-joint flux diagram and the count barplot;
 - `<model>_scanpy.pdf`, which merges them.
 

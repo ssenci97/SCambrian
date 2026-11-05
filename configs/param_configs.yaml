@@ -72,6 +72,7 @@ h5ad_scanpy:
   probe_max_q: 0.05
   min_probe_proteins: 10
   max_probe_clusters: 6
+  probe_mmseqs: true
   overwrite: false
 h5ad_interactive:
   max_points_per_view: null
