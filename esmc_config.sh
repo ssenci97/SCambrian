@@ -54,7 +54,7 @@ fi
 
 ###################################### analysis (uniprot / dimred / scanpy) — also runs on an existing .env
 echo "[SLURM-INFO] Installing analysis deps..."
-pip install "numpy<2.3" pyyaml tqdm seaborn scikit-learn umap-learn pynndescent "scanpy>=1.10" anndata plotly ipywidgets anywidget pyprojroot matplotlib-venn numba safetensors igraph pymupdf kaleido "snakemake>=8" || { echo "[SLURM-INFO] Error: analysis deps install failed" >&2; exit 1; }
+pip install "numpy<2.3" pyyaml tqdm seaborn scikit-learn umap-learn pynndescent "scanpy>=1.10" anndata plotly ipywidgets anywidget pyprojroot matplotlib-venn numba safetensors igraph pymupdf kaleido "snakemake>=7.32,<8" "pulp<2.8" || { echo "[SLURM-INFO] Error: analysis deps install failed" >&2; exit 1; }
 
 ###################################### verify
 echo "[SLURM-INFO] Comprehensive verification..."
