@@ -7,7 +7,7 @@
 #SBATCH --mem=32G
 #SBATCH --time=16:00:00
 #SBATCH --output=logs/scanpy/project_%A_%a.log
-#SBATCH --array=0
+#SBATCH --array=0-2
 ###################################### conda
 source ~/scratch/miniconda/etc/profile.d/conda.sh
 conda activate ./.env

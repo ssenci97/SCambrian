@@ -134,7 +134,7 @@ SCambrian/                     (git clone)
   esmc_config.sh               builds ./.env once
   configs/query_configs.tsv    WHAT to analyse (one row per sample)
   configs/param_configs.yaml   HOW (one section per Python script)
-  slurms/run_all.sh            submits steps 01 -> 02 -> 03 -> 04 -> 05 -> 06
+  slurms/run_all.sh            Snakemake driver: submits only the steps with missing or stale outputs
   src/                         the Python code of each step
   data/                        per-sample data, shared across analyses (not in git)
   analyses/<analysis_name>/    one folder per analysis (not in git)
@@ -190,16 +190,16 @@ FASTA ids (the first word of each header) must be unique across samples; step 02
 \section{4. Run}
 
 \begin{verbatim}
-DRY_RUN=1 bash slurms/run_all.sh        # show what would be submitted
-bash slurms/run_all.sh                  # submit the whole chain
-bash slurms/run_all.sh 05 06            # only some steps
-ANALYSIS_NAME=test_SCambrian bash slurms/run_all.sh 02 03 04 05 06
-squeue -u $USER                         # follow the jobs; logs in logs/<step>/
+DRY_RUN=1 sbatch slurms/run_all.sh      # list the jobs that would be submitted
+sbatch slurms/run_all.sh                # run every step that is missing or stale
+sbatch slurms/run_all.sh 05 06          # target some steps (and what they still need)
+ANALYSIS_NAME=test_SCambrian sbatch slurms/run_all.sh 02
+squeue -u $USER                         # follow the jobs; logs in logs/snakemake/ and logs/<step>/
 \end{verbatim}
 
-Run these on the login node, not with \texttt{sbatch}. Each step starts only if the previous one succeeded. The dry run is also the quickest check of the configs: it reads both files and prints the array sizes and the analysis name.
+\texttt{run\_all.sh} is a small THIN job running Snakemake. Snakemake submits each step script, one array task at a time, only when its outputs are missing, older than their inputs or built with other parameters, and only after the steps it needs succeeded. CPU steps go to the free node with the most idle CPUs and memory (\texttt{slurms/best\_node.sh}); step 04 always goes to DGX. The dry run is also the quickest check of the configs: it reads both files and lists the jobs and the analysis name.
 
-The analysis name is fixed once and passed to every job. It is taken from \texttt{ANALYSIS\_NAME}, else from the YAML, else it is today's \texttt{\{YYYY-MM-DD\}\_SCambrian} when step 02 runs, or the newest \texttt{analyses/*\_SCambrian} folder for later steps.
+The analysis name is fixed once and passed to every job. It is taken from \texttt{ANALYSIS\_NAME}, else from the YAML, else it is today's \texttt{\{YYYY-MM-DD\}\_SCambrian} when step 02 is requested (or no analysis exists yet), or the newest \texttt{analyses/*\_SCambrian} folder, so a plain \texttt{run\_all.sh} resumes the latest analysis.
 
 \begin{longtable}[]{@{}p{0.08\columnwidth}p{0.44\columnwidth}p{0.4\columnwidth}@{}}
 \toprule\noalign{}
@@ -253,39 +253,11 @@ The notebooks in \texttt{nbs/} load every stage; use \texttt{./.env} as the kern
 
 \begin{itemize}
 \tightlist
-\item After changing a config, run \texttt{bash slurms/run\_all.sh} again: only missing or outdated outputs are rebuilt. To force a step, set \texttt{overwrite: true} in its section.
+\item After changing a config or adding a sample, run \texttt{sbatch slurms/run\_all.sh} again: only missing or outdated outputs are rebuilt, and a new sample is embedded alone. To force a step, set \texttt{overwrite: true} in its section.
 \item Data in \texttt{data/} (downloads, dedup, embeddings) is reused by every analysis; a new analysis name only rebuilds the joint steps and the summary.
-\item Outputs of the previous layout (\texttt{data/dedup/}, \texttt{data/features/*\_focus\_ids.*}, \texttt{analyses/<labels>/}) are not deleted automatically; remove them by hand.
+\item Outputs of the previous layout are not deleted automatically: \texttt{bash slurms/list\_relics.sh} prints them; remove them by hand.
 \end{itemize}
 
 Full details are in \texttt{README.md}.
-
-\section{7. Coming next (not available yet): project folders}
-
-The plan separates the \textbf{tool}, installed once, from \textbf{projects}, one folder per study, anywhere on disk:
-
-\begin{verbatim}
-install once:   git clone ... && sbatch esmc_config.sh   (the tool + ./.env)
-new project:    scambrian init ~/scratch/projects/my-study
-first try:      scambrian init --demo ~/scratch/projects/demo
-run:            cd ~/scratch/projects/my-study && scambrian run --dry-run
-                scambrian run
-results:        ~/scratch/projects/my-study/analyses/<analysis_name>/
-\end{verbatim}
-
-A project folder holds only your inputs and results. The SLURM scripts stay inside the tool, so fixes reach every project.
-
-\begin{longtable}[]{@{}p{0.47\columnwidth}p{0.47\columnwidth}@{}}
-\toprule\noalign{}
-today & after the change \\
-\midrule\noalign{}
-\endhead
-\bottomrule\noalign{}
-\endlastfoot
-edit \texttt{configs/*} in the clone & edit \texttt{scambrian.yaml} and \texttt{query\_configs.tsv} in a project \\
-\texttt{bash slurms/run\_all.sh} & \texttt{scambrian run} \\
-one \texttt{analyses/<analysis\_name>/} per run, shared \texttt{data/} & the same, inside each project \\
-one clone serves one set of configs & many projects per install \\
-\end{longtable}
 
 \end{document}

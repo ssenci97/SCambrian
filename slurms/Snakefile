@@ -1,0 +1,187 @@
+"""Snakemake DAG of the SCambrian steps 01-06.
+
+Every rule submits the unchanged ``slurms/0X.sh`` script through ``slurms/submit_step.sh`` with one array index, so ``SLURM_ARRAY_TASK_ID`` keeps its meaning (row of the query table, target position, file x model index, model index). A job is submitted only when its declared outputs are missing, older than their inputs, or its YAML section changed. Step 02 is a checkpoint whose first output is a stamp named after the hash of its YAML section and of the sample list: an edited query table, a newer input FASTA or (through the ``params`` of ``project``) a changed step-02 section reruns it, and the per-sample ``<label>_dedup.fasta`` files (rewritten by preprocess_sequences.py only when their content changes) are compared by mtime only after it ran, so only the samples whose dedup changed are re-clustered and re-embedded. Run with ``--rerun-triggers mtime params code``: the stamp name changes with the hash, which the ``input`` trigger would read as a changed input set of every job. Run from the repo root: ``snakemake -s slurms/Snakefile``; ``slurms/run_all.sh`` is the driver.
+"""
+###################################### DEPENDENCIES_AND_CONSTANTS
+import csv
+import datetime
+import hashlib
+import json
+import os
+import re
+from pathlib import Path
+import yaml
+
+CONFIG_YAML = "configs/param_configs.yaml"
+CFG = yaml.safe_load(Path(CONFIG_YAML).read_text()) or {}
+NEVER = "(?!x)x"
+###################################### HELPER_FUNCTIONS
+def section(key: str) -> dict:
+    """Return one YAML section without its run switches.
+
+    Args:
+        key (str): Section name of configs/param_configs.yaml.
+
+    Returns:
+        dict: The section, without ``overwrite``.
+    """
+    return {k: v for k, v in (CFG.get(key) or {}).items() if k != "overwrite"}
+def read_samples(tsv: str) -> list[dict]:
+    """Read the query table with the array index each step script expects.
+
+    Args:
+        tsv (str): Path of configs/query_configs.tsv.
+
+    Returns:
+        list[dict]: One dict per non-empty label with label, query, type, row (01), pos (04) and tpos (03, targets only).
+    """
+    rows = list(csv.DictReader(Path(tsv).read_text(encoding="utf-8").splitlines(), delimiter="\t"))
+    samples, pos, tpos = [], 0, 0
+    for row_idx, row in enumerate(rows, start=1):
+        label = (row.get("label") or "").strip()
+        if not label: continue
+        kind = (row.get("input_type") or "target").strip() or "target"
+        tpos += kind != "probe"
+        samples.append(dict(label=label, query=(row.get("query") or "").strip(), type=kind, row=row_idx, pos=pos, tpos=tpos if kind != "probe" else None))
+        pos += 1
+    return samples
+def analysis_name() -> str:
+    """Resolve the analysis name like slurms/analysis_env.sh.
+
+    Returns:
+        str: ANALYSIS_NAME, else the YAML name, else the newest ``*_SCambrian`` folder, else today's ``{YYYY-MM-DD}_SCambrian``.
+    """
+    name = os.environ.get("ANALYSIS_NAME") or (CFG.get("preprocess_sequences") or {}).get("analysis_name")
+    if name: return name
+    found = sorted(p.name for p in Path(ANALYSES_DIR).glob("*_SCambrian") if p.is_dir()) if Path(ANALYSES_DIR).is_dir() else []
+    return found[-1] if found else f"{datetime.date.today().isoformat()}_SCambrian"
+def labels_regex(labels: list[str]) -> str:
+    """Return a wildcard constraint matching exactly the given labels.
+
+    Args:
+        labels (list[str]): Allowed labels.
+
+    Returns:
+        str: Alternation of the escaped labels, or a never-matching pattern.
+    """
+    return "|".join(map(re.escape, labels)) or NEVER
+###################################### CONFIG
+TSV = (CFG.get("dw_uniprot_seqs") or {}).get("query_table", "configs/query_configs.tsv")
+SEQ_DIR = (CFG.get("dw_uniprot_seqs") or {}).get("sequences_dir", "data/sequences")
+FEAT_DIR = (CFG.get("dw_uniprot_features") or {}).get("features_dir", "data/features")
+PRE_DIR = (CFG.get("preprocess_sequences") or {}).get("preprocessed_dir", "data/preprocessed")
+ANALYSES_DIR = ((CFG.get("preprocess_sequences") or {}).get("analyses_dir") or "analyses").rstrip("/")
+CLU_DIR = (CFG.get("run_mmseqs2") or {}).get("clusters_dir", "data/clusters")
+REPS_DIR = (CFG.get("extract_reps_biohub") or {}).get("embeddings_dir", "data/esm-reps")
+MODELS = (CFG.get("extract_reps_biohub") or {}).get("models", ["esmc_300m"])
+MODELS = [MODELS] if isinstance(MODELS, str) else list(MODELS)
+REPORT_SERIES = (CFG.get("h5ad_scanpy") or {}).get("report_series", "u_j_leiden2d")
+SAMPLES = read_samples(TSV)
+BY_LABEL = {s["label"]: s for s in SAMPLES}
+LABELS = [s["label"] for s in SAMPLES]
+TARGETS = [s["label"] for s in SAMPLES if s["type"] != "probe"]
+LOCAL = [s["label"] for s in SAMPLES if re.search(r"\.(fa|faa|fasta)$", s["query"])]
+UNIPROT = [l for l in LABELS if l not in LOCAL]
+A = analysis_name()
+AD = f"{ANALYSES_DIR}/{A}"
+PRE_STATE = [section("preprocess_sequences"), [(s["label"], s["type"]) for s in SAMPLES]]
+PRE_STAMP = f"{AD}/.preprocess.{hashlib.md5(json.dumps(PRE_STATE, sort_keys=True, default=str).encode()).hexdigest()[:10]}.done"
+SUBMIT = f"ANALYSIS_NAME={A} bash slurms/submit_step.sh"
+if not TARGETS: raise ValueError(f"[SNAKEMAKE-ERROR] No target sample in {TSV}")
+
+wildcard_constraints:
+    model="|".join(map(re.escape, MODELS)),
+    label=labels_regex(LABELS),
+    target=labels_regex(TARGETS),
+    ulabel=labels_regex(UNIPROT),
+    llabel=labels_regex(LOCAL),
+###################################### TARGETS
+def summary_outputs() -> list[str]:
+    """List the declared outputs of step 06.
+
+    Returns:
+        list[str]: Per model summary, report table and atlas, plus the analysis RO-Crate.
+    """
+    per_model = [f"{AD}/{m}/{f}" for m in MODELS for f in ("sc_summary.tsv", f"species_cluster_enrichment__{REPORT_SERIES}.csv", "interactive/views_3d.html")]
+    return per_model + [f"{AD}/ro-crate-metadata.json"]
+
+rule all:
+    input: summary_outputs()
+rule step01:
+    input: [f"{SEQ_DIR}/{l}_seqs.fasta" for l in LABELS]
+rule step02:
+    input: PRE_STAMP
+rule step03:
+    input: [f"{CLU_DIR}/{t}/clustering_summary.txt" for t in TARGETS] + [f"{AD}/mmseqs_joint/clustering_summary.txt"]
+rule step04:
+    input: [f"{REPS_DIR}/{m}/{l}_reps.npz" for m in MODELS for l in LABELS]
+rule step05:
+    input: [f"{AD}/{m}/projections.h5ad" for m in MODELS]
+rule step06:
+    input: summary_outputs()
+###################################### 01 ACQUIRE
+rule acquire_uniprot:
+    output:
+        fasta=f"{SEQ_DIR}/{{ulabel}}_seqs.fasta",
+        tsv=f"{SEQ_DIR}/{{ulabel}}_seqs.tsv",
+        feats=f"{FEAT_DIR}/{{ulabel}}_feats.tsv",
+    params: idx=lambda wc: BY_LABEL[wc.ulabel]["row"], query=lambda wc: BY_LABEL[wc.ulabel]["query"]
+    shell: "{SUBMIT} slurms/01_dw_uniprot.sh {params.idx}"
+rule acquire_local:
+    input: lambda wc: BY_LABEL[wc.llabel]["query"]
+    output: f"{SEQ_DIR}/{{llabel}}_seqs.fasta"
+    params: idx=lambda wc: BY_LABEL[wc.llabel]["row"]
+    shell: "{SUBMIT} slurms/01_dw_uniprot.sh {params.idx}"
+###################################### 02 PREPROCESS
+checkpoint preprocess:
+    input: [TSV] + [f"{SEQ_DIR}/{l}_seqs.fasta" for l in LABELS]
+    output: stamp=PRE_STAMP, meta=f"{AD}/sc_metadata.tsv"
+    shell: "{SUBMIT} slurms/02_preprocess.sh && rm -f {AD}/.preprocess.*.done && touch {output.stamp}"
+def dedup(*labels: str) -> list[str]:
+    """Return dedup FASTAs once step 02 has run.
+
+    Args:
+        *labels (str): Sample labels.
+
+    Returns:
+        list[str]: The step-02 stamp (ancient, ordering only) and ``<preprocessed_dir>/<label>_dedup.fasta`` per label.
+    """
+    checkpoints.preprocess.get()
+    return [ancient(PRE_STAMP)] + [f"{PRE_DIR}/{l}_dedup.fasta" for l in labels]
+###################################### 03 MMSEQS2
+rule mmseqs_internal:
+    input: lambda wc: dedup(wc.target)
+    output: f"{CLU_DIR}/{{target}}/clustering_summary.txt"
+    params: idx=lambda wc: BY_LABEL[wc.target]["tpos"], cfg=section("run_mmseqs2")
+    resources: mmseqs=1
+    shell: "{SUBMIT} slurms/03_mmseqs2.sh {params.idx}"
+rule mmseqs_joint:
+    input: lambda wc: dedup(*LABELS)
+    output: f"{AD}/mmseqs_joint/clustering_summary.txt"
+    params: idx=len(TARGETS) + 1, cfg=section("run_mmseqs2")
+    resources: mmseqs=1
+    shell: "{SUBMIT} slurms/03_mmseqs2.sh {params.idx}"
+###################################### 04 REPS
+rule reps:
+    input: lambda wc: dedup(wc.label)
+    output: f"{REPS_DIR}/{{model}}/{{label}}_reps.npz"
+    params: idx=lambda wc: BY_LABEL[wc.label]["pos"] * len(MODELS) + MODELS.index(wc.model)
+    resources: dgx=1
+    shell: "{SUBMIT} slurms/04_reps.sh {params.idx}"
+###################################### 05 PROJECT
+rule project:
+    input:
+        meta=f"{AD}/sc_metadata.tsv",
+        stamp=PRE_STAMP,
+        reps=lambda wc: [f"{REPS_DIR}/{wc.model}/{l}_reps.npz" for l in LABELS],
+    output: f"{AD}/{{model}}/projections.h5ad"
+    params: idx=lambda wc: MODELS.index(wc.model), cfg=section("npz_scanpy"), pre=PRE_STATE
+    shell: "{SUBMIT} slurms/05_project.sh {params.idx}"
+###################################### 06 SUMMARY
+rule summary:
+    input:
+        h5ad=[f"{AD}/{m}/projections.h5ad" for m in MODELS],
+        clusters=[f"{CLU_DIR}/{t}/clustering_summary.txt" for t in TARGETS] + [f"{AD}/mmseqs_joint/clustering_summary.txt"],
+    output: summary_outputs()
+    params: cfg=[section(k) for k in ("compile_summary", "h5ad_scanpy", "h5ad_interactive", "ro_crate")]
+    shell: "{SUBMIT} slurms/06_summary.sh"

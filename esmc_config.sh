@@ -54,12 +54,12 @@ fi
 
 ###################################### analysis (uniprot / dimred / scanpy) — also runs on an existing .env
 echo "[SLURM-INFO] Installing analysis deps..."
-pip install "numpy<2.3" pyyaml tqdm seaborn scikit-learn umap-learn pynndescent "scanpy>=1.10" anndata plotly ipywidgets anywidget pyprojroot matplotlib-venn numba safetensors igraph pymupdf kaleido || { echo "[SLURM-INFO] Error: analysis deps install failed" >&2; exit 1; }
+pip install "numpy<2.3" pyyaml tqdm seaborn scikit-learn umap-learn pynndescent "scanpy>=1.10" anndata plotly ipywidgets anywidget pyprojroot matplotlib-venn numba safetensors igraph pymupdf kaleido "snakemake>=8" || { echo "[SLURM-INFO] Error: analysis deps install failed" >&2; exit 1; }
 
 ###################################### verify
 echo "[SLURM-INFO] Comprehensive verification..."
 python -c "
-import torch, esm, httpx, accelerate, flash_attn, numpy, numba, scanpy, umap, sklearn, igraph, matplotlib_venn, pymupdf, pynndescent, kaleido
+import torch, esm, httpx, accelerate, flash_attn, numpy, numba, scanpy, umap, sklearn, igraph, matplotlib_venn, pymupdf, pynndescent, kaleido, snakemake
 print(f'PyTorch Version : {torch.__version__}')
 print(f'CUDA Available  : {torch.cuda.is_available()} ({torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"})')
 print(f'HTTPX Version   : {httpx.__version__}')
@@ -68,6 +68,7 @@ print(f'Flash Attention : {flash_attn.__version__}')
 print(f'NumPy / Numba   : {numpy.__version__} / {numba.__version__}')
 print(f'Scanpy          : {scanpy.__version__}')
 print(f'UMAP / sklearn  : {umap.__version__} / {sklearn.__version__}')
+print(f'Snakemake       : {snakemake.__version__}')
 print('All pipeline dependencies successfully verified!')
 " || { echo "[SLURM-INFO] Error: dependency verification failed" >&2; exit 1; }
 

@@ -90,39 +90,46 @@ The kept rows are the rows of the summary. The preprocessed FASTA headers carry 
 
 ## Requirements
 
-- SLURM cluster; one conda env `./.env` for every step, created by `sbatch esmc_config.sh`
+- SLURM cluster; one conda env `./.env` for every step and for Snakemake, created by `sbatch esmc_config.sh`
 - MMseqs2 on the PATH (or `mmseqs_executable` in the YAML)
 - A100 GPU for step 04
 
 ## Running
 
 ```bash
-bash slurms/run_all.sh                          # all steps, chained with afterok dependencies
-bash slurms/run_all.sh 05 06                    # selected steps only (01 02 03 04 05 06)
-ANALYSIS_NAME=test_SCambrian bash slurms/run_all.sh 02 03 04 05 06
-DRY_RUN=1 bash slurms/run_all.sh                # print the sbatch commands without submitting
+sbatch slurms/run_all.sh                        # every step whose outputs are missing or stale
+sbatch slurms/run_all.sh 05 06                  # targets steps 05 and 06 (and whatever upstream they still need)
+ANALYSIS_NAME=test_SCambrian sbatch slurms/run_all.sh 02
+DRY_RUN=1 sbatch slurms/run_all.sh              # snakemake -n: list the jobs that would be submitted
+bash slurms/list_relics.sh                      # read-only: print data of the old layout
 ```
 
-Run it from the repo root on the login node, not through `sbatch`. `run_all.sh` resolves the analysis name once and exports it to every job as `ANALYSIS_NAME`. The name is taken from, in order:
+Submit from the repo root. `run_all.sh` is a small THIN job (1 CPU, 2 GB) that runs **Snakemake** (`slurms/Snakefile`) inside `./.env`. Snakemake submits one job per unit of work and only when its outputs are missing, older than their inputs, or its YAML section changed. Each job is the unchanged `slurms/0X.sh` script, submitted by `slurms/submit_step.sh` with a single `--array` index (row of the query table for 01, target position for 03 with `N_TARGETS + 1` = joint, `row × N_MODELS + model` for 04, model for 05), so the scripts keep working with a manual `sbatch`. At most 2 DGX jobs (04) and 3 MMseqs2 jobs (03) run at once; `MAX_JOBS` (default 20) caps the total.
+
+**Node choice.** For every non-DGX step, `submit_step.sh` reads `--cpus-per-task`, `--mem` and `--time` from the script's `#SBATCH` header, keeps the partitions whose time limit covers `--time` (never DGX or GPU ones), and asks `get_best_node` (`slurms/best_node.sh`) for the idle or mixed node with the most free CPUs and memory; the job is submitted there with `-p <partition> -w <node>`. When no node fits, the header partition is used. `NODE_PICK=0` disables it. Step 04 always goes to DGX.
+
+The analysis name is resolved once and exported as `ANALYSIS_NAME`, in order:
 
 1. the `ANALYSIS_NAME` environment variable;
 2. `preprocess_sequences.analysis_name` in the YAML;
-3. today's `{YYYY-MM-DD}_SCambrian` when step 02 is included, otherwise the newest `analyses/*_SCambrian` folder.
+3. today's `{YYYY-MM-DD}_SCambrian` when step 02 is requested explicitly (or no analysis exists yet), otherwise the newest `analyses/*_SCambrian` folder, so a plain `run_all.sh` resumes the latest analysis.
 
-`slurms/analysis_env.sh` holds this logic, and a single step submitted with `sbatch slurms/<step>.sh` resolves the name the same way. Array sizes are computed from the query table (samples, targets) and from `extract_reps_biohub.models`.
+`slurms/analysis_env.sh` holds this logic, and a single step submitted with `sbatch slurms/<step>.sh` resolves the name the same way. The default `#SBATCH --array` ranges cover up to 10 samples (01: `1-10`, 03: `1-11%3`, 04: `0-9%2` for one model, 05: `0-2`); out-of-range tasks exit cleanly.
 
 ### Reruns and freshness
 
-Every step checks its own outputs, so after any change you can simply run `run_all.sh` again. An output is rebuilt when it is missing, older than one of its inputs, or was built with different parameters. `overwrite: true` (or `--overwrite`) forces a rebuild.
+Snakemake decides what to submit (`--rerun-triggers mtime params code`):
 
-| step | rebuilt when |
+| step | job submitted when |
 |---|---|
-| 01 | an output file is missing |
-| 02 | the clean FASTA content changed; the dedup also reruns when its `.params` sidecar differs from the `dedup_*` settings |
-| 03 | an output is missing or older than its dedup FASTA (internal) or the joint FASTA (joint) |
-| 04 | `<label>_reps.npz` is older than the dedup FASTA |
-| 05 | `projections.h5ad` is older than the metadata or an `.npz`, or its stored parameters differ |
-| 06 | an output is older than its inputs or its script |
+| 01 | a `<label>_seqs.fasta` (and, for UniProt rows, `_seqs.tsv`/`_feats.tsv`) is missing, or the local FASTA is newer |
+| 02 | the query table or a `_seqs.fasta` is newer, the sample list or the `preprocess_sequences` section changed (stamp `analyses/<A>/.preprocess.<hash>.done`) |
+| 03 | `clustering_summary.txt` is missing or older than the dedup FASTA(s), or `run_mmseqs2` changed |
+| 04 | `<label>_reps.npz` is missing or older than its dedup FASTA |
+| 05 | `projections.h5ad` is older than the metadata, the step-02 stamp or an `.npz`, or `npz_scanpy`/`preprocess_sequences` changed |
+| 06 | an output is missing or older than a `.h5ad` or MMseqs2 summary, or `compile_summary`, `h5ad_scanpy`, `h5ad_interactive` or `ro_crate` changed |
+
+Step 02 is a checkpoint: `preprocess_sequences.py` rewrites a dedup FASTA only when its content changes, and Snakemake reads the dedup times only after step 02 ran, so adding a sample re-clusters and re-embeds only that sample (plus the joint steps). Snakemake deletes the declared outputs of a job before submitting it, so the job's own freshness checks cannot skip a rebuild that Snakemake asked for. Inside each script the old checks stay as a second guard; `overwrite: true` (or `--overwrite`) still forces a rebuild of a manual run.
 
 ## Configuration
 
@@ -198,7 +205,8 @@ Outputs, all ending in `__<report_series>`:
 
 ```
 configs/      param_configs.yaml, query_configs.tsv
-slurms/       01_dw_uniprot.sh 02_preprocess.sh 03_mmseqs2.sh 04_reps.sh 05_project.sh 06_summary.sh run_all.sh analysis_env.sh
+slurms/       01_dw_uniprot.sh 02_preprocess.sh 03_mmseqs2.sh 04_reps.sh 05_project.sh 06_summary.sh
+              run_all.sh Snakefile submit_step.sh best_node.sh analysis_env.sh list_relics.sh
 src/          dw_uniprot_seqs.py dw_uniprot_features.py preprocess_sequences.py run_mmseqs2.py extract_reps_biohub.py
               npz_scanpy.py compile_summary.py h5ad_scanpy.py h5ad_interactive.py ro_crate.py templates/
 data/         sequences/ features/ preprocessed/ clusters/ esm-reps/      (per sample, shared across analyses)
@@ -207,9 +215,9 @@ analyses/<A>/ sc_metadata.tsv mmseqs_joint/ <model>/ ro-crate-metadata.json conf
 
 ## Leftovers from the previous layout
 
-Outputs of the old pipeline are not deleted automatically. Remove them by hand if they are no longer needed:
+Outputs of the old pipeline are not deleted automatically. `bash slurms/list_relics.sh` prints them (read-only); remove them by hand if they are no longer needed:
 
-- `data/dedup/`
+- `data/dedup/` and `data/scanpy/`
 - `data/features/*_focus_ids.*`
-- the old `data/clusters/<label>/*dmin*` files
-- `analyses/<labels joined by _>/`
+- `data/clusters/<label>/` files whose tag or identity threshold is not in the current config (old `*dmin*` names, older `ccov…_cmode…` tags); `run_mmseqs2.py` never removes them
+- `analyses/` folders not named `*_SCambrian` (old `analyses/<labels joined by _>/`)

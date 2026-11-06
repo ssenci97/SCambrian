@@ -12,6 +12,7 @@ import pandas as pd
 from pathlib import Path
 import re
 import resource
+import sys
 import time
 from tqdm import tqdm
 import urllib.error
@@ -144,6 +145,7 @@ def query_jobs() -> list[tuple[str, str]]:
 ###################################### MAIN
 def main() -> None:
     """Download the annotation fields of every requested label."""
+    if args.yaml_out and not args.query: sys.exit(0)
     start_time = time.time()
     column_names = uniprot_column_names(FEATURE_FIELDS)
     for label, query in tqdm(query_jobs(), desc="Feature downloads"):

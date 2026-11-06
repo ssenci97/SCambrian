@@ -17,5 +17,3 @@ Aedes_japonicus_koreicus_curation/
 *.transdecoder_dir/
 # Partial downloads
 *.part
-# Build output of DMP.tex (tectonic DMP.tex)
-DMP.pdf

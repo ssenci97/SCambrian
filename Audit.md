@@ -185,3 +185,16 @@ To decide before writing it: whether the v1.1 renames (section C) happen first, 
 | P1 documentation | C (document now, rename in v1.1) |
 | P2 | E16–E22 |
 | next session | G (metadata tooling) |
+
+## 2026-11-06 — status after the Snakemake orchestration
+
+Obsolete findings (they describe the old layout and no longer apply): `raw/` (curation is the separate `Aedes_japonicus_koreicus_curation` repository), `data/scanpy/*__esmc_*`, `data/dedup`, `dmin0.95` file names, HDBSCAN, `supp_01`/`supp_02`/`supp_03` slurms, `src/release_metadata.py`, `DMP.tex` (now `DMP.md`). The smoke check is now `DRY_RUN=1 sbatch slurms/run_all.sh` (`snakemake -n`).
+
+Fixed in this change: `01_dw_uniprot.sh` task 1 re-downloaded every UniProt row (`--yaml-out` did not exit); `npz_scanpy.seed` was ignored; `04_reps.sh` had no default array index; blind `afterok` resubmission of every step; mtime-only freshness of steps 04 and 06 (Snakemake now tracks each step's YAML section).
+
+Open findings:
+- duplicated keys that can drift: `preprocess_sequences.sequences_dir` vs `dw_uniprot_seqs.sequences_dir`, `run_mmseqs2.preprocessed_dir` vs `preprocess_sequences.preprocessed_dir`, `dw_uniprot_features.query_table` (ignored by `01_dw_uniprot.sh`, preferred by `h5ad_interactive.py`);
+- `run_mmseqs2.py` never removes cluster files of older tags (listed by `slurms/list_relics.sh`);
+- step-05 logs still go to `logs/scanpy/`, a name kept from the old scanpy step;
+- the THIN maximum walltime on ORFEO must cover the `run_all.sh` driver (`2-00:00:00`);
+- `ro_crate.license` is unset (see DMP.md).

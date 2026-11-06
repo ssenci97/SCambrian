@@ -45,6 +45,7 @@ YAML_PATH = "configs/param_configs.yaml"
 parser = argparse.ArgumentParser(description="Joint and internal UMAP/t-SNE projections of ESMC embeddings, clustered with Leiden")
 parser.add_argument("--analysis_dir", type=str, required=True, help="Analysis folder analyses/<analysis_name>/ holding sc_metadata.tsv")
 parser.add_argument("--model", type=str, required=True, help="ESMC model whose embeddings are projected (folder name under the embeddings_dir)")
+parser.add_argument("--seed", type=int, default=SEED, help="Random seed of PCA, kNN, UMAP, t-SNE and Leiden")
 parser.add_argument("--pca_components", type=int, default=PCA_COMPONENTS, help="PCs used for the kNN graphs (None or 0: full embedding space)")
 parser.add_argument("--knn_neighbors", type=int, default=KNN_NEIGHBORS, help="Neighbours of the embedding kNN graph (UMAP) and of the layout kNN graphs (Leiden)")
 parser.add_argument("--leiden_resolution", type=float, default=LEIDEN_RESOLUTION, help="Leiden resolution (higher: more, smaller clusters)")
@@ -129,7 +130,7 @@ def representation(adata: ad.AnnData) -> np.ndarray:
     Returns:
         np.ndarray: Representation per protein.
     """
-    if args.pca_components: return PCA(n_components=args.pca_components, random_state=SEED).fit_transform(np.asarray(adata.X)).astype(np.float32)
+    if args.pca_components: return PCA(n_components=args.pca_components, random_state=args.seed).fit_transform(np.asarray(adata.X)).astype(np.float32)
     return np.asarray(adata.X)
 def run_tsne(rep: np.ndarray) -> dict[int, np.ndarray]:
     """Run t-SNE in every layout dimension from a single cosine kNN graph and a shared PCA initialisation.
@@ -142,11 +143,11 @@ def run_tsne(rep: np.ndarray) -> dict[int, np.ndarray]:
     """
     n = rep.shape[0]
     k = min(int(3 * args.tsne_perplexity) + 2, n - 1)
-    idx, dist = NNDescent(rep, n_neighbors=k + 1, metric=METRIC, random_state=SEED, n_jobs=args.n_jobs).neighbor_graph
+    idx, dist = NNDescent(rep, n_neighbors=k + 1, metric=METRIC, random_state=args.seed, n_jobs=args.n_jobs).neighbor_graph
     graph = csr_matrix((np.clip(dist[:, 1:], 0, None).ravel(), idx[:, 1:].ravel(), np.arange(0, n * k + 1, k)), shape=(n, n))
-    pcs = PCA(n_components=max(args.layout_dimensions), svd_solver="randomized", random_state=SEED).fit_transform(rep)
+    pcs = PCA(n_components=max(args.layout_dimensions), svd_solver="randomized", random_state=args.seed).fit_transform(rep)
     pcs = (pcs / np.std(pcs[:, 0]) * 1e-4).astype(np.float32)
-    tsne_kw = dict(perplexity=min(args.tsne_perplexity, (k - 2) / 3), max_iter=args.tsne_iterations, early_exaggeration=EARLY_EXAGGERATION, learning_rate="auto", metric="precomputed", random_state=SEED, n_jobs=args.n_jobs)
+    tsne_kw = dict(perplexity=min(args.tsne_perplexity, (k - 2) / 3), max_iter=args.tsne_iterations, early_exaggeration=EARLY_EXAGGERATION, learning_rate="auto", metric="precomputed", random_state=args.seed, n_jobs=args.n_jobs)
     return {nc: TSNE(n_components=nc, init=pcs[:, :nc], **tsne_kw).fit_transform(graph).astype(np.float32) for nc in args.layout_dimensions}
 def cluster_layout(coords: np.ndarray) -> dict[str, np.ndarray]:
     """Cluster one layout on its own coordinates with Leiden on a Euclidean kNN graph of the layout.
@@ -158,8 +159,8 @@ def cluster_layout(coords: np.ndarray) -> dict[str, np.ndarray]:
         dict[str, np.ndarray]: Integer labels per method (``leiden``).
     """
     tmp = ad.AnnData(obsm={"L": coords}, obs=pd.DataFrame(index=np.arange(len(coords)).astype(str)))
-    sc.pp.neighbors(tmp, n_neighbors=min(args.knn_neighbors, len(coords) - 1), use_rep="L", metric="euclidean", random_state=SEED)
-    sc.tl.leiden(tmp, resolution=args.leiden_resolution, flavor="igraph", n_iterations=2, directed=False, random_state=SEED)
+    sc.pp.neighbors(tmp, n_neighbors=min(args.knn_neighbors, len(coords) - 1), use_rep="L", metric="euclidean", random_state=args.seed)
+    sc.tl.leiden(tmp, resolution=args.leiden_resolution, flavor="igraph", n_iterations=2, directed=False, random_state=args.seed)
     return {"leiden": tmp.obs["leiden"].astype(int).to_numpy()}
 def project(adata: ad.AnnData, scope: str, desc: str) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
     """Build the UMAP and t-SNE layouts of one scope and cluster every layout.
@@ -174,10 +175,10 @@ def project(adata: ad.AnnData, scope: str, desc: str) -> tuple[dict[str, np.ndar
     """
     rep = representation(adata)
     adata.obsm["X_rep"] = rep
-    sc.pp.neighbors(adata, n_neighbors=min(args.knn_neighbors, adata.n_obs - 1), use_rep="X_rep", metric=METRIC, random_state=SEED)
+    sc.pp.neighbors(adata, n_neighbors=min(args.knn_neighbors, adata.n_obs - 1), use_rep="X_rep", metric=METRIC, random_state=args.seed)
     layouts = {}
     for nc in tqdm(args.layout_dimensions, desc=f"{desc} UMAP", leave=False):
-        sc.tl.umap(adata, n_components=nc, min_dist=args.umap_min_dist, random_state=SEED, key_added="X_tmp")
+        sc.tl.umap(adata, n_components=nc, min_dist=args.umap_min_dist, random_state=args.seed, key_added="X_tmp")
         layouts[f"X_umap_{nc}d_{scope}"] = np.asarray(adata.obsm.pop("X_tmp"), dtype=np.float32)
     layouts |= {f"X_tsne_{nc}d_{scope}": coords for nc, coords in run_tsne(rep).items()}
     series = {}
@@ -189,7 +190,7 @@ def project(adata: ad.AnnData, scope: str, desc: str) -> tuple[dict[str, np.ndar
 def main() -> None:
     """Load the kept embeddings, project and cluster them jointly and per target, and save one .h5ad."""
     start_time = time.time()
-    sc.settings.n_jobs, sc.settings.seed = args.n_jobs, SEED
+    sc.settings.n_jobs, sc.settings.seed = args.n_jobs, args.seed
     analysis_dir = Path(args.analysis_dir)
     metadata_path = analysis_dir / METADATA_FILE
     if not metadata_path.exists(): raise FileNotFoundError(f"[PYTHON-ERROR] Missing {metadata_path}; run step 02 first.")

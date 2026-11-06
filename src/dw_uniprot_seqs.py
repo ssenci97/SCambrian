@@ -12,6 +12,7 @@ import pandas as pd
 from pathlib import Path
 import re
 import resource
+import sys
 import time
 from tqdm import tqdm
 import urllib.error
@@ -163,6 +164,7 @@ def save_outputs(records: pd.DataFrame, out_tsv: Path, out_fasta: Path, out_ids:
 ###################################### MAIN
 def main() -> None:
     """Download the sequences of every requested label."""
+    if args.yaml_out and not args.query: sys.exit(0)
     start_time = time.time()
     column_names = uniprot_column_names(FIELDS)
     for label, query in tqdm(query_jobs(), desc="Sequence downloads"):

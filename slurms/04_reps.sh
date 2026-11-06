@@ -8,7 +8,7 @@
 #SBATCH --time=04:00:00
 #SBATCH --job-name=ESMC
 #SBATCH --output=logs/ESMC/ESMC_%A_%a.log
-#SBATCH --array=0-4%2
+#SBATCH --array=0-9%2
 #SBATCH --open-mode=append
 ###################################### env
 module purge
@@ -71,10 +71,11 @@ if [ "${N_FOUND}" -eq 0 ]; then
   exit 1
 fi
 N_MODELS=${#MODELS[@]}
-FILE_IDX=$((SLURM_ARRAY_TASK_ID / N_MODELS))
-MODEL="${MODELS[$((SLURM_ARRAY_TASK_ID % N_MODELS))]}"
+TASK=${SLURM_ARRAY_TASK_ID:-0}
+FILE_IDX=$((TASK / N_MODELS))
+MODEL="${MODELS[$((TASK % N_MODELS))]}"
 if [ "$FILE_IDX" -ge "${#files[@]}" ]; then
-  echo "[SLURM-INFO] Task ID $SLURM_ARRAY_TASK_ID exceeds available files (${#files[@]}) x models ($N_MODELS). Exiting cleanly."
+  echo "[SLURM-INFO] Task ID ${TASK} exceeds available files (${#files[@]}) x models ($N_MODELS). Exiting cleanly."
   exit 0
 fi
 input_file="${files[$FILE_IDX]}"
